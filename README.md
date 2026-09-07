@@ -75,7 +75,7 @@ docker compose up --build
 
 Import workflow do n8n: **Workflows → Import from file** (pliki są też zamontowane w kontenerze pod `/srv/workflows/`):
 
-- `n8n/daas_workflow.json` — Manual + harmonogram (pon 07:00) → `POST /run` dla obu pipeline'ów → formatowanie → IF `needs_attention` → Alert / Digest.
+- `n8n/daas_workflow.json` — Manual + harmonogram (pon 07:00) → `POST /run` dla obu pipeline'ów → formatowanie → IF `needs_attention` (run nieudany, brak danych, **spadek przychodu ≥15 % tydzień-do-tygodnia lub marży ≥3 pp**) → Alert / Digest.
 ![Workflow n8n: webhook → POST /upload → walidacja → POST /run → odpowiedź z linkiem do raportu](docs/n8n_client_workflow.png)
 
 - `n8n/daas_client_report.json` — webhook `POST /webhook/daas-report` (multipart `file` + `client_name`) → `POST /upload` → `POST /run` → odpowiedź z linkiem do raportu HTML. To jest "przycisk" dla klienta: wysyła plik, dostaje link. Ustaw `DAAS_PUBLIC_URL` w env n8n, jeśli app jest za reverse proxy.

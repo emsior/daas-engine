@@ -7,7 +7,10 @@
       "name": "Manual Trigger",
       "type": "n8n-nodes-base.manualTrigger",
       "typeVersion": 1,
-      "position": [0, 300]
+      "position": [
+        0,
+        300
+      ]
     },
     {
       "parameters": {
@@ -16,7 +19,9 @@
             {
               "field": "weeks",
               "weeksInterval": 1,
-              "triggerAtDay": [1],
+              "triggerAtDay": [
+                1
+              ],
               "triggerAtHour": 7
             }
           ]
@@ -26,7 +31,10 @@
       "name": "Weekly Schedule (Mon 07:00)",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
-      "position": [0, 520]
+      "position": [
+        0,
+        520
+      ]
     },
     {
       "parameters": {
@@ -36,7 +44,10 @@
       "name": "Pipelines to run",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [260, 400]
+      "position": [
+        260,
+        400
+      ]
     },
     {
       "parameters": {
@@ -58,28 +69,42 @@
       "name": "POST /run (DaaS API)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
-      "position": [520, 400]
+      "position": [
+        520,
+        400
+      ]
     },
     {
       "parameters": {
-        "jsCode": "// Formatowanie odpowiedzi API do czytelnego raportu (Markdown) + flagi.\nconst badge = { LIVE_DATA: '🟢', MOCK_DATA: '🟡', BLOCKED_MISSING_SECRET: '🔴' };\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json;\n  const m = r.metrics || {};\n  const lines = [\n    `### ${badge[r.data_status] || '⚪'} ${r.pipeline} — ${r.run_status} / ${r.data_status}`,\n    `run_id: \\`${r.run_id}\\` · records: ${r.records_processed} · ${r.execution_time_sec}s`,\n    `report: ${r.report_path || 'n/a'}`,\n  ];\n  if (r.pipeline === 'cs2_demo') {\n    lines.push(`WR ${m.win_rate}% · K/D ${m.kd_ratio} · rating ${m.avg_rating} · ADR ${m.avg_adr} · form ${m.form_score}/100 (${m.form_trend})`);\n  } else if (r.pipeline === 'ecommerce_demo') {\n    lines.push(`revenue ${m.revenue_total} · profit ${m.profit_total} · margin ${m.margin_pct}% · loss orders ${m.loss_orders_count} (${m.loss_orders_total})`);\n  }\n  if (r.error) lines.push(`ERROR: ${r.error}`);\n  out.push({ json: {\n    pipeline: r.pipeline,\n    run_id: r.run_id,\n    run_status: r.run_status,\n    data_status: r.data_status,\n    is_mock: r.data_status !== 'LIVE_DATA',\n    needs_attention: r.run_status !== 'SUCCESS' || r.data_status === 'BLOCKED_MISSING_SECRET',\n    records_processed: r.records_processed,\n    report_path: r.report_path,\n    summary_markdown: lines.join('\\n'),\n    metrics: m,\n  }});\n}\nreturn out;"
+        "jsCode": "// Formatowanie odpowiedzi API do czytelnego raportu (Markdown) + flagi.\nconst badge = { LIVE_DATA: '🟢', MOCK_DATA: '🟡', BLOCKED_MISSING_SECRET: '🔴' };\nconst out = [];\nfor (const item of $input.all()) {\n  const r = item.json;\n  const m = r.metrics || {};\n  const lines = [\n    `### ${badge[r.data_status] || '⚪'} ${r.pipeline} — ${r.run_status} / ${r.data_status}`,\n    `run_id: \\`${r.run_id}\\` · records: ${r.records_processed} · ${r.execution_time_sec}s`,\n    `report: ${r.report_path || 'n/a'}`,\n  ];\n  if (r.pipeline === 'cs2_demo') {\n    lines.push(`WR ${m.win_rate}% · K/D ${m.kd_ratio} · rating ${m.avg_rating} · ADR ${m.avg_adr} · form ${m.form_score}/100 (${m.form_trend})`);\n  } else if (r.pipeline === 'ecommerce_demo') {\n    lines.push(`revenue ${m.revenue_total} · profit ${m.profit_total} · margin ${m.margin_pct}% · loss orders ${m.loss_orders_count} (${m.loss_orders_total})`);\n    if (m.wow) {\n      const w = m.wow;\n      const arrow = (v) => v === null || v === undefined ? 'n/d' : (v > 0 ? '▲' : v < 0 ? '▼' : '=') + ' ' + v + '%';\n      lines.push(`WoW ${w.week} vs ${w.prev_week}: revenue ${arrow(w.revenue_delta_pct)} · profit ${arrow(w.profit_delta_pct)} · margin ${w.margin_prev}% → ${w.margin_pct}% (${w.margin_delta_pp} pp) · orders ${w.orders_prev} → ${w.orders}${w.partial_week ? ' · ⚠ partial week' : ''}`);\n    }\n  }\n  if (r.error) lines.push(`ERROR: ${r.error}`);\n  out.push({ json: {\n    pipeline: r.pipeline,\n    run_id: r.run_id,\n    run_status: r.run_status,\n    data_status: r.data_status,\n    is_mock: r.data_status !== 'LIVE_DATA',\n    // alert: run nieudany, brak danych, albo tydzień-do-tygodnia: przychód spadł ≥15% (pełny tydzień) lub marża spadła ≥3 pp\n    needs_attention: r.run_status !== 'SUCCESS' || r.data_status === 'BLOCKED_MISSING_SECRET'\n      || (m.wow && !m.wow.partial_week && m.wow.revenue_delta_pct !== null && m.wow.revenue_delta_pct <= -15)\n      || (m.wow && m.wow.margin_delta_pp <= -3),\n    wow: m.wow || null,\n    records_processed: r.records_processed,\n    report_path: r.report_path,\n    summary_markdown: lines.join('\\n'),\n    metrics: m,\n  }});\n}\nreturn out;"
       },
       "id": "a1c2e3f4-0005-4000-8000-000000000005",
       "name": "Format report",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [780, 400]
+      "position": [
+        780,
+        400
+      ]
     },
     {
       "parameters": {
         "conditions": {
-          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
           "conditions": [
             {
               "id": "c-needs-attention",
               "leftValue": "={{ $json.needs_attention }}",
               "rightValue": true,
-              "operator": { "type": "boolean", "operation": "true", "singleValue": true }
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
             }
           ],
           "combinator": "and"
@@ -90,7 +115,10 @@
       "name": "Needs attention?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [1040, 400]
+      "position": [
+        1040,
+        400
+      ]
     },
     {
       "parameters": {
@@ -100,7 +128,10 @@
       "name": "Alert (hook Discord/Slack here)",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1300, 260]
+      "position": [
+        1300,
+        260
+      ]
     },
     {
       "parameters": {
@@ -110,25 +141,97 @@
       "name": "Digest OK",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
-      "position": [1300, 540]
+      "position": [
+        1300,
+        540
+      ]
     }
   ],
   "connections": {
-    "Manual Trigger": { "main": [[{ "node": "Pipelines to run", "type": "main", "index": 0 }]] },
-    "Weekly Schedule (Mon 07:00)": { "main": [[{ "node": "Pipelines to run", "type": "main", "index": 0 }]] },
-    "Pipelines to run": { "main": [[{ "node": "POST /run (DaaS API)", "type": "main", "index": 0 }]] },
-    "POST /run (DaaS API)": { "main": [[{ "node": "Format report", "type": "main", "index": 0 }]] },
-    "Format report": { "main": [[{ "node": "Needs attention?", "type": "main", "index": 0 }]] },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Pipelines to run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Schedule (Mon 07:00)": {
+      "main": [
+        [
+          {
+            "node": "Pipelines to run",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pipelines to run": {
+      "main": [
+        [
+          {
+            "node": "POST /run (DaaS API)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "POST /run (DaaS API)": {
+      "main": [
+        [
+          {
+            "node": "Format report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format report": {
+      "main": [
+        [
+          {
+            "node": "Needs attention?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
     "Needs attention?": {
       "main": [
-        [{ "node": "Alert (hook Discord/Slack here)", "type": "main", "index": 0 }],
-        [{ "node": "Digest OK", "type": "main", "index": 0 }]
+        [
+          {
+            "node": "Alert (hook Discord/Slack here)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Digest OK",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     }
   },
-  "settings": { "executionOrder": "v1", "timezone": "Europe/Warsaw" },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Warsaw"
+  },
   "active": false,
   "pinData": {},
   "versionId": "1",
-  "tags": [{ "name": "daas" }]
+  "tags": [
+    {
+      "name": "daas"
+    }
+  ]
 }
