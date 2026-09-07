@@ -95,3 +95,7 @@ python -c "import duckdb; c=duckdb.connect('runtime/daas.duckdb'); print(c.sql('
 - Rating dla danych FACEIT LIVE to aproksymacja (FACEIT nie zwraca HLTV 2.0).
 - `LIQUIPEDIA_USER_AGENT` jest tylko wykrywany — brak jeszcze adaptera Liquipedia (miejsce na kontekst drużynowy / turniejowy).
 - Powiadomienie Discord jest fire-and-forget (5 s timeout), błąd loguje warning i nie wpływa na `run_status`.
+| **v0.3** | | | |
+| 22 | Tydzień-do-tygodnia: `weekly` + `wow` w metrykach, sekcja w raporcie MD/HTML, akcje w PRAKTYCZNYCH WNIOSKACH, `week_over_week` w kontekście LLM | ✅ 34 passed (VM na PC Michała, 07.09) | `ecommerce_transform.py::weekly_breakdown`, `generator.py`, testy `test_weekly_breakdown_and_wow`, `test_single_week_has_no_wow` |
+| 23 | Kwoty w formacie PL (`7 255,95`) w WNIOSKU, metrykach i streszczeniu | ✅ | `generator.py::_pln`, `narrative.py::_pln` |
+| 24 | Uruchomienie natywne bez Dockera (`URUCHOM_DAAS_PYTHON.ps1`) | ✅ testy + demo run w VM; ⚠ Windows-PowerShell nieodpalony | skrypt w repo |

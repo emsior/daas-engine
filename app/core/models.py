@@ -178,3 +178,5 @@ class EcommerceMetrics(BaseModel):
     top_categories: list[dict[str, Any]]
     top_products: list[dict[str, Any]]
     anomalies: list[dict[str, Any]]
+    weekly: list[dict[str, Any]] = []          # per tydzień ISO: orders, revenue, profit, margin_pct, aov
+    wow: dict[str, Any] | None = None          # ostatni tydzień vs poprzedni (delty); None gdy < 2 tygodni

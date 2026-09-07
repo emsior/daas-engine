@@ -78,6 +78,26 @@ def test_mapped_data_feeds_transform():
     assert 25 < m.margin_pct < 35
 
 
+def test_weekly_breakdown_and_wow():
+    out, _ = map_dataframe(read_client_csv(str(PL_FIXTURE)))
+    m = transform_ecommerce(out.to_dict(orient="records"))
+    # fixture: 01–14.08.2026 → ISO tygodnie W31 (2 dni), W32, W33
+    assert [w["week"] for w in m.weekly] == ["2026-W31", "2026-W32", "2026-W33"]
+    assert sum(w["orders"] for w in m.weekly) == m.orders_completed + 0 + sum(
+        1 for r in out.to_dict(orient="records") if r["status"] == "pending")
+    assert abs(sum(w["revenue"] for w in m.weekly) - m.revenue_total) < 0.01
+    assert m.wow and m.wow["week"] == "2026-W33" and m.wow["prev_week"] == "2026-W32"
+    assert m.wow["revenue_delta_pct"] is not None and m.wow["orders_delta"] == 0
+    assert m.wow["margin_delta_pp"] == round(m.weekly[-1]["margin_pct"] - m.weekly[-2]["margin_pct"], 1)
+
+
+def test_single_week_has_no_wow():
+    rows = [{"order_id": f"A{i}", "date": f"2026-08-0{i}", "product": "x", "category": "c", "quantity": 1,
+             "revenue": 100.0, "cost": 60.0, "profit": 40.0, "discount": 0.0, "status": "completed"} for i in range(3, 8)]
+    m = transform_ecommerce(rows)
+    assert len(m.weekly) == 1 and m.wow is None
+
+
 # ---------------------------------------------------------------------------
 # Narracja
 # ---------------------------------------------------------------------------

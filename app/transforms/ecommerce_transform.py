@@ -53,6 +53,46 @@ def detect_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
     return out
 
 
+def weekly_breakdown(pnl: pd.DataFrame) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    """Agregacja per tydzień ISO (pon–nd) + delta ostatni vs poprzedni tydzień.
+    Zwraca ([], None) gdy brak dat. `wow` = None, gdy w danych jest mniej niż 2 tygodnie."""
+    if pnl.empty or "date" not in pnl.columns:
+        return [], None
+    d = pd.to_datetime(pnl["date"], errors="coerce")
+    g = pnl.assign(_d=d).dropna(subset=["_d"])
+    if g.empty:
+        return [], None
+    iso = g["_d"].dt.isocalendar()
+    g = g.assign(week=iso["year"].astype(str) + "-W" + iso["week"].astype(int).map(lambda w: f"{w:02d}"),
+                 week_start=(g["_d"] - pd.to_timedelta(g["_d"].dt.weekday, unit="D")).dt.date)
+    agg = (g.groupby(["week", "week_start"])
+             .agg(orders=("order_id", "count"), revenue=("revenue", "sum"), profit=("profit", "sum"),
+                  days=("_d", lambda x: int(x.dt.date.nunique())))
+             .reset_index().sort_values("week"))
+    agg["margin_pct"] = (100 * agg["profit"] / agg["revenue"].where(agg["revenue"] != 0)).fillna(0.0).round(1)
+    agg["aov"] = (agg["revenue"] / agg["orders"]).round(2)
+    agg["week_start"] = agg["week_start"].astype(str)
+    agg = agg.round(2)
+    weekly = agg.to_dict(orient="records")
+    if len(weekly) < 2:
+        return weekly, None
+    last, prev = weekly[-1], weekly[-2]
+
+    def pct(a: float, b: float) -> float | None:
+        return round(100 * (a - b) / b, 1) if b else None
+
+    wow = {
+        "week": last["week"], "prev_week": prev["week"],
+        "revenue": last["revenue"], "revenue_prev": prev["revenue"], "revenue_delta_pct": pct(last["revenue"], prev["revenue"]),
+        "profit": last["profit"], "profit_prev": prev["profit"], "profit_delta_pct": pct(last["profit"], prev["profit"]),
+        "orders": last["orders"], "orders_prev": prev["orders"], "orders_delta": int(last["orders"] - prev["orders"]),
+        "margin_pct": last["margin_pct"], "margin_prev": prev["margin_pct"],
+        "margin_delta_pp": round(last["margin_pct"] - prev["margin_pct"], 1),
+        "partial_week": bool(last["days"] < 7 and len(weekly) >= 2 and last["days"] < prev["days"]),
+    }
+    return weekly, wow
+
+
 def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
     df = pd.DataFrame(records)
     if df.empty:
@@ -60,7 +100,7 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
             orders_total=0, orders_completed=0, orders_refunded=0, orders_cancelled=0,
             revenue_total=0.0, cost_total=0.0, profit_total=0.0, margin_pct=0.0, avg_order_value=0.0,
             avg_discount_pct=0.0, loss_orders=[], loss_orders_count=0, loss_orders_total=0.0,
-            top_categories=[], top_products=[], anomalies=[],
+            top_categories=[], top_products=[], anomalies=[], weekly=[], wow=None,
         )
     df["status"] = df["status"].str.lower()
     pnl = df[df["status"].isin(REVENUE_STATUSES)].copy()
@@ -92,6 +132,8 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
         .round(2)
     )
 
+    weekly, wow = weekly_breakdown(pnl)
+
     return EcommerceMetrics(
         orders_total=int(len(df)),
         orders_completed=int((df["status"] == "completed").sum()),
@@ -109,4 +151,6 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
         top_categories=by_cat.to_dict(orient="records"),
         top_products=by_prod.to_dict(orient="records"),
         anomalies=detect_anomalies(pnl),
+        weekly=weekly,
+        wow=wow,
     )

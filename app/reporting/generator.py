@@ -95,6 +95,20 @@ def _header(payload: dict[str, Any], title: str) -> str:
     )
 
 
+def _pln(x: float | int | None) -> str:
+    """Format PL: 7 255,95 (spacja tysięcy, przecinek dziesiętny)."""
+    if x is None:
+        return "—"
+    return f"{x:,.2f}".replace(",", " ").replace(".", ",")
+
+
+def _delta(pct: float | None, unit: str = "%") -> str:
+    if pct is None:
+        return "n/d"
+    arrow = "▲" if pct > 0 else "▼" if pct < 0 else "="
+    return f"{arrow} {pct:+.1f}{unit}"
+
+
 def _table(rows: list[dict[str, Any]], cols: list[str]) -> str:
     if not rows:
         return "_brak danych_\n"
@@ -142,26 +156,46 @@ def render_cs2_markdown(payload: dict[str, Any], m: CS2Metrics) -> str:
 def render_ecommerce_markdown(payload: dict[str, Any], m: EcommerceMetrics) -> str:
     verdict = "MARŻA ZDROWA" if m.margin_pct >= 25 else "MARŻA POD PRESJĄ" if m.margin_pct >= 10 else "MARŻA KRYTYCZNA"
     s = _header(payload, "E-Commerce B2B Sales Report")
-    s += f"## WNIOSEK\n\n**{verdict}** — marża **{m.margin_pct}%**, przychód **{m.revenue_total:,.2f}**, "
-    s += f"zysk **{m.profit_total:,.2f}**, {m.loss_orders_count} zamówień stratnych (łącznie {m.loss_orders_total:,.2f}).\n\n"
+    s += f"## WNIOSEK\n\n**{verdict}** — marża **{m.margin_pct}%**, przychód **{_pln(m.revenue_total)}**, "
+    s += f"zysk **{_pln(m.profit_total)}**, {m.loss_orders_count} zamówień stratnych (łącznie {_pln(m.loss_orders_total)}).\n\n"
+    if m.wow:
+        w = m.wow
+        s += (f"**Tydzień {w['week']} vs {w['prev_week']}:** przychód {_delta(w['revenue_delta_pct'])} "
+              f"({_pln(w['revenue'])} vs {_pln(w['revenue_prev'])}), zysk {_delta(w['profit_delta_pct'])}, "
+              f"marża {_delta(w['margin_delta_pp'], ' pp')} ({w['margin_pct']}% vs {w['margin_prev']}%), "
+              f"zamówienia {w['orders']} vs {w['orders_prev']}"
+              + (" — ⚠ ostatni tydzień niepełny" if w.get("partial_week") else "") + ".\n\n")
     if payload.get("narrative"):
         s += f"> {payload['narrative']}\n>\n> _streszczenie: {payload.get('narrative_source', 'TEMPLATE')}_\n\n"
     s += "## Metryki zbiorcze\n\n"
     s += _table([
         {"metryka": "Zamówienia (wszystkie)", "wartość": m.orders_total},
         {"metryka": "Completed / refunded / cancelled", "wartość": f"{m.orders_completed} / {m.orders_refunded} / {m.orders_cancelled}"},
-        {"metryka": "Przychód", "wartość": f"{m.revenue_total:,.2f}"},
-        {"metryka": "Koszt", "wartość": f"{m.cost_total:,.2f}"},
-        {"metryka": "Zysk", "wartość": f"{m.profit_total:,.2f}"},
+        {"metryka": "Przychód", "wartość": _pln(m.revenue_total)},
+        {"metryka": "Koszt", "wartość": _pln(m.cost_total)},
+        {"metryka": "Zysk", "wartość": _pln(m.profit_total)},
         {"metryka": "Marża %", "wartość": f"{m.margin_pct}%"},
-        {"metryka": "Średnia wartość zamówienia", "wartość": f"{m.avg_order_value:,.2f}"},
+        {"metryka": "Średnia wartość zamówienia", "wartość": _pln(m.avg_order_value)},
         {"metryka": "Średni rabat", "wartość": f"{m.avg_discount_pct}%"},
     ], ["metryka", "wartość"])
+    if m.weekly:
+        s += "\n## Tydzień do tygodnia\n\n" + _table(m.weekly, ["week", "week_start", "days", "orders", "revenue", "profit", "margin_pct", "aov"])
+        if not m.wow:
+            s += "\n_Jeden tydzień w danych — porównanie tydzień-do-tygodnia pojawi się od drugiego tygodnia._\n"
     s += "\n## Top kategorie\n\n" + _table(m.top_categories, ["category", "orders", "revenue", "profit", "margin_pct", "revenue_share_pct"])
     s += "\n## Top produkty\n\n" + _table(m.top_products, ["product", "orders", "units", "revenue", "profit"])
     s += "\n## Zamówienia stratne\n\n" + _table(m.loss_orders, ["order_id", "date", "product", "category", "revenue", "cost", "profit", "discount"])
     s += "\n## Anomalie\n\n" + _table(m.anomalies, ["order_id", "type", "product", "revenue", "profit", "discount_pct", "note"])
     s += "\n## PRAKTYCZNE WNIOSKI\n\n"
+    if m.wow:
+        w = m.wow
+        if w["revenue_delta_pct"] is not None and w["revenue_delta_pct"] <= -15 and not w.get("partial_week"):
+            s += (f"- Przychód spadł o {abs(w['revenue_delta_pct'])}% tydzień do tygodnia ({_pln(w['revenue_prev'])} → {_pln(w['revenue'])}) — "
+                  f"sprawdź w tym tygodniu: ruch/reklamy, dostępność top produktów, konkurencję cenową.\n")
+        if w["margin_delta_pp"] <= -3:
+            s += f"- Marża spadła o {abs(w['margin_delta_pp'])} pp ({w['margin_prev']}% → {w['margin_pct']}%) — przejrzyj rabaty i koszty zakupu z ostatniego tygodnia.\n"
+        elif w["margin_delta_pp"] >= 3:
+            s += f"- Marża wzrosła o {w['margin_delta_pp']} pp ({w['margin_prev']}% → {w['margin_pct']}%) — utrzymaj politykę rabatową z tego tygodnia.\n"
     if m.loss_orders_count:
         worst = m.loss_orders[0]
         s += f"- Zablokuj rabaty > 20% na **{worst['product']}** — każde takie zamówienie kończy się stratą.\n"
@@ -171,5 +205,5 @@ def render_ecommerce_markdown(payload: dict[str, Any], m: EcommerceMetrics) -> s
         s += f"- **{top['category']}** = {top['revenue_share_pct']}% przychodu — koncentracja ryzyka, dywersyfikuj ofertę lub zabezpiecz dostawcę.\n"
     if m.orders_refunded:
         s += f"- {m.orders_refunded} zwrot(y) — sprawdź opis/foto produktu, zwroty to najtańszy do naprawienia wyciek marży.\n"
-    s += "- Kolejny run: tygodniowo (poniedziałek 07:00) przez n8n, porównuj marżę tydzień-do-tygodnia.\n"
+    s += "- Kolejny run: tygodniowo (poniedziałek 07:00) przez n8n — sekcja „Tydzień do tygodnia” porówna się automatycznie.\n"
     return s

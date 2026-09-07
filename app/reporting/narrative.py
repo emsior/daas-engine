@@ -49,6 +49,8 @@ def _compact(metrics: Any) -> dict[str, Any]:
     for key in ("top_categories", "loss_orders", "map_breakdown"):
         if isinstance(d.get(key), list):
             out[key] = d[key][:3]
+    if isinstance(d.get("wow"), dict):
+        out["week_over_week"] = d["wow"]
     return out
 
 
@@ -73,6 +75,10 @@ def _llm_narrative(api_key: str, pipeline: str, metrics: Any, client_name: str |
 
 
 # ----------------------------------------------------------------------
+def _pln(x: float) -> str:
+    return f"{x:,.2f}".replace(",", " ").replace(".", ",")
+
+
 def template_narrative(pipeline: str, metrics: Any, client_name: str | None = None) -> str:
     who = f" dla {client_name}" if client_name else ""
     if isinstance(metrics, CS2Metrics):
@@ -94,12 +100,19 @@ def template_narrative(pipeline: str, metrics: Any, client_name: str | None = No
         if m.orders_total == 0:
             return "Brak zamówień w analizowanym pliku — streszczenie niedostępne."
         s = (f"Raport{who} obejmuje {m.orders_total} zamówień ({m.orders_completed} zrealizowanych, "
-             f"{m.orders_refunded} zwrotów, {m.orders_cancelled} anulowanych). Przychód wyniósł {m.revenue_total:,.2f} "
-             f"przy koszcie {m.cost_total:,.2f}, co daje zysk {m.profit_total:,.2f} i marżę {m.margin_pct}%. "
-             f"Średnia wartość zamówienia to {m.avg_order_value:,.2f}, średni rabat {m.avg_discount_pct}%.")
+             f"{m.orders_refunded} zwrotów, {m.orders_cancelled} anulowanych). Przychód wyniósł {_pln(m.revenue_total)} "
+             f"przy koszcie {_pln(m.cost_total)}, co daje zysk {_pln(m.profit_total)} i marżę {m.margin_pct}%. "
+             f"Średnia wartość zamówienia to {_pln(m.avg_order_value)}, średni rabat {m.avg_discount_pct}%.")
         if m.loss_orders_count:
-            s += (f" Wykryto {m.loss_orders_count} zamówień stratnych o łącznym wyniku {m.loss_orders_total:,.2f} — "
+            s += (f" Wykryto {m.loss_orders_count} zamówień stratnych o łącznym wyniku {_pln(m.loss_orders_total)} — "
                   f"to pierwszy obszar do naprawy.")
+        if m.wow:
+            w = m.wow
+            dr = w["revenue_delta_pct"]
+            kier = "wzrósł" if (dr or 0) > 0 else "spadł" if (dr or 0) < 0 else "nie zmienił się"
+            s += (f" Tydzień {w['week']} vs {w['prev_week']}: przychód {kier}"
+                  f"{f' o {abs(dr)}%' if dr else ''}, marża {w['margin_prev']}% → {w['margin_pct']}%"
+                  f"{' (ostatni tydzień niepełny)' if w.get('partial_week') else ''}.")
         if m.top_categories:
             top = m.top_categories[0]
             s += f" Największą kategorią jest {top['category']} ({top['revenue_share_pct']}% przychodu, marża {top['margin_pct']}%)."
