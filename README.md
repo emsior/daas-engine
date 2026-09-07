@@ -13,6 +13,10 @@ Dwa pipeline'y demo na jednym silniku (ta sama baza, ten sam kontrakt API):
 
 **Zasada nr 1: brak klucza nie jest błędem.** Pipeline automatycznie przełącza się na fixtures i oznacza wynik jako `MOCK_DATA`. Wszystko działa od pierwszego `docker compose up` bez żadnego sekretu.
 
+![Raport HTML wygenerowany z pliku klienta (client_export_pl.csv): KPI, marża, zamówienia stratne, anomalie, PRAKTYCZNE WNIOSKI](docs/demo_report.png)
+
+*Powyżej: raport z przykładowego eksportu sklepu (15 zamówień) — od uploadu pliku do gotowego HTML w < 1 s, bez ręcznej roboty. Pełny raport: `runtime/reports/<pipeline>_latest.html` po pierwszym runie.*
+
 **Zasada nr 2 (v0.2): plik klienta zamiast integracji.** `POST /upload` przyjmuje dowolny eksport CSV/XLSX (Allegro, Shoper, WooCommerce, Baselinker, Excel "po swojemu" — polskie nagłówki, `1 299,00 zł`, `30%`, `Zrealizowane`), mapuje kolumny heurystycznie i zwraca gotowy payload do `POST /run`. Wynik = `LIVE_DATA`, raport HTML pod linkiem. Demo dla klienta: 2 requesty, zero kodu.
 
 ---
@@ -81,6 +85,10 @@ Baza i raporty trafiają na hosta do `./runtime/` (wolumen).
 ---
 
 ## Uruchomienie — Windows PowerShell bez Dockera
+
+**Jedno kliknięcie:** `URUCHOM_DAAS_PYTHON.ps1` (prawy klik → *Uruchom w programie PowerShell*). Skrypt sprawdza Pythona 3.11+, tworzy `.venv`, instaluje zależności, odpala testy, startuje API na `:8000`, wgrywa `data/fixtures/client_export_pl.csv` przez `/upload` → `/run` i otwiera raport HTML w przeglądarce. Brak Pythona: `winget install Python.Python.3.12`.
+
+Ręcznie:
 
 ```powershell
 # 1. środowisko
