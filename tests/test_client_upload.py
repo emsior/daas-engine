@@ -184,3 +184,27 @@ def test_api_upload_rejects_bad_input(client: TestClient):  # noqa: F811
     assert client.post("/upload", files={"file": ("x.csv", b"   ", "text/csv")}).status_code == 400
     bad = client.post("/upload", files={"file": ("x.csv", b"a;b\n1;2\n", "text/csv")})
     assert bad.status_code == 422 and "przychodu" in bad.json()["detail"]
+
+
+def test_api_upload_xlsx_export(client: TestClient, tmp_path):  # noqa: F811
+    """Eksport XLSX (Allegro/Shoper/Excel) z polskimi nagłówkami i kwotami jako tekst → mapowanie → LIVE_DATA."""
+    import io
+    import openpyxl
+
+    df = read_client_csv(str(PL_FIXTURE))
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(list(df.columns))
+    for row in df.itertuples(index=False):
+        ws.append([str(v) for v in row])
+    buf = io.BytesIO()
+    wb.save(buf)
+    r = client.post("/upload", files={"file": ("export_allegro.xlsx", buf.getvalue(),
+                                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                    data={"client_name": "Sklep XLSX"})
+    assert r.status_code == 200, r.text
+    up = r.json()
+    assert up["ready"] and up["rows"] == 15 and up["confidence"] == 1.0
+    run = client.post("/run", json=up["run_payload"]).json()
+    assert run["run_status"] == "SUCCESS" and run["data_status"] == "LIVE_DATA"
+    assert run["metrics"]["wow"] is not None and run["metrics"]["weeks_in_data"] == 3

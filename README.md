@@ -228,7 +228,7 @@ Błąd sieci przy LIVE (timeout, 401, zmiana schematu API) również kończy si�
 - **anomalies** — typy: `NEGATIVE_PROFIT` (zysk < 0), `DEEP_DISCOUNT` (rabat ≥ 25%), `MARGIN_OUTLIER` (marża < mediana − 2·MAD w kategorii), `REVENUE_OUTLIER` (przychód > Q3 + 1.5·IQR).
 - **top_categories** — przychód, zysk, marża, udział w przychodzie; **top_products** — top 5 po przychodzie.
 - **weekly** (v0.3) — agregacja per tydzień ISO (pon–nd): zamówienia, przychód, zysk, marża, AOV, liczba dni z danymi.
-- **wow** (v0.3) — ostatni tydzień vs poprzedni: delta przychodu %, zysku %, marży (pp), zamówień; flaga `partial_week`, gdy ostatni tydzień jest niepełny. `null`, gdy w pliku jest mniej niż 2 tygodnie. W raporcie: linia w WNIOSKU, sekcja „Tydzień do tygodnia”, akcje w PRAKTYCZNYCH WNIOSKACH (spadek przychodu ≥15 %, ruch marży ≥3 pp).
+- **wow** (v0.3) — ostatni tydzień vs poprzedni: delta przychodu %, zysku %, marży (pp), zamówień; flaga `partial_week`, gdy ostatni tydzień jest niepełny. `null`, gdy w pliku jest mniej niż 2 tygodnie. W odpowiedzi `POST /run` pole `metrics.wow` + `metrics.weeks_in_data` (do IF-a w n8n: alert przy spadku przychodu). W raporcie: linia w WNIOSKU, sekcja „Tydzień do tygodnia”, akcje w PRAKTYCZNYCH WNIOSKACH (spadek przychodu ≥15 %, ruch marży ≥3 pp).
 
 Każdy raport Markdown kończy się sekcją **PRAKTYCZNE WNIOSKI** — konkretne akcje wynikające z liczb.
 

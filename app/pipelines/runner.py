@@ -152,4 +152,8 @@ def _summary(metrics: Any) -> dict[str, Any]:
     """Kompaktowe metryki do odpowiedzi API (pełne w raporcie JSON)."""
     d = metrics.model_dump() if hasattr(metrics, "model_dump") else dict(metrics)
     keep = [k for k, v in d.items() if not isinstance(v, (list, dict))]
-    return {k: d[k] for k in keep}
+    out = {k: d[k] for k in keep}
+    if "wow" in d:                       # e-commerce: delta tydzień-do-tygodnia jest mała i kluczowa dla alertów w n8n
+        out["wow"] = d["wow"]
+        out["weeks_in_data"] = len(d.get("weekly") or [])
+    return out
