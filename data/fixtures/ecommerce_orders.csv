@@ -1,0 +1,21 @@
+order_id,date,product,category,quantity,revenue,cost,profit,discount,status
+ORD-1001,2026-08-01,Wireless Mouse Pro,Electronics,2,159.80,96.00,63.80,0.00,completed
+ORD-1002,2026-08-01,Mechanical Keyboard TKL,Electronics,1,349.00,210.00,139.00,0.00,completed
+ORD-1003,2026-08-02,Standing Desk 140cm,Furniture,1,1299.00,980.00,319.00,0.05,completed
+ORD-1004,2026-08-03,USB-C Hub 7in1,Electronics,3,267.00,165.00,102.00,0.10,completed
+ORD-1005,2026-08-04,Ergonomic Chair X2,Furniture,1,899.00,940.00,-41.00,0.30,completed
+ORD-1006,2026-08-05,Gaming Headset 7.1,Electronics,1,299.00,175.00,124.00,0.00,completed
+ORD-1007,2026-08-06,Monitor Arm Dual,Accessories,2,398.00,230.00,168.00,0.00,completed
+ORD-1008,2026-08-07,Webcam 4K,Electronics,1,449.00,290.00,159.00,0.00,refunded
+ORD-1009,2026-08-08,Desk Lamp LED,Accessories,4,316.00,180.00,136.00,0.15,completed
+ORD-1010,2026-08-09,Laptop Stand Aluminium,Accessories,2,238.00,120.00,118.00,0.00,completed
+ORD-1011,2026-08-10,Mechanical Keyboard TKL,Electronics,1,279.20,210.00,69.20,0.20,completed
+ORD-1012,2026-08-11,Office Bookshelf,Furniture,1,549.00,610.00,-61.00,0.40,completed
+ORD-1013,2026-08-12,Wireless Mouse Pro,Electronics,5,359.50,240.00,119.50,0.10,completed
+ORD-1014,2026-08-13,Noise Cancelling Earbuds,Electronics,2,598.00,340.00,258.00,0.00,completed
+ORD-1015,2026-08-14,Cable Organizer Set,Accessories,10,199.00,80.00,119.00,0.00,completed
+ORD-1016,2026-08-15,Standing Desk 140cm,Furniture,1,1299.00,980.00,319.00,0.00,cancelled
+ORD-1017,2026-08-16,Gaming Headset 7.1,Electronics,1,239.20,175.00,64.20,0.20,completed
+ORD-1018,2026-08-17,Portable SSD 2TB,Electronics,1,699.00,720.00,-21.00,0.25,completed
+ORD-1019,2026-08-18,Monitor 27 QHD,Electronics,1,1499.00,1050.00,449.00,0.00,completed
+ORD-1020,2026-08-19,Desk Mat XXL,Accessories,3,177.00,90.00,87.00,0.00,pending

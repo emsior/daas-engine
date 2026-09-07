@@ -1,0 +1,51 @@
+services:
+  app:
+    build: .
+    container_name: daas_app
+    env_file:
+      - .env
+    environment:
+      DUCKDB_PATH: /srv/app/runtime/daas.duckdb
+      REPORTS_DIR: /srv/app/runtime/reports
+      FIXTURES_DIR: /srv/app/data/fixtures
+    volumes:
+      - ./runtime:/srv/app/runtime
+    ports:
+      - "8000:8000"
+    networks:
+      - daas_network
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: daas_n8n
+    env_file:
+      - .env
+    environment:
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: http://localhost:5678/
+      GENERIC_TIMEZONE: ${GENERIC_TIMEZONE:-Europe/Warsaw}
+      N8N_BASIC_AUTH_ACTIVE: ${N8N_BASIC_AUTH_ACTIVE:-true}
+      N8N_BASIC_AUTH_USER: ${N8N_BASIC_AUTH_USER:-admin}
+      N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:-change_me}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:-change_me_32_chars_minimum_please}
+      DAAS_APP_URL: http://app:8000
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./n8n:/srv/workflows:ro
+    ports:
+      - "5678:5678"
+    depends_on:
+      - app
+    networks:
+      - daas_network
+    restart: unless-stopped
+
+networks:
+  daas_network:
+    driver: bridge
+
+volumes:
+  n8n_data:
