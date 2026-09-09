@@ -1,4 +1,29 @@
-# DaaS Engine — Source-Agnostic B2B Data-as-a-Service
+# DaaS Engine — automatyczny raport tygodniowy z Twoich danych
+
+**Wysyłasz eksport CSV/XLSX ze sklepu, CRM-a albo księgowości → dostajesz gotowy raport HTML.
+Co tydzień, automatycznie, bez ręcznego składania w Excelu.**
+
+▶ **[Demo wideo — 50 s](docs/daas_demo.mp4)** (bez dźwięku, wystarczy obejrzeć)
+
+Co liczy: przychód, koszt, marża, średnia wartość zamówienia, zwroty, top produkty i kategorie,
+porównanie tydzień do tygodnia, zamówienia stratne i anomalie — plus sekcja **PRAKTYCZNE WNIOSKI**
+z konkretnymi akcjami. Liczby pochodzą wyłącznie z Twojego pliku; nic nie jest generowane „z głowy".
+
+Radzi sobie z realnymi polskimi eksportami: separator `;`, kwoty `1 299,00 zł`, rabaty `30%`,
+statusy `Zrealizowane / Zwrot / Anulowane`, kodowanie `cp1250`, nagłówki po polsku i angielsku.
+
+Dostawa: uruchamiane przyciskiem (webhook n8n) albo automatycznie wg harmonogramu, z alertem przy
+spadku przychodu ≥15% lub marży ≥3 pp. Dostajesz kod źródłowy i workflow — rozwiązanie jest Twoje.
+Możesz hostować u siebie (Docker) albo zlecić hosting.
+
+*In short (EN): upload any messy sales export (CSV/XLSX) → get an automated weekly HTML report with
+KPIs, week-over-week deltas, loss-making orders and anomaly flags. FastAPI + DuckDB + n8n, tests included.*
+
+Kontakt: Michał Prochera · mcq089@gmail.com
+
+---
+
+## Dokumentacja techniczna
 
 Silnik analityczny, który bierze dane z dowolnego źródła (API / CSV / fixtures), liczy metryki biznesowe i generuje raport JSON + Markdown — orkiestrowany przez n8n, sterowany przez HTTP.
 
