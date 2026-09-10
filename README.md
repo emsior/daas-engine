@@ -19,7 +19,7 @@ Możesz hostować u siebie (Docker) albo zlecić hosting.
 *In short (EN): upload any messy sales export (CSV/XLSX) → get an automated weekly HTML report with
 KPIs, week-over-week deltas, loss-making orders and anomaly flags. FastAPI + DuckDB + n8n, tests included.*
 
-Kontakt: Michał Prochera · mcq089@gmail.com
+Kontakt: prochpc@gmail.com
 
 ---
 
