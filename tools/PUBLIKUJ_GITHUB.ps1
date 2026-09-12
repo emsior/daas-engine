@@ -3,7 +3,7 @@
 # Wymaga: git (winget install Git.Git). GitHub CLI opcjonalnie (winget install GitHub.cli) - wtedy repo tworzy sie samo.
 
 $ErrorActionPreference = "Continue"
-Set-Location $PSScriptRoot
+Set-Location (Split-Path $PSScriptRoot -Parent)
 $Repo = "daas-engine"
 $User = "emsior"
 
@@ -20,7 +20,7 @@ git status --short
 git log --oneline -3
 
 Step "2/4 Sprawdzam, czy w repo nie ma slowa 'betting' (zasada z 05_OFERTA)"
-$hits = git grep -n -i -E "betting|bukmach" -- . ':!PUBLIKUJ_GITHUB.ps1' 2>$null
+$hits = git grep -n -i -E "betting|bukmach" -- . ':!tools/PUBLIKUJ_GITHUB.ps1' 2>$null
 if ($hits) { Write-Host $hits -ForegroundColor Yellow; Fail "Znaleziono zakazane slowa - popraw przed publikacja." } else { Write-Host "OK - 0 trafien" }
 
 Step "3/4 Zdalne repo"
