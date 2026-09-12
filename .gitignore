@@ -42,3 +42,8 @@ Thumbs.db
 # wyniki twardego testu - lokalne, nie do repo
 runtime/reality.json
 runtime/reality_history.jsonl
+
+# Robocze wyjscia AI i logi audytu - nie do publicznego repo
+Claude outputs/
+logs/
+*.bak
