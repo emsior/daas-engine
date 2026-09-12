@@ -1,4 +1,5 @@
 # DaaS Engine — automatyczny raport tygodniowy z Twoich danych
+*[English README →](README.md)*
 
 **Wysyłasz eksport CSV/XLSX ze sklepu, CRM-a albo księgowości → dostajesz gotowy raport HTML.
 Co tydzień, automatycznie, bez ręcznego składania w Excelu.**
