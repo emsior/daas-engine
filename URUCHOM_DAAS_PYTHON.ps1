@@ -1,7 +1,7 @@
 # URUCHOM_DAAS_PYTHON.ps1 - start DaaS Engine v0.2 NATYWNIE (bez Dockera) na Windows
 # Wymaga: Python 3.11+ (winget install Python.Python.3.12) - n8n opcjonalnie przez Node (npx n8n)
 # Uruchom: prawy klik -> "Uruchom w programie PowerShell", albo:
-#   powershell -ExecutionPolicy Bypass -File "D:\daas-engine\URUCHOM_DAAS_PYTHON.ps1"
+#   powershell -ExecutionPolicy Bypass -File ".\URUCHOM_DAAS_PYTHON.ps1"
 
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot

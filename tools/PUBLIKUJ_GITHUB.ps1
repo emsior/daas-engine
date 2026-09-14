@@ -12,8 +12,8 @@ function Fail($m) { Write-Host ""; Write-Host "BLAD: $m" -ForegroundColor Red; R
 
 Step "1/4 git"
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail "Brak git. Zainstaluj:  winget install Git.Git  i odpal ponownie." }
-git config user.name  | Out-Null; if (-not (git config user.name))  { git config --global user.name  $User }
-git config user.email | Out-Null; if (-not (git config user.email)) { git config --global user.email "mcq089@gmail.com" }
+git config user.name  | Out-Null; if (-not (git config user.name))  { git config user.name  "PPC" }
+git config user.email | Out-Null; if (-not (git config user.email)) { git config user.email "267137654+emsior@users.noreply.github.com" }
 git config core.autocrlf false
 if (-not (Test-Path ".git")) { Fail "Brak .git - repo powinno byc juz zainicjowane (commit 0d1836a)." }
 git status --short

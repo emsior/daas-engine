@@ -9,7 +9,7 @@ description = "Source-Agnostic B2B Data-as-a-Service Engine (FastAPI + DuckDB + 
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
-authors = [{ name = "Michał Prochera" }]
+authors = [{ name = "PPC", email = "prochpc@gmail.com" }]
 dependencies = [
     "fastapi>=0.110",
     "uvicorn[standard]>=0.27",

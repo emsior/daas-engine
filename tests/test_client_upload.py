@@ -132,7 +132,12 @@ def test_template_narrative_cs2_empty():
 # Runner + raport HTML
 # ---------------------------------------------------------------------------
 def test_runner_with_client_file_is_live(runner):  # noqa: F811
-    res = runner.run(RunRequest(pipeline="ecommerce_demo", source_path=str(PL_FIXTURE), client_name="ACME"))
+    # Security fix: source_path must be inside uploads/
+    uploads = runner.settings.reports_path.parent / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    dest = uploads / "test_client_export.csv"
+    dest.write_bytes(PL_FIXTURE.read_bytes())
+    res = runner.run(RunRequest(pipeline="ecommerce_demo", source_path=str(dest), client_name="ACME"))
     assert res.run_status == RunStatus.SUCCESS
     assert res.data_status == DataStatus.LIVE_DATA
     assert res.records_processed == 15
@@ -148,7 +153,7 @@ def test_runner_with_client_file_is_live(runner):  # noqa: F811
 def test_runner_missing_source_path_fails_cleanly(runner):  # noqa: F811
     res = runner.run(RunRequest(pipeline="ecommerce_demo", source_path="/does/not/exist.csv"))
     assert res.run_status == RunStatus.FAILED
-    assert "not found" in (res.error or "")
+    assert "outside" in (res.error or "") or "not found" in (res.error or "")
 
 
 # ---------------------------------------------------------------------------
