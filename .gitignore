@@ -47,3 +47,8 @@ runtime/reality_history.jsonl
 Claude outputs/
 logs/
 *.bak
+
+# Robocze drafty publikacji i plany archiwizacji (lokalne)
+ARCHIVE_PLAN_*.md
+notion_update_draft.md
+slack_alert_draft.md

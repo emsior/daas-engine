@@ -42,13 +42,14 @@ if (-not $hasRemote) {
 }
 git remote -v
 
-Step "4/4 Push"
-git branch -M main
-git push -u origin main
-if ($LASTEXITCODE -ne 0) { Fail "Push nie przeszedl. Najczesciej: brak logowania - Windows otworzy okno 'Git Credential Manager', zaloguj sie przez przegladarke i odpal skrypt ponownie." }
-
+Step "4/4 Publikacja i Pull Request"
+Write-Host "BEZPIECZENSTWO: Automatyczny push do repozytorium jest wylaczony." -ForegroundColor Yellow
+Write-Host "Zgodnie z zasadami repozytorium, publikacja NIE zostala wykonana przez ten skrypt." -ForegroundColor Yellow
 Write-Host ""
-Write-Host "OPUBLIKOWANE: https://github.com/$User/$Repo" -ForegroundColor Green
-Write-Host "CI: https://github.com/$User/$Repo/actions  (job 'test' + 'docker' - docker buduje sie na runnerze GitHub, nie u Ciebie)"
-Start-Process "https://github.com/$User/$Repo/actions"
+$currentBranch = (git branch --show-current).Trim()
+Write-Host "GOTOWE DO RECZNEJ PUBLIKACJI:" -ForegroundColor Cyan
+Write-Host "  1. Aktualna galaz:  $currentBranch" -ForegroundColor White
+Write-Host "  2. Polecenie push:  git push origin $currentBranch" -ForegroundColor White
+Write-Host "  3. Strona PR:       https://github.com/$User/$Repo/pulls" -ForegroundColor White
+Write-Host ""
 Read-Host "Enter, aby zamknac"

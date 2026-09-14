@@ -39,7 +39,7 @@ class EcommerceSource:
         if source_path:
             uploads_root = (self.settings.reports_path.parent / "uploads").resolve()
             p = Path(source_path).resolve()
-            if not str(p).startswith(str(uploads_root)):
+            if not p.is_relative_to(uploads_root.resolve()):
                 return SourceResult(
                     records=[],
                     data_status=DataStatus.BLOCKED_MISSING_SECRET,

@@ -87,6 +87,23 @@ class TestPathTraversal:
         assert res.run_status == RunStatus.SUCCESS
         assert res.data_status == DataStatus.LIVE_DATA
 
+    def test_rejects_sibling_prefix_directory(self, secure_runner):
+        """Zabezpieczenie przed prefix collision: katalog 'uploads-evil' obok 'uploads'."""
+        runner, tmp_path = secure_runner
+        sibling_evil = tmp_path / "runtime" / "uploads-evil"
+        sibling_evil.mkdir(parents=True, exist_ok=True)
+        payload = sibling_evil / "payload.csv"
+        payload.write_text(
+            "order_id,date,product,category,revenue,cost,profit,discount,status\n"
+            "ORD-999,2024-01-15,Evil Widget,Electronics,1200,800,400,0.05,completed\n"
+        )
+        res = runner.run(RunRequest(
+            pipeline="ecommerce_demo",
+            source_path=str(payload),
+        ))
+        assert res.run_status == RunStatus.FAILED
+        assert "outside" in (res.error or "")
+
 
 # -----------------------------------------------------------------------
 # TENANT ISOLATION
