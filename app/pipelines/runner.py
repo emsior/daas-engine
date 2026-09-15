@@ -69,6 +69,21 @@ class PipelineRunner:
         log.info("run start pipeline=%s run_id=%s", pipeline, run_id)
 
         try:
+            if self.settings.daas_policy_enforce:
+                from app.core.policy import Budget, ReadFile, enforce
+                audit_log_path = self.settings.duckdb_file.parent / "audit.jsonl"
+                if request.source_path:
+                    enforce(
+                        tool="read_file",
+                        raw_args={"path": request.source_path},
+                        schema=ReadFile,
+                        fn=lambda path: path,
+                        budget=Budget(),
+                        role="analyst",
+                        audit_log=audit_log_path,
+                        workspace=self.settings.reports_path.parent,
+                    )
+
             if pipeline == "cs2_demo":
                 src, metrics, records = self._run_cs2(run_id, request.force_mock)
             elif pipeline == "ecommerce_demo":

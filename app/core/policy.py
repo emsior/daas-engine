@@ -13,6 +13,7 @@ Warstwy:
 """
 from __future__ import annotations
 
+import contextvars
 import hashlib
 import json
 import time
@@ -24,6 +25,19 @@ from pydantic import BaseModel, field_validator
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = (PROJECT_ROOT / "runtime").resolve()
+
+#: Workspace aktywny dla biezacego wywolania enforce(); None = domyslne WORKSPACE.
+#: Ustawiany przez enforce(workspace=...), zeby runtime (natywnie / Docker / tenant)
+#: mogl podac wlasny katalog runtime zamiast stalej modulu.
+_workspace_ctx: contextvars.ContextVar[Path | None] = contextvars.ContextVar(
+    "daas_policy_workspace", default=None
+)
+
+
+def active_workspace() -> Path:
+    """Katalog roboczy obowiazujacy w tym wywolaniu policy (rozwiazany do sciezki absolutnej)."""
+    ws = _workspace_ctx.get()
+    return (ws if ws is not None else WORKSPACE).resolve()
 AUDIT_LOG = PROJECT_ROOT / "logs" / "audit.jsonl"
 
 Role = Literal["researcher", "analyst", "executor"]
@@ -52,9 +66,12 @@ class ReadFile(BaseModel):
     @field_validator("path")
     @classmethod
     def inside_workspace(cls, v: str) -> str:
-        candidate = (WORKSPACE / v).resolve()
-        if not str(candidate).startswith(str(WORKSPACE)):
-            raise PolicyError(f"sciezka poza workspace: {candidate}")
+        root = active_workspace()
+        p = Path(v)
+        candidate = p.resolve() if p.is_absolute() else (root / p).resolve()
+        if not candidate.is_relative_to(root):
+            # Bez sciezek absolutnych w komunikacie - nie ujawniamy ukladu serwera.
+            raise PolicyError("sciezka poza workspace")
         return str(candidate)
 
 
@@ -118,6 +135,7 @@ def enforce(
     allow: dict[str, set[str]] | None = None,
     approve: Callable[[str, dict[str, Any]], bool] | None = None,
     audit_log: Path | None = None,
+    workspace: Path | None = None,
 ) -> Any:
     """Jedyna droga wywolania narzedzia przez agenta.
 
@@ -134,7 +152,11 @@ def enforce(
             raise PolicyError(f"rola '{role}' nie ma uprawnien do '{tool}'")
 
         try:
-            args = schema(**raw_args).model_dump()
+            _tok = _workspace_ctx.set(workspace)
+            try:
+                args = schema(**raw_args).model_dump()
+            finally:
+                _workspace_ctx.reset(_tok)
         except PolicyError:
             decision = "deny:invalid_args"
             raise
