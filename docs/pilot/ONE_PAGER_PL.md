@@ -11,4 +11,4 @@ Dostarczamy gotowe, cotygodniowe raporty rentowności, marżowości i anomalii s
 ### Dlaczego to ma sens?
 - **Zero wdrożeń:** Nie musisz integrować skomplikowanych narzędzi BI ani płacić za licencje użytkowników.
 - **Działa z Twoimi danymi:** Polski format liczb (`1 299,00 zł`), elastyczne nagłówki, obsługa zwrotów i rabatów.
-- **Prywatność:** Twoje dane są izolowane i przetwarzane w dedykowanej przestrzeni tenanta.
+- **Prywatność:** Dostajesz własną instancję silnika z własnym katalogiem danych. Twoje pliki nie trafiają do wspólnej bazy z danymi innych firm.

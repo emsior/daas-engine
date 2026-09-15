@@ -220,11 +220,26 @@ def map_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, MappingReport]:
     return out[cols].reset_index(drop=True), report
 
 
+#: Dozwolone kodowania wejścia, w kolejności prób. Bez latin-1, które dekoduje
+#: dowolną sekwencję bajtów i przez to nigdy nie sygnalizuje uszkodzonego pliku.
+ALLOWED_ENCODINGS: tuple[str, ...] = ("utf-8-sig", "utf-8", "cp1250")
+
+
 def read_client_csv(path: str) -> pd.DataFrame:
-    """Odczyt CSV z auto-detekcją separatora (; , tab) i kodowania (utf-8 / cp1250)."""
-    for enc in ("utf-8-sig", "utf-8", "cp1250", "latin-1"):
+    """Odczyt CSV z auto-detekcją separatora (; , tab) i ścisłym dekodowaniem.
+
+    Próbuje wyłącznie UTF-8-SIG, UTF-8 i CP1250. Gdy żadne nie zadziała,
+    podnosi UnicodeDecodeError zamiast po cichu podmieniać bajty na U+FFFD:
+    plik uszkodzony ma zostać odrzucony, a nie zamieniony w dane wyglądające
+    poprawnie.
+    """
+    last_error: UnicodeDecodeError | None = None
+    for enc in ALLOWED_ENCODINGS:
         try:
             return pd.read_csv(path, sep=None, engine="python", encoding=enc, dtype=str)
-        except UnicodeDecodeError:
+        except UnicodeDecodeError as exc:
+            last_error = exc
             continue
-    return pd.read_csv(path, sep=None, engine="python", encoding_errors="replace", dtype=str)
+    if last_error is not None:
+        raise last_error
+    raise UnicodeDecodeError("utf-8", b"", 0, 1, "nieobsługiwane kodowanie pliku")
