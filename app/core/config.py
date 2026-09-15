@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     app_host: str = "0.0.0.0"
     app_port: int = 8000
     log_level: str = "INFO"
+    daas_policy_enforce: bool = Field(default=False, description="Wymuszenie sprawdzania uprawnień policy w runtime")
 
     # --- sekrety (opcjonalne) ---
     faceit_api_key: str | None = Field(default=None)
