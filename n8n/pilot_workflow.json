@@ -1,0 +1,175 @@
+{
+  "name": "DaaS Engine — Pilot Workflow (Report -> Log -> Notion -> Slack Alert)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                1
+              ],
+              "triggerAtHour": 7
+            }
+          ]
+        }
+      },
+      "id": "10000000-0000-4000-8000-000000000001",
+      "name": "Cron Trigger (Mon 07:00)",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        100,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "={{ $env.DAAS_APP_URL || 'http://app:8000' }}/health",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "10000000-0000-4000-8000-000000000002",
+      "name": "Sprawdzenie wejscia (/health)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        320,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.DAAS_APP_URL || 'http://app:8000' }}/run",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"pipeline\": \"ecommerce_demo\",\n  \"client_name\": \"Pilot Client\",\n  \"force_mock\": false,\n  \"notify\": false\n}",
+        "options": {
+          "timeout": 60000
+        }
+      },
+      "id": "10000000-0000-4000-8000-000000000003",
+      "name": "Uruchomienie raportu (POST /run)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        540,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-success",
+              "leftValue": "={{ $json.run_status }}",
+              "rightValue": "SUCCESS",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "10000000-0000-4000-8000-000000000004",
+      "name": "Sprawdzenie statusu (SUCCESS?)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        760,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Przygotowanie logu oraz payloadu Notion - brak wysylki sieciowej bez zgody\nconst run = $input.item.json;\nconst metrics = run.metrics || {};\n\nconst notionPayload = {\n  parent: { database_id: $env.NOTION_DAAS_DB_ID || 'NOTION_DB_ID_PLACEHOLDER' },\n  properties: {\n    'Projekt': { title: [{ text: { content: 'DaaS Engine' } }] },\n    'Status': { select: { name: 'Pilot Active' } },\n    'Run ID': { rich_text: [{ text: { content: run.run_id || '' } }] },\n    'Data Status': { select: { name: run.data_status || 'UNKNOWN' } },\n    'Przychód': { number: metrics.revenue_total || 0 },\n    'Marża %': { number: metrics.margin_pct || 0 },\n    'Wykonano': { date: { start: run.finished_at || new Date().toISOString() } },\n    'Wlasciciel': { people: [] },\n    'Next Action': { rich_text: [{ text: { content: 'Przeglad raportu tygodniowego przez Michala' } }] }\n  }\n};\n\nreturn {\n  status: 'SUCCESS',\n  run_id: run.run_id,\n  records_processed: run.records_processed,\n  execution_time_sec: run.execution_time_sec,\n  report_html_path: run.report_html_path,\n  notion_payload: notionPayload\n};"
+      },
+      "id": "10000000-0000-4000-8000-000000000005",
+      "name": "Zapis logu i payload Notion",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Obsluga awarii - formatowanie alertu Slack (bez bezposredniej wysylki bez credentials)\nconst run = $input.item.json;\nconst slackAlertPayload = {\n  channel: $env.SLACK_ALERT_CHANNEL || '#edge-os',\n  text: `⚠️ [DaaS Alert] Awaria runu pipeline: ${run.pipeline || 'unknown'}`,\n  blocks: [\n    {\n      type: 'header',\n      text: { type: 'plain_text', text: 'DaaS Engine Alert — Awaria Runu' }\n    },\n    {\n      type: 'section',\n      text: {\n        type: 'mrkdwn',\n        text: `*Status:* ${run.run_status || 'FAILED'}\\n*Blad:* ${run.error || 'Nieznany blad wykonania'}\\n*Run ID:* \\`${run.run_id || 'n/a'}\\`\\n*Czas:* ${new Date().toISOString()}`\n      }\n    },\n    {\n      type: 'context',\n      elements: [\n        { type: 'mrkdwn', text: 'Wymagana interwencja operatora (Michal). Brak danych klienta w alercie.' }\n      ]\n    }\n  ]\n};\n\nreturn {\n  status: 'FAILED',\n  error: run.error || 'Pipeline run failed',\n  slack_payload: slackAlertPayload\n};"
+      },
+      "id": "10000000-0000-4000-8000-000000000006",
+      "name": "Przygotowanie alertu Slack (Awaria)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        420
+      ]
+    }
+  ],
+  "connections": {
+    "Cron Trigger (Mon 07:00)": {
+      "main": [
+        [
+          {
+            "node": "Sprawdzenie wejscia (/health)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sprawdzenie wejscia (/health)": {
+      "main": [
+        [
+          {
+            "node": "Uruchomienie raportu (POST /run)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Uruchomienie raportu (POST /run)": {
+      "main": [
+        [
+          {
+            "node": "Sprawdzenie statusu (SUCCESS?)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sprawdzenie statusu (SUCCESS?)": {
+      "main": [
+        [
+          {
+            "node": "Zapis logu i payload Notion",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Przygotowanie alertu Slack (Awaria)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

@@ -1,0 +1,178 @@
+"""Policy layer dla agentow: kontrakty narzedzi, allowlista rol, budzety, audit log.
+
+Zasada naczelna: model jest planista, nigdy autorytetem. Autorytet mieszka tutaj.
+Kazde wywolanie narzedzia przechodzi przez enforce() i laduje w append-only audit logu.
+
+Warstwy:
+    W1 kontrakty narzedzi   -> modele Pydantic z walidacja argumentow
+    W2 policy / HITL        -> allowlista per rola + zgoda czlowieka na operacje nieodwracalne
+    W4 budzety              -> limit krokow / kosztu / czasu + detektor petli
+    W5 audit                -> logs/audit.jsonl (append-only, hash wyniku)
+
+(W3 sandbox jest poza kodem: kontener / read-only mounty / egress allowlist.)
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable, Literal
+
+from pydantic import BaseModel, field_validator
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+WORKSPACE = (PROJECT_ROOT / "runtime").resolve()
+AUDIT_LOG = PROJECT_ROOT / "logs" / "audit.jsonl"
+
+Role = Literal["researcher", "analyst", "executor"]
+
+#: Narzedzia nieodwracalne — zawsze wymagaja zgody czlowieka (HITL gate).
+DESTRUCTIVE: set[str] = {"send_email", "publish", "delete_file", "git_push", "charge"}
+
+#: Allowlista: co wolno ktorej roli. Brak wpisu = brak uprawnien.
+ALLOW: dict[str, set[str]] = {
+    "researcher": {"web_search", "fetch_url", "read_file"},
+    "analyst": {"read_file", "run_sql"},
+    "executor": {"write_file", "send_email", "publish", "git_push"},
+}
+
+
+class PolicyError(RuntimeError):
+    """Odmowa policy layer. Nigdy nie jest wyjatkiem technicznym — to decyzja."""
+
+
+# --------------------------------------------------------------------------- W1
+class ReadFile(BaseModel):
+    """Odczyt pliku ograniczony do katalogu roboczego."""
+
+    path: str
+
+    @field_validator("path")
+    @classmethod
+    def inside_workspace(cls, v: str) -> str:
+        candidate = (WORKSPACE / v).resolve()
+        if not str(candidate).startswith(str(WORKSPACE)):
+            raise PolicyError(f"sciezka poza workspace: {candidate}")
+        return str(candidate)
+
+
+#: Klauzule DuckDB rozszerzajace dostep poza odczyt — blokowane w RunSQL.
+BANNED_SQL: tuple[str, ...] = ("attach", "copy ", "install", "load ", "pragma", "export")
+
+
+class RunSQL(BaseModel):
+    """Zapytanie DuckDB tylko do odczytu, bez klauzul rozszerzajacych dostep."""
+
+    query: str
+
+    @field_validator("query")
+    @classmethod
+    def read_only(cls, v: str) -> str:
+        q = v.strip().lower()
+        if not q.startswith(("select", "with")):
+            raise PolicyError("dozwolone tylko SELECT / WITH")
+        if any(k in q for k in BANNED_SQL):
+            raise PolicyError("zablokowana klauzula DuckDB")
+        return v
+
+
+# --------------------------------------------------------------------------- W4
+@dataclass
+class Budget:
+    """Twardy limit na sesje agenta. Agent bez budzetu = karta kredytowa oddana modelowi."""
+
+    max_steps: int = 25
+    max_cost_usd: float = 2.00
+    max_wall_s: int = 900
+    steps: int = 0
+    cost: float = 0.0
+    t0: float = field(default_factory=time.time)
+    _fingerprints: list[str] = field(default_factory=list)
+
+    def charge(self, tool: str, args: dict[str, Any], usd: float = 0.0) -> None:
+        self.steps += 1
+        self.cost += usd
+        if self.steps > self.max_steps:
+            raise PolicyError(f"limit krokow ({self.max_steps})")
+        if self.cost > self.max_cost_usd:
+            raise PolicyError(f"limit kosztu ({self.max_cost_usd} USD)")
+        if time.time() - self.t0 > self.max_wall_s:
+            raise PolicyError(f"limit czasu ({self.max_wall_s}s)")
+
+        payload = f"{tool}{json.dumps(args, sort_keys=True, default=str)}"
+        self._fingerprints.append(hashlib.sha256(payload.encode()).hexdigest()[:16])
+        if len(self._fingerprints) >= 3 and len(set(self._fingerprints[-3:])) == 1:
+            raise PolicyError("wykryta petla — ta sama akcja 3x pod rzad")
+
+
+# ---------------------------------------------------------------------- W2 + W5
+def enforce(
+    tool: str,
+    raw_args: dict[str, Any],
+    schema: type[BaseModel],
+    fn: Callable[..., Any],
+    budget: Budget,
+    role: Role,
+    allow: dict[str, set[str]] | None = None,
+    approve: Callable[[str, dict[str, Any]], bool] | None = None,
+    audit_log: Path | None = None,
+) -> Any:
+    """Jedyna droga wywolania narzedzia przez agenta.
+
+    Kolejnosc: allowlista -> walidacja argumentow -> budzet -> HITL -> wykonanie.
+    Audit zapisuje sie ZAWSZE, takze przy odmowie (blok finally).
+    """
+    allow = ALLOW if allow is None else allow
+    audit_log = AUDIT_LOG if audit_log is None else audit_log
+    decision, result = "allow", None
+
+    try:
+        if tool not in allow.get(role, set()):
+            decision = "deny:not_allowlisted"
+            raise PolicyError(f"rola '{role}' nie ma uprawnien do '{tool}'")
+
+        try:
+            args = schema(**raw_args).model_dump()
+        except PolicyError:
+            decision = "deny:invalid_args"
+            raise
+        except Exception as exc:  # blad schematu = odmowa, nie crash agenta
+            decision = "deny:schema"
+            raise PolicyError(f"argumenty niezgodne z kontraktem: {exc}") from exc
+
+        try:
+            budget.charge(tool, args)
+        except PolicyError:
+            decision = "deny:budget"
+            raise
+
+        if tool in DESTRUCTIVE:
+            if approve is None or not approve(tool, args):
+                decision = "deny:no_human_approval"
+                raise PolicyError(f"'{tool}' jest nieodwracalne i wymaga zgody czlowieka")
+
+        result = fn(**args)
+        return result
+
+    finally:
+        audit_log.parent.mkdir(parents=True, exist_ok=True)
+        with audit_log.open("a", encoding="utf-8") as fh:
+            fh.write(
+                json.dumps(
+                    {
+                        "ts": round(time.time(), 3),
+                        "role": role,
+                        "tool": tool,
+                        "args": raw_args,
+                        "decision": decision,
+                        "result_sha": hashlib.sha256(repr(result).encode()).hexdigest()[:16],
+                        "steps": budget.steps,
+                        "cost_usd": round(budget.cost, 4),
+                    },
+                    ensure_ascii=False,
+                    default=str,
+                )
+                + "\n"
+            )

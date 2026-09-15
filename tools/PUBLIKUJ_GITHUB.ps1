@@ -12,8 +12,8 @@ function Fail($m) { Write-Host ""; Write-Host "BLAD: $m" -ForegroundColor Red; R
 
 Step "1/4 git"
 if (-not (Get-Command git -ErrorAction SilentlyContinue)) { Fail "Brak git. Zainstaluj:  winget install Git.Git  i odpal ponownie." }
-git config user.name  | Out-Null; if (-not (git config user.name))  { git config --global user.name  $User }
-git config user.email | Out-Null; if (-not (git config user.email)) { git config --global user.email "mcq089@gmail.com" }
+git config user.name  | Out-Null; if (-not (git config user.name))  { git config user.name  "PPC" }
+git config user.email | Out-Null; if (-not (git config user.email)) { git config user.email "267137654+emsior@users.noreply.github.com" }
 git config core.autocrlf false
 if (-not (Test-Path ".git")) { Fail "Brak .git - repo powinno byc juz zainicjowane (commit 0d1836a)." }
 git status --short
@@ -42,13 +42,14 @@ if (-not $hasRemote) {
 }
 git remote -v
 
-Step "4/4 Push"
-git branch -M main
-git push -u origin main
-if ($LASTEXITCODE -ne 0) { Fail "Push nie przeszedl. Najczesciej: brak logowania - Windows otworzy okno 'Git Credential Manager', zaloguj sie przez przegladarke i odpal skrypt ponownie." }
-
+Step "4/4 Publikacja i Pull Request"
+Write-Host "BEZPIECZENSTWO: Automatyczny push do repozytorium jest wylaczony." -ForegroundColor Yellow
+Write-Host "Zgodnie z zasadami repozytorium, publikacja NIE zostala wykonana przez ten skrypt." -ForegroundColor Yellow
 Write-Host ""
-Write-Host "OPUBLIKOWANE: https://github.com/$User/$Repo" -ForegroundColor Green
-Write-Host "CI: https://github.com/$User/$Repo/actions  (job 'test' + 'docker' - docker buduje sie na runnerze GitHub, nie u Ciebie)"
-Start-Process "https://github.com/$User/$Repo/actions"
+$currentBranch = (git branch --show-current).Trim()
+Write-Host "GOTOWE DO RECZNEJ PUBLIKACJI:" -ForegroundColor Cyan
+Write-Host "  1. Aktualna galaz:  $currentBranch" -ForegroundColor White
+Write-Host "  2. Polecenie push:  git push origin $currentBranch" -ForegroundColor White
+Write-Host "  3. Strona PR:       https://github.com/$User/$Repo/pulls" -ForegroundColor White
+Write-Host ""
 Read-Host "Enter, aby zamknac"

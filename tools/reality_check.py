@@ -58,10 +58,30 @@ checks["repo_publiczne"] = {
     "dowod": "private=%s" % meta.get("private"),
     "znaczenie": "prywatne = obcy widzi 404",
 }
+# Lekcja z 10.09: pole `size` w API GitHuba aktualizuje sie z opoznieniem po pierwszym pushu
+# i przez kilka godzin pokazuje 0 mimo dzialajacego repo. Falszywy negatyw.
+# Wiarygodne sygnaly to README + liczba commitow widocznych dla obcego.
+s_commits, b_commits = api("/commits?per_page=1")
+n_commits = len(json.loads(b_commits)) if s_commits == 200 else 0
 checks["repo_ma_kod"] = {
-    "wartosc": bool(meta.get("size")) and s_readme == 200,
-    "dowod": "size=%s KB, README HTTP %s" % (meta.get("size"), s_readme),
+    "wartosc": s_readme == 200 and n_commits > 0,
+    "dowod": "README HTTP %s, commits HTTP %s, size=%s KB (size bywa opoznione)" % (s_readme, s_commits, meta.get("size")),
     "znaczenie": "TO JEST WLASCIWY TEST. Puste publiczne repo wyglada gorzej niz 404 - jak porzucony projekt",
+}
+
+s_ci, b_ci = api("/actions/runs?per_page=1")
+ci = (json.loads(b_ci).get("workflow_runs") or [{}])[0] if s_ci == 200 else {}
+checks["ci_zielone"] = {
+    "wartosc": ci.get("conclusion") == "success",
+    "dowod": "%s / %s" % (ci.get("status"), ci.get("conclusion")),
+    "znaczenie": "czerwony badge na publicznym repo jest gorszym dowodem niz brak badge",
+}
+
+s_sec, _ = api("/contents/.secrets")
+checks["sekrety_nie_wyciekly"] = {
+    "wartosc": s_sec == 404,
+    "dowod": "/.secrets -> HTTP %s (404 = dobrze)" % s_sec,
+    "znaczenie": "kontrola, czy katalog z tokenem nie trafil do publicznego repo",
 }
 
 # 2. Czy push w ogole poszedl
@@ -89,12 +109,12 @@ for nazwa, url in [
 
 # 4. Dowody CS2 - folder, ktory mial sie zapelnic
 dow = pathlib.Path(os.path.expanduser("~")) / "Desktop" / "CS2Ops" / "dowody"
-alt = pathlib.Path("C:/Users/proch/Desktop/CS2Ops/dowody")
-target = dow if dow.exists() else alt
+alt = pathlib.Path(os.environ.get("CS2_DOWODY_PATH", ""))
+target = dow if dow.exists() else (alt if alt and alt.exists() else dow)
 checks["zrzuty_cs2"] = {
     "wartosc": len(list(target.glob("*"))) if target.exists() else -1,
     "dowod": str(target),
-    "znaczenie": "0 od 17.08 = projekt zablokowany na jednym wieczorze Michala",
+    "znaczenie": "materialy dowodowe CS2",
 }
 
 # 5. Wideo demo - czy istnieje material do galerii

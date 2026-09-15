@@ -34,12 +34,20 @@ class EcommerceSource:
         if force_mock:
             return self._load_csv(self.fixture_path, DataStatus.MOCK_DATA, "force_mock=true")
 
-        # 0) plik klienta (z POST /upload lub dowolna ścieżka) — najwyższy priorytet
+        # 0) plik klienta (z POST /upload) — najwyższy priorytet
+        #    SECURITY: canonicalization + sprawdzenie, że plik jest w uploads/
         if source_path:
-            p = Path(source_path)
+            uploads_root = (self.settings.reports_path.parent / "uploads").resolve()
+            p = Path(source_path).resolve()
+            if not p.is_relative_to(uploads_root.resolve()):
+                return SourceResult(
+                    records=[],
+                    data_status=DataStatus.BLOCKED_MISSING_SECRET,
+                    detail=f"source_path outside allowed uploads directory",
+                )
             if not p.exists():
                 return SourceResult(records=[], data_status=DataStatus.BLOCKED_MISSING_SECRET,
-                                    detail=f"source_path not found: {source_path}")
+                                    detail=f"source_path not found")
             return self._load_client_file(p)
 
         dataset_id = os.getenv("APIFY_DATASET_ID", "").strip()
