@@ -187,13 +187,27 @@ def test_api_upload_run_report_flow(client: TestClient):  # noqa: F811
 def test_api_upload_rejects_bad_input(client: TestClient):  # noqa: F811
     assert client.post("/upload", files={"file": ("x.exe", b"abc", "application/octet-stream")}).status_code == 415
     assert client.post("/upload", files={"file": ("x.csv", b"   ", "text/csv")}).status_code == 400
+
     bad = client.post("/upload", files={"file": ("x.csv", b"a;b\n1;2\n", "text/csv")})
-    assert bad.status_code == 422 and "przychodu" in bad.json()["detail"]
+    assert bad.status_code == 422
+    # PR #3: komunikat odmowy jest ogólny i nie zawiera nagłówków z pliku klienta.
+    # Wcześniej wypisywał listę kolumn, co przenosiło treść pliku do odpowiedzi HTTP.
+    detail = bad.json()["detail"]
+    assert "kolumn" in detail
+    assert "a;b" not in detail and "'a'" not in detail
 
 
-def test_api_upload_xlsx_export(client: TestClient, tmp_path):  # noqa: F811
-    """Eksport XLSX (Allegro/Shoper/Excel) z polskimi nagłówkami i kwotami jako tekst → mapowanie → LIVE_DATA."""
+def test_api_upload_rejects_xlsx(client: TestClient, settings):  # noqa: F811
+    """XLSX nie jest już przyjmowany przez /upload — wyłącznie CSV (PR #3, punkt 2 kontraktu).
+
+    Zastępuje wcześniejszy test_api_upload_xlsx_export, który sprawdzał, że upload
+    pliku .xlsx kończy się powodzeniem. Kontrakt PR #3 zawęża wejście do .csv, bo
+    parser XLSX to nieporównanie szersza powierzchnia ataku niż tekstowy CSV.
+
+    Skutek dla klienta: eksport z Allegro/Shoper/Excela trzeba zapisać jako CSV.
+    """
     import io
+
     import openpyxl
 
     df = read_client_csv(str(PL_FIXTURE))
@@ -204,12 +218,15 @@ def test_api_upload_xlsx_export(client: TestClient, tmp_path):  # noqa: F811
         ws.append([str(v) for v in row])
     buf = io.BytesIO()
     wb.save(buf)
+
     r = client.post("/upload", files={"file": ("export_allegro.xlsx", buf.getvalue(),
                                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
                     data={"client_name": "Sklep XLSX"})
-    assert r.status_code == 200, r.text
-    up = r.json()
-    assert up["ready"] and up["rows"] == 15 and up["confidence"] == 1.0
-    run = client.post("/run", json=up["run_payload"]).json()
-    assert run["run_status"] == "SUCCESS" and run["data_status"] == "LIVE_DATA"
-    assert run["metrics"]["wow"] is not None and run["metrics"]["weeks_in_data"] == 3
+
+    assert r.status_code == 415, r.text
+
+    # Odmowa nie może zostawić po sobie ani pliku finalnego, ani tymczasowego.
+    uploads = settings.reports_path.parent / "uploads"
+    if uploads.exists():
+        assert list(uploads.glob("*.csv")) == []
+        assert list(uploads.glob("*.tmp")) == []
