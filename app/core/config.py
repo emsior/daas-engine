@@ -13,6 +13,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+#: Jedyna nazwa pliku audytowego w calym projekcie. Nie duplikowac literalem.
+AUDIT_LOG_FILENAME = "audit.jsonl"
+
 
 def _is_blank(value: str | None) -> bool:
     return value is None or value.strip() == "" or value.strip().lower() in {"none", "null", "changeme", "change_me"}
@@ -67,6 +70,16 @@ class Settings(BaseSettings):
     @property
     def fixtures_path(self) -> Path:
         return self._abs(self.fixtures_dir)
+
+    @property
+    def audit_log_path(self) -> Path:
+        """Kanoniczna sciezka logu audytowego — jedno zrodlo prawdy dla wszystkich pisarzy.
+
+        Kazdy call site (routes, runner, policy, upload_guard) czyta stad, zeby
+        log nie rozwarstwil sie na kilka plikow w zaleznosci od miejsca wywolania.
+        Katalog runtime wyznacza plik bazy — jeden tenant = jeden runtime = jeden audyt.
+        """
+        return self.duckdb_file.parent / AUDIT_LOG_FILENAME
 
     # ---------- auto-detekcja sekretów ----------
     @property

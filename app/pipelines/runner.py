@@ -71,7 +71,7 @@ class PipelineRunner:
         try:
             if self.settings.daas_policy_enforce:
                 from app.core.policy import Budget, ReadFile, enforce
-                audit_log_path = self.settings.duckdb_file.parent / "audit.jsonl"
+                audit_log_path = self.settings.audit_log_path
                 if request.source_path:
                     enforce(
                         tool="read_file",
