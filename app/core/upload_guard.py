@@ -12,7 +12,6 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
-import json
 import time
 import uuid
 from dataclasses import dataclass
@@ -330,10 +329,15 @@ AUDIT_ALLOWED_KEYS: frozenset[str] = frozenset({
 
 
 def append_audit(event: dict[str, Any], audit_log: Path) -> None:
-    """Dopisuje zdarzenie do logu audytowego (append-only, jedna linia JSON)."""
-    audit_log.parent.mkdir(parents=True, exist_ok=True)
-    with audit_log.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+    """Dopisuje zdarzenie do logu audytowego (append-only, jedna linia JSON).
+
+    Zapis idzie przez wspolny, thread-safe writer warstwy policy — zdarzenia
+    uploadu i zdarzenia policy trafiaja do tego samego pliku tym samym kanalem,
+    wiec nie moga sie przeplatac w polowie linii.
+    """
+    from app.core.policy import append_audit_line
+
+    append_audit_line(audit_log, event)
 
 
 def safe_deployment_id(runtime_root: Path) -> str:

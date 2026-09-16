@@ -7,7 +7,11 @@ Warstwy:
     W1 kontrakty narzedzi   -> modele Pydantic z walidacja argumentow
     W2 policy / HITL        -> allowlista per rola + zgoda czlowieka na operacje nieodwracalne
     W4 budzety              -> limit krokow / kosztu / czasu + detektor petli
-    W5 audit                -> logs/audit.jsonl (append-only, hash wyniku)
+    W5 audit                -> <runtime>/audit.jsonl (append-only, hash wyniku)
+
+Sciezka audytu ma dokladnie jedno zrodlo prawdy: Settings.audit_log_path.
+Zaden call site nie sklada jej wlasnym literalem — inaczej log rozwarstwia sie
+na kilka plikow w zaleznosci od tego, skad wywolano enforce() (dlug Z-10).
 
 (W3 sandbox jest poza kodem: kontener / read-only mounty / egress allowlist.)
 """
@@ -16,12 +20,17 @@ from __future__ import annotations
 import contextvars
 import hashlib
 import json
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Literal
 
 from pydantic import BaseModel, field_validator
+
+# Sam literal nazwy pliku mieszka w konfiguracji — import stalej nie tworzy cyklu
+# (config nie importuje niczego z app) i nie odpala get_settings() przy imporcie.
+from app.core.config import AUDIT_LOG_FILENAME
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE = (PROJECT_ROOT / "runtime").resolve()
@@ -38,7 +47,46 @@ def active_workspace() -> Path:
     """Katalog roboczy obowiazujacy w tym wywolaniu policy (rozwiazany do sciezki absolutnej)."""
     ws = _workspace_ctx.get()
     return (ws if ws is not None else WORKSPACE).resolve()
-AUDIT_LOG = PROJECT_ROOT / "logs" / "audit.jsonl"
+
+
+#: Serializuje dopisywanie linii audytu w obrebie procesu (FastAPI threadpool,
+#: runner, testy wielowatkowe). Jedna linia = jedno write() pod tym zamkiem.
+_AUDIT_LOCK = threading.Lock()
+
+#: Sciezka audytu uzywana, gdy konfiguracja jest niedostepna (policy uzyte samodzielnie).
+#: Celowo w runtime/, a nie w osobnym logs/ — ten sam katalog, co sciezka kanoniczna.
+FALLBACK_AUDIT_LOG = WORKSPACE / AUDIT_LOG_FILENAME
+
+
+def default_audit_log() -> Path:
+    """Kanoniczna sciezka audytu dla wywolan bez jawnego `audit_log`.
+
+    Zrodlem prawdy jest Settings.audit_log_path. Import jest leniwy, zeby policy
+    pozostalo modulem bez zaleznosci importowej od warstwy konfiguracji i zeby
+    get_settings() nie odpalalo sie przy samym imporcie tego modulu.
+    """
+    try:
+        from app.core.config import get_settings
+
+        return get_settings().audit_log_path
+    except Exception:  # noqa: BLE001 - brak konfiguracji nie moze uciszyc audytu
+        return FALLBACK_AUDIT_LOG
+
+
+def append_audit_line(audit_log: Path, event: dict[str, Any]) -> None:
+    """Dopisuje jedno zdarzenie jako jedna linie JSON (append-only, thread-safe).
+
+    Gwarancje:
+        * tryb `a` — nigdy nie nadpisuje istniejacej tresci,
+        * caly rekord leci jednym write(), wiec linie sie nie przeplataja,
+        * serializacja poza zamkiem — zamek trzymany tylko na czas zapisu.
+    """
+    line = json.dumps(event, ensure_ascii=False, default=str) + "\n"
+    with _AUDIT_LOCK:
+        audit_log.parent.mkdir(parents=True, exist_ok=True)
+        with audit_log.open("a", encoding="utf-8") as fh:
+            fh.write(line)
+
 
 Role = Literal["researcher", "analyst", "executor"]
 
@@ -143,7 +191,7 @@ def enforce(
     Audit zapisuje sie ZAWSZE, takze przy odmowie (blok finally).
     """
     allow = ALLOW if allow is None else allow
-    audit_log = AUDIT_LOG if audit_log is None else audit_log
+    audit_log = default_audit_log() if audit_log is None else audit_log
     decision, result = "allow", None
 
     try:
@@ -179,22 +227,16 @@ def enforce(
         return result
 
     finally:
-        audit_log.parent.mkdir(parents=True, exist_ok=True)
-        with audit_log.open("a", encoding="utf-8") as fh:
-            fh.write(
-                json.dumps(
-                    {
-                        "ts": round(time.time(), 3),
-                        "role": role,
-                        "tool": tool,
-                        "args": raw_args,
-                        "decision": decision,
-                        "result_sha": hashlib.sha256(repr(result).encode()).hexdigest()[:16],
-                        "steps": budget.steps,
-                        "cost_usd": round(budget.cost, 4),
-                    },
-                    ensure_ascii=False,
-                    default=str,
-                )
-                + "\n"
-            )
+        append_audit_line(
+            audit_log,
+            {
+                "ts": round(time.time(), 3),
+                "role": role,
+                "tool": tool,
+                "args": raw_args,
+                "decision": decision,
+                "result_sha": hashlib.sha256(repr(result).encode()).hexdigest()[:16],
+                "steps": budget.steps,
+                "cost_usd": round(budget.cost, 4),
+            },
+        )

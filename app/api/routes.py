@@ -96,10 +96,6 @@ def _uploads_root(settings) -> Path:
     return root
 
 
-def _audit_log_path(settings) -> Path:
-    return settings.duckdb_file.parent / "audit.jsonl"
-
-
 async def _stream_to_temp(upload_file: UploadFile, tmp_path: Path) -> int:
     """Zapisuje strumien do pliku tymczasowego, pilnujac limitu w trakcie.
 
@@ -168,7 +164,7 @@ async def upload(request: Request, file: UploadFile = File(...),
 
     settings = _runner(request).settings
     root = _uploads_root(settings)
-    audit_log = _audit_log_path(settings)
+    audit_log = settings.audit_log_path
     deployment_id = safe_deployment_id(root)
 
     upload_id = new_upload_id()
