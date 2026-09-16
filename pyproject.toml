@@ -39,4 +39,5 @@ addopts = "-q"
 filterwarnings = ["ignore::DeprecationWarning"]
 markers = [
     "slow: testy granic rozmiaru operujace na plikach rzedu 10 MiB",
+    "performance: pomiar czasu ingestu; prog jest luzny i sygnalizuje regresje rzedu wielkosci, nie wahania maszyny",
 ]
