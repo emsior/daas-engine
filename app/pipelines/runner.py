@@ -17,9 +17,11 @@ from app.core.models import DataStatus, PipelineInfo, RunRequest, RunResult, Run
 from app.reporting.generator import ReportGenerator
 from app.sources.cs2_source import CS2Source, SourceResult
 from app.sources.ecommerce_source import EcommerceSource
+from app.sources.uksc_source import UkscSource
 from app.storage.duckdb_client import DuckDBClient
 from app.transforms.cs2_transform import transform_cs2
 from app.transforms.ecommerce_transform import transform_ecommerce
+from app.transforms.uksc_transform import transform_uksc
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +36,11 @@ PIPELINES: dict[str, dict[str, Any]] = {
         "description": "E-Commerce B2B demo: zamówienia, przychód, zysk, marża, anomalie, top kategorie",
         "domain": "ecommerce",
         "required_secrets": ["APIFY_TOKEN"],
+    },
+    "uksc_evidence": {
+        "description": "Dowod UKSC: kontrole techniczne stacji Windows zmapowane na art. 8 UKSC (paczka z uksc-collector.ps1)",
+        "domain": "compliance",
+        "required_secrets": [],
     },
 }
 
@@ -88,6 +95,9 @@ class PipelineRunner:
                 src, metrics, records = self._run_cs2(run_id, request.force_mock)
             elif pipeline == "ecommerce_demo":
                 src, metrics, records = self._run_ecommerce(run_id, request.force_mock, request.source_path)
+            elif pipeline == "uksc_evidence":
+                src, metrics, records = self._run_uksc(run_id, request.force_mock, request.source_path,
+                                                       request.client_name)
             else:
                 raise ValueError(f"unknown pipeline: {pipeline}")
             if src.data_status == DataStatus.BLOCKED_MISSING_SECRET and not src.records:
@@ -147,6 +157,22 @@ class PipelineRunner:
         src = EcommerceSource(self.settings).fetch(force_mock=force_mock, source_path=source_path)
         n = self.db.write_ecommerce_orders(run_id, src.records, src.data_status.value)
         return src, transform_ecommerce(src.records), n
+
+    def _run_uksc(self, run_id: str, force_mock: bool, source_path: str | None,
+                  client_name: str | None) -> tuple[SourceResult, Any, int]:
+        src = UkscSource(self.settings).fetch(force_mock=force_mock, source_path=source_path)
+        if not src.records:
+            return src, None, 0
+        host = src.raw_meta["host"]
+        # run musi istniec w tabeli runs zanim policzymy "poprzedni" - wpis wstepny, nadpisany na koncu run()
+        self.db.upsert_run({"run_id": run_id, "pipeline": "uksc_evidence", "run_status": RunStatus.PARTIAL,
+                            "data_status": src.data_status, "started_at": datetime.utcnow(),
+                            "client_name": client_name})
+        n = self.db.write_uksc_package(run_id, host, src.records, src.raw_meta, src.data_status.value, client_name)
+        prev_id = self.db.previous_uksc_run(host["name"], run_id)
+        prev_df = self.db.read_uksc_checks(prev_id) if prev_id else None
+        metrics = transform_uksc(src.records, host, src.raw_meta["collected_at_utc"], prev_df)
+        return src, metrics, n
 
     # ------------------------------------------------------------------
     def _notify(self, result: RunResult) -> None:

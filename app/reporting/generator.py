@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from app.core.models import CS2Metrics, DataStatus, EcommerceMetrics
+from app.core.models import CS2Metrics, DataStatus, EcommerceMetrics, UkscMetrics
 from app.reporting.html import render_html
 from app.reporting.narrative import build_narrative
 
@@ -59,6 +59,10 @@ class ReportGenerator:
         elif isinstance(metrics, EcommerceMetrics):
             md = render_ecommerce_markdown(payload, metrics)
             title = "E-Commerce Sales Report"
+        elif isinstance(metrics, UkscMetrics):
+            from app.reporting.uksc_report import render_uksc_markdown
+            md = render_uksc_markdown(payload, metrics)
+            title = "Dowod UKSC - raport zgodnosci technicznej stacji"
         else:
             md = f"# Report {pipeline}\n\n```json\n{json.dumps(payload, indent=2, default=str)}\n```\n"
             title = f"Report {pipeline}"
