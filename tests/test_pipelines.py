@@ -104,7 +104,8 @@ def test_duckdb_persistence(runner: PipelineRunner, settings: Settings):
     r1 = runner.run(RunRequest(pipeline="cs2_demo"))
     r2 = runner.run(RunRequest(pipeline="ecommerce_demo"))
     counts = runner.db.table_counts()
-    assert counts == {"runs": 2, "cs2_matches": 10, "ecommerce_orders": 20}
+    assert counts == {"runs": 2, "cs2_matches": 10, "ecommerce_orders": 20,
+                      "uksc_hosts": 0, "uksc_checks": 0, "uksc_inventory": 0}
     assert settings.duckdb_file.exists()
 
     latest = runner.db.latest_run()
@@ -151,8 +152,10 @@ def test_api_pipelines(client: TestClient):
     r = client.get("/pipelines")
     assert r.status_code == 200
     names = {p["name"] for p in r.json()}
-    assert names == {"cs2_demo", "ecommerce_demo"}
-    assert all(p["expected_data_status"] == "MOCK_DATA" for p in r.json())
+    assert names == {"cs2_demo", "ecommerce_demo", "uksc_evidence"}
+    # cs2/ecommerce: bez sekretow -> MOCK; uksc_evidence nie potrzebuje sekretow -> LIVE (dane z pliku klienta)
+    expected = {"cs2_demo": "MOCK_DATA", "ecommerce_demo": "MOCK_DATA", "uksc_evidence": "LIVE_DATA"}
+    assert {p["name"]: p["expected_data_status"] for p in r.json()} == expected
 
 
 def test_api_run_and_latest(client: TestClient):
