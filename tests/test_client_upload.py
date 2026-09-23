@@ -8,11 +8,10 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
-from app.core.models import CS2Metrics, DataStatus, EcommerceMetrics, RunRequest, RunStatus
+from app.core.models import DataStatus, RunRequest, RunStatus
 from app.reporting.narrative import build_narrative, template_narrative
 from app.sources.csv_mapper import _to_number, detect_mapping, map_dataframe, read_client_csv
 from app.transforms.ecommerce_transform import transform_ecommerce
-
 from tests.test_pipelines import PROJECT_ROOT, client, runner, settings  # noqa: F401  (fixtures)
 
 PL_FIXTURE = PROJECT_ROOT / "data" / "fixtures" / "client_export_pl.csv"
@@ -206,7 +205,6 @@ def test_api_upload_rejects_xlsx(client: TestClient, settings):  # noqa: F811
 
     Skutek dla klienta: eksport z Allegro/Shoper/Excela trzeba zapisać jako CSV.
     """
-    import io
 
     import openpyxl
 

@@ -1,0 +1,7 @@
+# Domyslne reguly gitleaks + wyjatek na atrapy kluczy w testach.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "atrapy w testach"
+regexes = ['''sk-fake''']

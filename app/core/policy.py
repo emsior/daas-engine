@@ -22,9 +22,10 @@ import hashlib
 import json
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, field_validator
 

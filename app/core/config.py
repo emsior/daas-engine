@@ -33,10 +33,13 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     app_name: str = "DaaS Engine"
     app_version: str = "0.3.0"
-    app_host: str = "0.0.0.0"
+    app_host: str = "0.0.0.0"  # noqa: S104  wymagane w kontenerze; lokalnie nadpisz APP_HOST=127.0.0.1
     app_port: int = 8000
     log_level: str = "INFO"
     daas_policy_enforce: bool = Field(default=False, description="Wymuszenie sprawdzania uprawnień policy w runtime")
+    # CORS domyslnie wylaczony: n8n i klienci API wolaja serwer-serwer, przegladarka niepotrzebna.
+    # Wlaczenie: CORS_ORIGINS='["https://prochpc.pl"]' w .env
+    cors_origins: list[str] = Field(default_factory=list)
 
     # --- sekrety (opcjonalne) ---
     faceit_api_key: str | None = Field(default=None)

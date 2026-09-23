@@ -5,7 +5,6 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
 from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 

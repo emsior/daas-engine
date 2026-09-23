@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
-from dataclasses import dataclass
 
 from app.core.models import CS2Metrics, DataStatus, EcommerceMetrics
 from app.reporting.html import render_html

@@ -19,7 +19,6 @@ from app.sources.csv_mapper import (
     STATUS_MAP,
     _norm,
     _to_number,
-    detect_mapping,
     map_dataframe,
     normalize_status_series,
     parse_dates,

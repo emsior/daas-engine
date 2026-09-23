@@ -37,7 +37,7 @@ def detect_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
     for _, r in df[(df["discount"] >= 0.25) & (df["profit"] >= 0)].iterrows():
         add(r, "DEEP_DISCOUNT", f"rabat {100*r['discount']:.0f}% zjada marżę do {r['margin_pct']:.1f}%")
 
-    for cat, g in df.groupby("category"):
+    for _cat, g in df.groupby("category"):
         if len(g) < 3:
             continue
         med = g["margin_pct"].median()

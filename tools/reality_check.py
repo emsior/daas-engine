@@ -1,11 +1,15 @@
-# -*- coding: utf-8 -*-
 """
 TWARDY TEST RZECZYWISTOSCI - warstwa 0 systemu kontroli.
 Zero AI, zero narracji. Same fakty, ktore albo sa, albo ich nie ma.
 Wynik: runtime/reality.json (biezacy) + runtime/reality_history.jsonl (historia).
 Uruchomienie: python tools/reality_check.py
 """
-import json, os, subprocess, sys, urllib.request, datetime, pathlib
+import datetime
+import json
+import os
+import pathlib
+import subprocess
+import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 OUT = ROOT / "runtime"
@@ -18,7 +22,7 @@ def http_status(url, timeout=12):
             return r.status, len(r.read(4096))
     except urllib.error.HTTPError as e:
         return e.code, 0
-    except Exception as e:
+    except Exception:
         return -1, 0
 
 def git(*args):

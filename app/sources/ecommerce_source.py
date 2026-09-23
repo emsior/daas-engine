@@ -43,11 +43,11 @@ class EcommerceSource:
                 return SourceResult(
                     records=[],
                     data_status=DataStatus.BLOCKED_MISSING_SECRET,
-                    detail=f"source_path outside allowed uploads directory",
+                    detail="source_path outside allowed uploads directory",
                 )
             if not p.exists():
                 return SourceResult(records=[], data_status=DataStatus.BLOCKED_MISSING_SECRET,
-                                    detail=f"source_path not found")
+                                    detail="source_path not found")
             return self._load_client_file(p)
 
         dataset_id = os.getenv("APIFY_DATASET_ID", "").strip()

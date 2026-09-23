@@ -41,3 +41,21 @@ markers = [
     "slow: testy granic rozmiaru operujace na plikach rzedu 10 MiB",
     "performance: pomiar czasu ingestu; prog jest luzny i sygnalizuje regresje rzedu wielkosci, nie wahania maszyny",
 ]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["runtime", "n8n", "docs"]
+
+[tool.ruff.lint]
+# E/F = bledy, B = bugbear, S = bezpieczenstwo (bandit), UP = nowoczesna skladnia, I = importy
+select = ["E4", "E7", "E9", "F", "B", "S", "UP", "I"]
+# styl, nie bledy: do posprzatania przy okazji, nie blokuje CI
+ignore = ["UP031", "UP042"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.File", "fastapi.Form", "fastapi.Depends", "fastapi.Query"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101", "S105", "S106", "S108", "S311", "E741", "F811"]  # F811: wzorzec fixture pytest
+"tools/**" = ["S603", "S607", "S310", "E741"]  # reality_check.py: tylko stale URL-e https do API GitHuba

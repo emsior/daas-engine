@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any
 
 import duckdb
 import pandas as pd
@@ -180,7 +181,7 @@ class DuckDBClient:
         df["played_at"] = pd.to_datetime(df["played_at"], utc=True).dt.tz_localize(None)
         with self.connect() as con:
             con.register("_cs2_tmp", df)
-            con.execute(f"INSERT OR REPLACE INTO cs2_matches SELECT {', '.join(CS2_COLUMNS)} FROM _cs2_tmp")
+            con.execute(f"INSERT OR REPLACE INTO cs2_matches SELECT {', '.join(CS2_COLUMNS)} FROM _cs2_tmp")  # noqa: S608  kolumny = stala CS2_COLUMNS
             con.unregister("_cs2_tmp")
         return int(len(df))
 
@@ -205,7 +206,7 @@ class DuckDBClient:
         df["order_date"] = pd.to_datetime(df["order_date"]).dt.date
         with self.connect() as con:
             con.register("_ecom_tmp", df)
-            con.execute(f"INSERT OR REPLACE INTO ecommerce_orders SELECT {', '.join(ECOM_COLUMNS)} FROM _ecom_tmp")
+            con.execute(f"INSERT OR REPLACE INTO ecommerce_orders SELECT {', '.join(ECOM_COLUMNS)} FROM _ecom_tmp")  # noqa: S608  kolumny = stala ECOM_COLUMNS
             con.unregister("_ecom_tmp")
         return int(len(df))
 
@@ -219,7 +220,7 @@ class DuckDBClient:
     def table_counts(self) -> dict[str, int]:
         with self.connect() as con:
             return {
-                t: int(con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])
+                t: int(con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])  # noqa: S608  t z krotki stalej
                 for t in ("runs", "cs2_matches", "ecommerce_orders")
             }
 

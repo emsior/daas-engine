@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -122,7 +122,7 @@ def _parse_faceit_match(item: dict[str, Any], stats: dict[str, Any], player_id: 
     deaths = int(ps.get("Deaths", 0))
     rounds_played = int(round_stats.get("Rounds", score_team + score_opp) or 1)
     adr = float(ps.get("ADR", 0) or 0)
-    played_at = datetime.fromtimestamp(int(item.get("finished_at", 0)), tz=timezone.utc)
+    played_at = datetime.fromtimestamp(int(item.get("finished_at", 0)), tz=UTC)
     return {
         "match_id": item["match_id"],
         "played_at": played_at,
