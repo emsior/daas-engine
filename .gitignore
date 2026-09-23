@@ -52,3 +52,6 @@ logs/
 ARCHIVE_PLAN_*.md
 notion_update_draft.md
 slack_alert_draft.md
+
+# log audytowy runtime (sciezki plikow klientow) - nigdy do repo
+runtime/*.jsonl

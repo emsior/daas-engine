@@ -33,13 +33,14 @@ def create_app() -> FastAPI:
         description="Source-Agnostic B2B Data-as-a-Service Engine (FastAPI + DuckDB + n8n)",
         lifespan=lifespan,
     )
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=False,
+            allow_methods=["GET", "POST"],
+            allow_headers=["Content-Type"],
+        )
     app.include_router(router)
     return app
 

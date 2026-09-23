@@ -14,7 +14,11 @@ COPY data ./data
 
 RUN pip install --upgrade pip && pip install .
 
-RUN mkdir -p runtime/reports
+# Kontener nie dziala jako root
+RUN useradd --system --uid 10001 --home-dir /srv/app daas \
+    && mkdir -p runtime/reports runtime/uploads \
+    && chown -R daas:daas /srv/app/runtime
+USER daas
 
 EXPOSE 8000
 
