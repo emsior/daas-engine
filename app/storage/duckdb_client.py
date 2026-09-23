@@ -10,7 +10,7 @@ import json
 import threading
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +74,54 @@ CREATE TABLE IF NOT EXISTS ecommerce_orders (
     data_status VARCHAR,
     PRIMARY KEY (run_id, order_id)
 );
+
+CREATE TABLE IF NOT EXISTS uksc_hosts (
+    run_id              VARCHAR NOT NULL,
+    host_name           VARCHAR NOT NULL,
+    os                  VARCHAR,
+    build               VARCHAR,
+    domain_joined       BOOLEAN,
+    is_admin_run        BOOLEAN,
+    collected_at_utc    TIMESTAMP,
+    collector_version   VARCHAR,
+    schema_version      VARCHAR,
+    package_sha256      VARCHAR,
+    integrity           VARCHAR,
+    client_name         VARCHAR,
+    data_status         VARCHAR,
+    PRIMARY KEY (run_id, host_name)
+);
+
+CREATE TABLE IF NOT EXISTS uksc_checks (
+    run_id                  VARCHAR NOT NULL,
+    host_name               VARCHAR NOT NULL,
+    control_id              VARCHAR NOT NULL,
+    uksc_ref                VARCHAR,
+    title                   VARCHAR,
+    status                  VARCHAR,
+    evidence_json           VARCHAR,
+    evidence_source         VARCHAR,
+    evidence_collected_at   TIMESTAMP,
+    evidence_hash           VARCHAR,
+    reference_threshold     VARCHAR,
+    owner                   VARCHAR,
+    exception_reason        VARCHAR,
+    last_test_date          DATE,
+    reviewer                VARCHAR,
+    reviewed_at             TIMESTAMP,
+    data_status             VARCHAR,
+    PRIMARY KEY (run_id, host_name, control_id)
+);
+
+CREATE TABLE IF NOT EXISTS uksc_inventory (
+    run_id      VARCHAR NOT NULL,
+    host_name   VARCHAR NOT NULL,
+    kind        VARCHAR NOT NULL,
+    name        VARCHAR NOT NULL,
+    version     VARCHAR,
+    publisher   VARCHAR,
+    PRIMARY KEY (run_id, host_name, kind, name)
+);
 """
 
 CS2_COLUMNS = [
@@ -84,6 +132,12 @@ CS2_COLUMNS = [
 ECOM_COLUMNS = [
     "run_id", "order_id", "order_date", "product", "category", "revenue", "cost",
     "profit", "discount", "status", "quantity", "data_status",
+]
+
+UKSC_CHECK_COLUMNS = [
+    "run_id", "host_name", "control_id", "uksc_ref", "title", "status", "evidence_json",
+    "evidence_source", "evidence_collected_at", "evidence_hash", "reference_threshold",
+    "owner", "exception_reason", "last_test_date", "reviewer", "reviewed_at", "data_status",
 ]
 
 
@@ -217,17 +271,102 @@ class DuckDBClient:
             ).df()
 
     # ------------------------------------------------------------------
+    # UKSC EVIDENCE
+    # ------------------------------------------------------------------
+    def write_uksc_package(self, run_id: str, host: dict[str, Any], checks: Iterable[dict[str, Any]],
+                           meta: dict[str, Any], data_status: str, client_name: str | None = None) -> int:
+        """Zapis jednej paczki collectora: host + kontrole + inwentarz. Idempotentny po (run_id, host, control)."""
+        host_name = host["name"]
+        rows = list(checks)
+        with self.connect() as con:
+            con.execute(
+                """
+                INSERT OR REPLACE INTO uksc_hosts
+                (run_id, host_name, os, build, domain_joined, is_admin_run, collected_at_utc,
+                 collector_version, schema_version, package_sha256, integrity, client_name, data_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    run_id, host_name, host.get("os"), host.get("build"),
+                    bool(host.get("domain_joined")), bool(host.get("is_admin_run")),
+                    _ts(meta.get("collected_at_utc")), meta.get("collector_version"), meta.get("schema_version"),
+                    meta.get("package_sha256"), meta.get("integrity"), client_name, data_status,
+                ],
+            )
+            if rows:
+                df = pd.DataFrame(rows)
+                df["run_id"] = run_id
+                df["host_name"] = host_name
+                df["data_status"] = data_status
+                df["evidence_json"] = df["evidence"].apply(
+                    lambda e: json.dumps(e, ensure_ascii=False, sort_keys=True, default=str)
+                )
+                df = df.reindex(columns=UKSC_CHECK_COLUMNS)
+                for col in ("evidence_collected_at", "reviewed_at"):
+                    df[col] = pd.to_datetime(df[col], utc=True, errors="coerce").dt.tz_localize(None)
+                df["last_test_date"] = pd.to_datetime(df["last_test_date"], errors="coerce").dt.date
+                con.register("_uksc_tmp", df)
+                con.execute(f"INSERT OR REPLACE INTO uksc_checks SELECT {', '.join(UKSC_CHECK_COLUMNS)} FROM _uksc_tmp")  # noqa: S608  kolumny = stala UKSC_CHECK_COLUMNS
+                con.unregister("_uksc_tmp")
+            inv = (meta.get("inventory") or {})
+            inv_rows = [
+                (run_id, host_name, "software", str(x.get("name")), x.get("version"), x.get("publisher"))
+                for x in (inv.get("software") or []) if x.get("name")
+            ]
+            if inv_rows:
+                con.executemany(
+                    "INSERT OR REPLACE INTO uksc_inventory (run_id, host_name, kind, name, version, publisher) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    inv_rows,
+                )
+        return int(len(rows))
+
+    def read_uksc_checks(self, run_id: str) -> pd.DataFrame:
+        with self.connect() as con:
+            return con.execute(
+                "SELECT * FROM uksc_checks WHERE run_id = ? ORDER BY control_id", [run_id]
+            ).df()
+
+    def previous_uksc_run(self, host_name: str, before_run_id: str) -> str | None:
+        """Ostatni wczesniejszy run tego samego hosta (do diffu miesiac-do-miesiaca)."""
+        with self.connect() as con:
+            df = con.execute(
+                """
+                SELECT h.run_id FROM uksc_hosts h
+                JOIN runs r ON r.run_id = h.run_id
+                WHERE h.host_name = ? AND h.run_id <> ?
+                  AND r.started_at < (SELECT started_at FROM runs WHERE run_id = ?)
+                ORDER BY r.started_at DESC LIMIT 1
+                """,
+                [host_name, before_run_id, before_run_id],
+            ).df()
+        return str(df.iloc[0]["run_id"]) if len(df) else None
+
+    # ------------------------------------------------------------------
     def table_counts(self) -> dict[str, int]:
         with self.connect() as con:
             return {
                 t: int(con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0])  # noqa: S608  t z krotki stalej
-                for t in ("runs", "cs2_matches", "ecommerce_orders")
+                for t in ("runs", "cs2_matches", "ecommerce_orders", "uksc_hosts", "uksc_checks", "uksc_inventory")
             }
 
 
 # ----------------------------------------------------------------------
 def _enum_val(v: Any) -> str:
     return getattr(v, "value", v)
+
+
+def _ts(v: Any) -> datetime | None:
+    """ISO-8601 (z 'Z' lub offsetem) -> naiwny UTC datetime; None gdy brak/blad."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, datetime):
+        return v if v.tzinfo is None else v.astimezone(UTC).replace(tzinfo=None)
+    try:
+        t = pd.to_datetime(v, utc=True)
+        return t.tz_localize(None).to_pydatetime()
+    except (TypeError, ValueError):
+        return None
 
 
 def _row_to_run(row: pd.Series) -> dict[str, Any]:

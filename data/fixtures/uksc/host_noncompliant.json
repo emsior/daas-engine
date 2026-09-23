@@ -1,0 +1,514 @@
+{
+  "schema_version": "1.0",
+  "collector_version": "0.1.0",
+  "collected_at_utc": "2026-09-22T08:15:00Z",
+  "host": {
+    "name": "WS-PRODUKCJA-07",
+    "os": "Windows 10 Pro",
+    "build": "19045",
+    "domain_joined": true,
+    "is_admin_run": true
+  },
+  "checks": [
+    {
+      "control_id": "ENC-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. k",
+      "title": "Szyfrowanie woluminu systemowego (BitLocker)",
+      "status": "FAIL",
+      "evidence": {
+        "volume": "C:",
+        "protection": "Off",
+        "method": null,
+        "pct": 0
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "ee5bd64dae7c89441e5f8a7e77c33904f9f80827d595660b262641057736ccef",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "INT-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 5 lit. c",
+      "title": "Secure Boot wlaczony",
+      "status": "FAIL",
+      "evidence": {
+        "secure_boot": false
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "6f108aa7f9bdc35522d42bbbde98781079058085395d8a9c184d782e46b20b35",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "INT-02",
+      "uksc_ref": "art. 8 ust. 1 pkt 5 lit. c",
+      "title": "TPM obecny i gotowy",
+      "status": "FAIL",
+      "evidence": {
+        "present": false,
+        "ready": false,
+        "version": null
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "5b7da7788bf98fa413e82fde8f1797dba1480613ae6acecb3bf7c685e82dfac4",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "INT-03",
+      "uksc_ref": "art. 8 ust. 1 pkt 5 lit. c",
+      "title": "Defender Tamper Protection",
+      "status": "FAIL",
+      "evidence": {
+        "tamper_protected": false
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "0c80c667d40101d5265bbeb1a4c877ed5494a1e1d419e39bf81b1a011018f5af",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "INT-04",
+      "uksc_ref": "art. 8 ust. 1 pkt 5 lit. c",
+      "title": "BCD: testsigning / nointegritychecks wylaczone",
+      "status": "FAIL",
+      "evidence": {
+        "testsigning": true,
+        "nointegritychecks": false
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "3defeb57126257c48721abd11904f9ee18075ced41f41e6bad968a170582a06f",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "INT-05",
+      "uksc_ref": "art. 8 ust. 1 pkt 5 lit. c",
+      "title": "Sterowniki bez podpisu",
+      "status": "FAIL",
+      "evidence": {
+        "unsigned_count": 3,
+        "sample": [
+          "oem7.inf"
+        ]
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "23db8dc1979552af748790de066fd45eb3d0cf475930428961cbadad751f2b38",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "ACC-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. n",
+      "title": "Konta w grupie Administratorzy",
+      "status": "WARN",
+      "evidence": {
+        "count": 6,
+        "members": [
+          "Administrator",
+          "user1",
+          "user2",
+          "user3",
+          "kasa",
+          "biuro"
+        ]
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "9965eb7a82a4cb9dcc7235d37d0d2d5916b4035ac43128e672c275fb05f8fb32",
+      "reference_threshold": "referencja: <= 2 konta imienne + wbudowane"
+    },
+    {
+      "control_id": "ACC-02",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. n",
+      "title": "Konto Gosc wylaczone",
+      "status": "FAIL",
+      "evidence": {
+        "guest_enabled": true
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "c2f80ac854162b8a4403d2d47bf8c072efbb88f230dfb124afb5dfe390aa726b",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "ACC-03",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. n",
+      "title": "Konta wlaczone bez wymaganego hasla",
+      "status": "FAIL",
+      "evidence": {
+        "count": 1,
+        "accounts": [
+          "kasa"
+        ]
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "965b9300b9edeef0763482ba5c56a789e56222536ec2e8598379a559d3e90b2d",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "ACC-04",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. n",
+      "title": "Polityka hasel (dlugosc, wiek, blokada)",
+      "status": "FAIL",
+      "evidence": {
+        "min_length": 0,
+        "max_age_days": 0,
+        "lockout_threshold": 0,
+        "history": 0
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "1ac97667d90d374a0a281b2a9d5eca7bd4e64ee49fea3196d9efb3f291fa377a",
+      "reference_threshold": "referencja: min. 12 znakow, blokada po <= 10 probach"
+    },
+    {
+      "control_id": "ACC-05",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. n",
+      "title": "UAC wlaczony z monitem",
+      "status": "FAIL",
+      "evidence": {
+        "enable_lua": 1,
+        "consent_prompt_admin": 0,
+        "secure_desktop": 0
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "6c20960f6015038cfde46712e3975a8009d016c553245548710831dca2b1c412",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "MON-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. g",
+      "title": "Dziennik Security wlaczony, rozmiar i retencja",
+      "status": "FAIL",
+      "evidence": {
+        "enabled": true,
+        "max_size_mb": 20,
+        "oldest_event_days": 2
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "743fce190cc4d4b42ff64feec1c3429ccb886ebb8943a4ba57b09d395c1d44ba",
+      "reference_threshold": "referencja: >= 64 MB, bez nadpisywania < 30 dni"
+    },
+    {
+      "control_id": "MON-02",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. g",
+      "title": "Polityka audytu: logowanie i zarzadzanie kontami",
+      "status": "FAIL",
+      "evidence": {
+        "logon": "No Auditing",
+        "account_management": "No Auditing"
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "c73ad1d0f0f2322c27c846930e625ebbccd91b200bce2220ae633956276e839d",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "UPD-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 5 lit. b",
+      "title": "Dni od ostatniej poprawki systemu",
+      "status": "FAIL",
+      "evidence": {
+        "last_hotfix": "2026-05-14",
+        "days_since": 131,
+        "last_hotfix_id": "KB5058411"
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "0f9c96a21eef5bc9177042646a3f794a5967d557efa91dca9446738c487abec0",
+      "reference_threshold": "OWU PZU Cyber UZ/162/2023: krytyczne poprawki <= 30 dni"
+    },
+    {
+      "control_id": "UPD-02",
+      "uksc_ref": "art. 8 ust. 1 pkt 5 lit. b",
+      "title": "Brak oczekujacego restartu po aktualizacji",
+      "status": "WARN",
+      "evidence": {
+        "reboot_pending": true
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "1ede3c574e928aaef4b02daa5a37a090c344583968ed6233f3cb1c37324d6428",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "UPD-03",
+      "uksc_ref": "zal. 4 pkt 16",
+      "title": "Wersja systemu wspierana przez producenta",
+      "status": "FAIL",
+      "evidence": {
+        "os": "Windows 10 Pro",
+        "build": "19045",
+        "supported": false,
+        "eol": "2025-10-14"
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "002ac0886f398103505b7fac92bb530c08e6ade2ebc459a020bc8e0aff186031",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "AV-01",
+      "uksc_ref": "zal. 4 pkt 13",
+      "title": "Ochrona antywirusowa aktywna (Defender lub inny)",
+      "status": "FAIL",
+      "evidence": {
+        "product": "Microsoft Defender",
+        "realtime": false,
+        "third_party": []
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "b10bd6b9c0770a244272e4a0cafffe34035099241eb551bf63bbd3133bdc5f36",
+      "reference_threshold": "OWU PZU Cyber UZ/162/2023: aktywny antywirus na wszystkich punktach koncowych"
+    },
+    {
+      "control_id": "AV-02",
+      "uksc_ref": "zal. 4 pkt 13",
+      "title": "Wiek sygnatur antywirusa",
+      "status": "WARN",
+      "evidence": {
+        "signature_age_days": 23,
+        "last_full_scan_days": 78
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "35c2b946ce8bb0aafcba906148cb2c9c929ee779e48d491de61cbfbf7b8ec74d",
+      "reference_threshold": "referencja: <= 7 dni"
+    },
+    {
+      "control_id": "BKP-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. f; zal. 4 pkt 10",
+      "title": "Agent kopii zapasowej obecny na stacji",
+      "status": "FAIL",
+      "evidence": {
+        "agents": [],
+        "last_backup_hint": null
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "85cf205abbe6ebfa20d71b7bc94efbbd9f863e5d9759eec87d1e892745ae62d1",
+      "reference_threshold": "OWU PZU Cyber UZ/162/2023: kopia do izolowanego srodowiska co <= 7 dni"
+    },
+    {
+      "control_id": "BKP-02",
+      "uksc_ref": "zal. 4 pkt 11",
+      "title": "Test odtworzenia kopii zapasowej",
+      "status": "MANUAL",
+      "evidence": {
+        "attestation_hint": "protokol z testu odtworzenia (data, zakres, wynik) - pole last_test_date"
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "4ed75190dd6d723b859de1c33e8199bd3bb430e2cedc0e3d1479b8cf4ed2c48d",
+      "reference_threshold": "OWU PZU Cyber UZ/162/2023: test odtworzenia co <= 365 dni"
+    },
+    {
+      "control_id": "MFA-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. l",
+      "title": "MFA dla dostepu zdalnego i kont uprzywilejowanych",
+      "status": "MANUAL",
+      "evidence": {
+        "attestation_hint": "raport rejestracji MFA z Entra ID / VPN (v1.1: automatycznie przez Graph API)",
+        "hello_for_business_policy": true
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "5189c6ff7e344bfa0df2a1abc0f8c16b7e04b23a918d8ea61ad6d1321b7496fc",
+      "reference_threshold": "OWU PZU Cyber UZ/162/2023: MFA dla zdalnego dostepu"
+    },
+    {
+      "control_id": "FW-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 5 lit. a",
+      "title": "Zapora Windows wlaczona na wszystkich profilach",
+      "status": "FAIL",
+      "evidence": {
+        "profiles": {
+          "Domain": true,
+          "Private": false,
+          "Public": true
+        },
+        "enabled_all_profiles": false,
+        "rdp_rule_present": true,
+        "rdp_rule_profiles": [
+          "Private",
+          "Public"
+        ]
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "251450c2bb02504edae227a827594e51015a58bab879551e6c398268f54ee200",
+      "reference_threshold": "OWU PZU Cyber UZ/162/2023: aktywna zapora sieciowa"
+    },
+    {
+      "control_id": "RDP-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 5 lit. a",
+      "title": "RDP wylaczony albo chroniony (NLA + zapora)",
+      "status": "FAIL",
+      "evidence": {
+        "rdp_enabled": true,
+        "listening_3389": true,
+        "nla_required": false
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "ec25cacbc0414ce4af68e7ba001ab7f29e7531d49825ccc48f0cb5caea7e34da",
+      "reference_threshold": "OWU PZU Cyber UZ/162/2023: RDP wylaczony, chyba ze chroniony MFA"
+    },
+    {
+      "control_id": "HYG-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. j",
+      "title": "Blokada sesji po bezczynnosci",
+      "status": "FAIL",
+      "evidence": {
+        "inactivity_timeout_sec": 0,
+        "screensaver_secure": false
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "f51729e9a792c64136ec54bce64fbf2ac5357aab6805f08dff0ee300ddacd872",
+      "reference_threshold": "referencja: <= 15 min"
+    },
+    {
+      "control_id": "HYG-02",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. j",
+      "title": "SMBv1 wylaczony",
+      "status": "FAIL",
+      "evidence": {
+        "smb1_enabled": true
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "b3d9983b9681774140f98df1df7767e3e327c87d72bb7d482c6a76e22a53a645",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "HYG-03",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. j",
+      "title": "Wykluczenia Defendera obejmujace cale drzewa",
+      "status": "FAIL",
+      "evidence": {
+        "exclusions_total": 4,
+        "tree_exclusions": [
+          "C:\\",
+          "C:\\Users"
+        ]
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "da87481bfa2f6296f0990ca7f241f00a5ae95d48c17968cb8aeed21ae444adae",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "HYG-04",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. j",
+      "title": "Wpisy autostartu / zadania / uslugi bez podpisu",
+      "status": "WARN",
+      "evidence": {
+        "unsigned_autoruns": 3,
+        "unsigned_tasks": 1,
+        "unsigned_services": 0
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "5693004e7668c6ecfe6c5084f4085a514ee7e38017312be034e4230fc6d535a0",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "AST-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. m; zal. 4 pkt 1",
+      "title": "Inwentarz stacji i oprogramowania zebrany",
+      "status": "PASS",
+      "evidence": {
+        "software_count": 84,
+        "hardware": true
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "e9a1607a655562f2f58ebd9ed03ac12325f28fb20a1bcdb9981341b602fb5db1",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "GOV-01",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. a",
+      "title": "Polityka bezpieczenstwa / dokumentacja SZBI",
+      "status": "MANUAL",
+      "evidence": {
+        "attestation_hint": "dokument polityki z data zatwierdzenia i wlascicielem"
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "b4b4a6b7b00fcb644f60cb2786bf6e2dc1dd78ddab7723d3d80504ca6ef4e6ea",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "GOV-02",
+      "uksc_ref": "art. 8 ust. 1 pkt 4",
+      "title": "Procedura zarzadzania incydentami (24h/72h/1 mies.)",
+      "status": "MANUAL",
+      "evidence": {
+        "attestation_hint": "procedura z kontaktem do CSIRT sektorowego"
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "728042066bebb8f8c847bc4036bdb99c4bf72823c4e48ebe28431213944e0296",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "GOV-03",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. i",
+      "title": "Szkolenia z cyberbezpieczenstwa (w tym kierownik, raz w roku)",
+      "status": "MANUAL",
+      "evidence": {
+        "attestation_hint": "lista szkolen z datami i podpisami"
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "1b566d79711e6eef1444186543e577c9b1151a195c245e8602d34ec35b51fdca",
+      "reference_threshold": null
+    },
+    {
+      "control_id": "GOV-04",
+      "uksc_ref": "art. 8 ust. 1 pkt 2 lit. e",
+      "title": "Rejestr dostawcow ICT i klauzule bezpieczenstwa",
+      "status": "MANUAL",
+      "evidence": {
+        "attestation_hint": "wykaz dostawcow + umowa z MSP (art. 14)"
+      },
+      "evidence_source": "powershell",
+      "evidence_collected_at": "2026-09-22T08:15:00Z",
+      "evidence_hash": "a2c96a0c971fa44f53525250d6a9736c7ff25cbc3e5b7ce4c409fecf608958e6",
+      "reference_threshold": null
+    }
+  ],
+  "inventory": {
+    "software": [
+      {
+        "name": "Microsoft 365 Apps for business",
+        "version": "16.0.19127.20000",
+        "publisher": "Microsoft Corporation"
+      },
+      {
+        "name": "7-Zip 24.09 (x64)",
+        "version": "24.09",
+        "publisher": "Igor Pavlov"
+      },
+      {
+        "name": "Google Chrome",
+        "version": "140.0.7339.128",
+        "publisher": "Google LLC"
+      }
+    ],
+    "hardware": {
+      "cpu": "Intel Core i5-12400",
+      "ram_gb": 16,
+      "disk_gb": 512,
+      "serial": "REDACTED-IN-FIXTURE"
+    }
+  },
+  "package_sha256": "adc57418723967dce15ada318f7c9c1df8850b4cf3f6830e9886d253cb2d6f75"
+}

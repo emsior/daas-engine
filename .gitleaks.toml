@@ -1,7 +1,17 @@
-# Domyslne reguly gitleaks + wyjatek na atrapy kluczy w testach.
+# gitleaks config for daas-engine
+# Reguly: domyslny zestaw. Allowlist PUNKTOWY (fixtures z syntetycznymi hashami, atrapy w testach), nigdy cale katalogi.
+title = "daas-engine gitleaks"
+
 [extend]
 useDefault = true
 
 [allowlist]
-description = "atrapy w testach"
-regexes = ['''sk-fake''']
+description = "syntetyczne hashe w fixtures UKSC + atrapy kluczy w testach"
+paths = [
+  '''data/fixtures/uksc/host_(compliant|noncompliant|no_admin)\.json$''',
+  '''schemas/uksc_collector_v1\.json$''',
+]
+regexes = [
+  '''(evidence_hash|package_sha256)"?\s*[:=]\s*"?[0-9a-f]{64}''',
+  '''sk-fake''',
+]

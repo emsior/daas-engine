@@ -5,9 +5,9 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-PipelineName = Literal["cs2_demo", "ecommerce_demo"]
+PipelineName = Literal["cs2_demo", "ecommerce_demo", "uksc_evidence"]
 
 
 class DataStatus(str, Enum):
@@ -180,3 +180,111 @@ class EcommerceMetrics(BaseModel):
     anomalies: list[dict[str, Any]]
     weekly: list[dict[str, Any]] = []          # per tydzień ISO: orders, revenue, profit, margin_pct, aov
     wow: dict[str, Any] | None = None          # ostatni tydzień vs poprzedni (delty); None gdy < 2 tygodni
+
+
+# ---------------------------------------------------------------------------
+# UKSC EVIDENCE (dowody zgodnosci technicznej ze stacji Windows)
+# ---------------------------------------------------------------------------
+UKSC_SCHEMA_VERSION = "1.0"
+
+
+class CheckStatus(str, Enum):
+    PASS = "PASS"  # noqa: S105  status kontroli, nie haslo
+    FAIL = "FAIL"
+    WARN = "WARN"
+    MANUAL = "MANUAL"            # wymaga poswiadczenia dokumentem / oswiadczeniem
+    NA_NO_ADMIN = "NA_NO_ADMIN"  # collector uruchomiony bez uprawnien administratora
+    ERROR = "ERROR"              # blad zbierania (wyjatek w collectorze) - nie zgadujemy
+
+
+class EvidenceSource(str, Enum):
+    POWERSHELL = "powershell"
+    RMM = "rmm"                          # v2: eksport z RMM
+    MANUAL_ATTESTATION = "manual_attestation"
+    DOCUMENT = "document"
+
+
+class UkscCheck(BaseModel):
+    """Jedna kontrola techniczna zmapowana na wymog UKSC (art. 8 / zal. 4).
+
+    Pola owner/exception_reason/last_test_date/reviewer wypelnia MSP po stronie raportu,
+    collector ich nie zna - dlatego sa opcjonalne.
+    """
+    model_config = ConfigDict(extra="forbid")
+
+    control_id: str = Field(..., pattern=r"^[A-Z]{2,5}-\d{2}$", description="np. ENC-01")
+    uksc_ref: str = Field(..., description="np. 'art. 8 ust. 1 pkt 2 lit. k'")
+    title: str
+    status: CheckStatus
+    evidence: dict[str, Any] = Field(default_factory=dict)
+    evidence_source: EvidenceSource = EvidenceSource.POWERSHELL
+    evidence_collected_at: datetime
+    evidence_hash: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    reference_threshold: str | None = Field(
+        default=None, description="Prog referencyjny (np. 'OWU PZU Cyber: krytyczne poprawki <= 30 dni')"
+    )
+    owner: str | None = None
+    exception_reason: str | None = None
+    last_test_date: date | None = None
+    reviewer: str | None = None
+    reviewed_at: datetime | None = None
+
+
+class UkscHost(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    os: str
+    build: str
+    domain_joined: bool = False
+    is_admin_run: bool = False
+
+
+class UkscSoftware(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    version: str | None = None
+    publisher: str | None = None
+
+
+class UkscPackage(BaseModel):
+    """Kontrakt wyjscia collectora (tools/uksc-collector.ps1). Jeden plik JSON per stacja."""
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: str
+    collector_version: str
+    collected_at_utc: datetime
+    host: UkscHost
+    checks: list[UkscCheck]
+    inventory: dict[str, Any] = Field(default_factory=dict)
+    package_sha256: str = Field(..., pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("schema_version")
+    @classmethod
+    def _schema_supported(cls, v: str) -> str:
+        if v != UKSC_SCHEMA_VERSION:
+            raise ValueError(f"unsupported schema_version {v!r}, expected {UKSC_SCHEMA_VERSION!r}")
+        return v
+
+
+class UkscMetrics(BaseModel):
+    host: str
+    collected_at_utc: datetime
+    is_admin_run: bool
+    checks_total: int
+    passed: int
+    failed: int
+    warned: int
+    manual: int
+    na_no_admin: int
+    errors: int
+    coverage_pct: float = Field(description="udzial kontroli udokumentowanych automatycznie (PASS+FAIL+WARN)")
+    pass_pct: float = Field(description="PASS / (PASS+FAIL+WARN), 0 gdy brak")
+    by_article: list[dict[str, Any]]
+    failed_controls: list[dict[str, Any]]
+    manual_controls: list[dict[str, Any]]
+    diff_vs_previous: dict[str, Any] | None = None
+    # metryka paczki drukowana w raporcie, zeby odbiorca mogl sam zweryfikowac hash (review PR #9)
+    package_sha256: str | None = None
+    integrity: str | None = None

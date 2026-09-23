@@ -55,3 +55,8 @@ slack_alert_draft.md
 
 # log audytowy runtime (sciezki plikow klientow) - nigdy do repo
 runtime/*.jsonl
+
+# UKSC: prawdziwe paczki z collectora i surowe zrzuty - NIGDY do repo (fixtures sa w data/fixtures/uksc/)
+uksc_*_[0-9]*.json
+uksc_*_[0-9]*.json.sha256
+uksc/raw/

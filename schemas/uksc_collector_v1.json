@@ -1,0 +1,244 @@
+{
+  "$defs": {
+    "CheckStatus": {
+      "enum": [
+        "PASS",
+        "FAIL",
+        "WARN",
+        "MANUAL",
+        "NA_NO_ADMIN",
+        "ERROR"
+      ],
+      "title": "CheckStatus",
+      "type": "string"
+    },
+    "EvidenceSource": {
+      "enum": [
+        "powershell",
+        "rmm",
+        "manual_attestation",
+        "document"
+      ],
+      "title": "EvidenceSource",
+      "type": "string"
+    },
+    "UkscCheck": {
+      "additionalProperties": false,
+      "description": "Jedna kontrola techniczna zmapowana na wymog UKSC (art. 8 / zal. 4).\n\nPola owner/exception_reason/last_test_date/reviewer wypelnia MSP po stronie raportu,\ncollector ich nie zna - dlatego sa opcjonalne.",
+      "properties": {
+        "control_id": {
+          "description": "np. ENC-01",
+          "pattern": "^[A-Z]{2,5}-\\d{2}$",
+          "title": "Control Id",
+          "type": "string"
+        },
+        "uksc_ref": {
+          "description": "np. 'art. 8 ust. 1 pkt 2 lit. k'",
+          "title": "Uksc Ref",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "status": {
+          "$ref": "#/$defs/CheckStatus"
+        },
+        "evidence": {
+          "additionalProperties": true,
+          "title": "Evidence",
+          "type": "object"
+        },
+        "evidence_source": {
+          "$ref": "#/$defs/EvidenceSource",
+          "default": "powershell"
+        },
+        "evidence_collected_at": {
+          "format": "date-time",
+          "title": "Evidence Collected At",
+          "type": "string"
+        },
+        "evidence_hash": {
+          "anyOf": [
+            {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Hash"
+        },
+        "reference_threshold": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Prog referencyjny (np. 'OWU PZU Cyber: krytyczne poprawki <= 30 dni')",
+          "title": "Reference Threshold"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Owner"
+        },
+        "exception_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exception Reason"
+        },
+        "last_test_date": {
+          "anyOf": [
+            {
+              "format": "date",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Test Date"
+        },
+        "reviewer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewer"
+        },
+        "reviewed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reviewed At"
+        }
+      },
+      "required": [
+        "control_id",
+        "uksc_ref",
+        "title",
+        "status",
+        "evidence_collected_at"
+      ],
+      "title": "UkscCheck",
+      "type": "object"
+    },
+    "UkscHost": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "os": {
+          "title": "Os",
+          "type": "string"
+        },
+        "build": {
+          "title": "Build",
+          "type": "string"
+        },
+        "domain_joined": {
+          "default": false,
+          "title": "Domain Joined",
+          "type": "boolean"
+        },
+        "is_admin_run": {
+          "default": false,
+          "title": "Is Admin Run",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "os",
+        "build"
+      ],
+      "title": "UkscHost",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Kontrakt wyjscia collectora (tools/uksc-collector.ps1). Jeden plik JSON per stacja.",
+  "properties": {
+    "schema_version": {
+      "title": "Schema Version",
+      "type": "string"
+    },
+    "collector_version": {
+      "title": "Collector Version",
+      "type": "string"
+    },
+    "collected_at_utc": {
+      "format": "date-time",
+      "title": "Collected At Utc",
+      "type": "string"
+    },
+    "host": {
+      "$ref": "#/$defs/UkscHost"
+    },
+    "checks": {
+      "items": {
+        "$ref": "#/$defs/UkscCheck"
+      },
+      "title": "Checks",
+      "type": "array"
+    },
+    "inventory": {
+      "additionalProperties": true,
+      "title": "Inventory",
+      "type": "object"
+    },
+    "package_sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "title": "Package Sha256",
+      "type": "string"
+    }
+  },
+  "required": [
+    "schema_version",
+    "collector_version",
+    "collected_at_utc",
+    "host",
+    "checks",
+    "package_sha256"
+  ],
+  "title": "UkscPackage",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://prochpc.pl/schemas/uksc_collector_v1.json"
+}
