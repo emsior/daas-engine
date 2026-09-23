@@ -29,7 +29,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
-        run: pip install -e ".[dev]" ruff
+        run: pip install -e ".[dev]" "ruff==0.16.8"
       - name: OPSEC check
         run: |
           ! git grep -iE "mcq089[@]|bukmache[r]|bettin[g]" -- ':!*.png' ':!*.mp4'
@@ -62,7 +62,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install scanners
-        run: pip install semgrep zizmor
+        run: pip install "semgrep==1.177.0" "zizmor==1.30.1" # wersje przypiete, podbija Dependabot/recznie
       - name: SAST (semgrep) — blokuje ERROR, WARNING raportuje
         run: |
           semgrep scan --config p/python --config p/owasp-top-ten --metrics off --severity ERROR --error .
