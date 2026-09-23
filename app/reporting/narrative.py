@@ -124,17 +124,17 @@ def template_narrative(pipeline: str, metrics: Any, client_name: str | None = No
     if isinstance(metrics, UkscMetrics):
         m = metrics
         s = (f"Stacja {m.host}: {m.checks_total} kontroli technicznych, z czego {m.passed + m.failed + m.warned} "
-             f"udokumentowanych automatycznie ({m.coverage_pct}% pokrycia), {m.manual} wymaga poswiadczenia dokumentem")
+             f"udokumentowanych automatycznie ({m.coverage_pct}% pokrycia), {m.manual} wymaga poświadczenia dokumentem")
         if m.na_no_admin:
-            s += f", {m.na_no_admin} nie zebrano (collector bez uprawnien administratora)"
+            s += f", {m.na_no_admin} nie zebrano (collector bez uprawnień administratora)"
         s += f". Wynik kontroli automatycznych: {m.passed} PASS, {m.failed} FAIL, {m.warned} WARN ({m.pass_pct}% PASS)."
         if m.failed_controls:
             ids = ", ".join(str(c["control_id"]) for c in m.failed_controls[:5])
-            s += f" Do naprawy w pierwszej kolejnosci: {ids}."
+            s += f" Do naprawy w pierwszej kolejności: {ids}."
         if m.diff_vs_previous:
             d = m.diff_vs_previous
-            s += f" Vs poprzedni run: poprawione {len(d['improved'])}, regresje {len(d['regressed'])}."
-        s += " Raport dokumentuje stan techniczny stacji (zapis wg art. 10 UKSC); nie zastepuje oceny prawnej SZBI."
+            s += f" Względem poprzedniego runu: poprawione {len(d['improved'])}, regresje {len(d['regressed'])}."
+        s += " Raport dokumentuje stan techniczny stacji (zapis wg art. 10 UKSC); nie zastępuje oceny prawnej SZBI."
         return s
 
     return "Streszczenie niedostępne dla tego typu metryk."

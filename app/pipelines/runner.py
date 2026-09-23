@@ -38,7 +38,7 @@ PIPELINES: dict[str, dict[str, Any]] = {
         "required_secrets": ["APIFY_TOKEN"],
     },
     "uksc_evidence": {
-        "description": "Dowod UKSC: kontrole techniczne stacji Windows zmapowane na art. 8 UKSC (paczka z uksc-collector.ps1)",
+        "description": "Dowód UKSC: kontrole techniczne stacji Windows zmapowane na art. 8 UKSC (paczka z uksc-collector.ps1)",
         "domain": "compliance",
         "required_secrets": [],
     },

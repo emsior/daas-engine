@@ -62,7 +62,7 @@ class ReportGenerator:
         elif isinstance(metrics, UkscMetrics):
             from app.reporting.uksc_report import render_uksc_markdown
             md = render_uksc_markdown(payload, metrics)
-            title = "Dowod UKSC - raport zgodnosci technicznej stacji"
+            title = "Dowód UKSC — raport zgodności technicznej stacji"
         else:
             md = f"# Report {pipeline}\n\n```json\n{json.dumps(payload, indent=2, default=str)}\n```\n"
             title = f"Report {pipeline}"

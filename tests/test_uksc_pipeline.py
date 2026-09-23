@@ -182,12 +182,14 @@ def test_pipeline_run_writes_db_and_report(runner: PipelineRunner):
     counts = runner.db.table_counts()
     assert counts["uksc_hosts"] == 1 and counts["uksc_checks"] == 32 and counts["uksc_inventory"] == 3
     md = Path(res.report_path).read_text(encoding="utf-8")
-    assert "Dowod UKSC" in md and "art. 8 ust. 1 pkt 2 lit. k" in md
+    assert "Dowód UKSC" in md and "art. 8 ust. 1 pkt 2 lit. k" in md
+    # nazwy dla czytelnika po polsku (dane w paczce zostają w ASCII)
+    assert "Polityka bezpieczeństwa / dokumentacja SZBI" in md and "zał. 4 pkt 11" in md and "zal. 4" not in md
     assert "Demo Sp. z o.o." in md
     # review PR #9: raport musi zawierac hash paczki i status integralnosci, zeby dalo sie go zweryfikowac
     pkg_hash = _load("host_compliant.json")["package_sha256"]
-    assert pkg_hash in md and "Integralnosc paczki przy imporcie: **ok**" in md
-    for banned in ("certyfikuje", "gwarantuje zgodnosc", "pelna zgodnosc"):
+    assert pkg_hash in md and "Integralność paczki przy imporcie: **ok**" in md
+    for banned in ("certyfikuje", "gwarantuje zgodnosc", "pelna zgodnosc", "gwarantuje zgodność", "pełna zgodność"):
         assert banned not in md.lower()
     html = Path(res.report_html_path).read_text(encoding="utf-8")
     assert "<table" in html
@@ -206,7 +208,7 @@ def test_pipeline_diff_vs_previous_run_same_host(runner: PipelineRunner, setting
     assert r1.run_status == RunStatus.SUCCESS and r2.run_status == RunStatus.SUCCESS
     assert r1.data_status == DataStatus.LIVE_DATA
     md = Path(r2.report_path).read_text(encoding="utf-8")
-    assert "Zmiany vs poprzedni run" in md
+    assert "Zmiany względem poprzedniego runu" in md
     assert "ENC-01" in md.split("Poprawione")[1].split("\n")[0]
     assert runner.db.previous_uksc_run(raw_fail["host"]["name"], r2.run_id) == r1.run_id
 
