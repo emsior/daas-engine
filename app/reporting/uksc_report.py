@@ -88,6 +88,11 @@ def render_uksc_markdown(payload: dict[str, Any], m: UkscMetrics) -> str:
         lines.append("")
     lines.append("## Metryka paczki dowodowej")
     lines.append("")
+    lines.append(f"- `package_sha256`: `{m.package_sha256 or 'brak'}`")
+    lines.append(f"- Integralnosc paczki przy imporcie: **{m.integrity or 'nieznana'}**")
+    lines.append("- Weryfikacja: sha256 z posortowanej konkatenacji `evidence_hash` wszystkich kontroli "
+                 "(kazdy `evidence_hash` = sha256 kanonicznego JSON dowodu) musi dac powyzszy `package_sha256`.")
+    lines.append("")
     lines.append("Raport jest zapisem operacyjnym w rozumieniu art. 10 UKSC: stan techniczny stacji w chwili zebrania, "
                  "z hashem paczki weryfikowalnym niezaleznie. Nie stanowi oceny prawnej ani potwierdzenia wdrozenia SZBI.")
     lines.append("")

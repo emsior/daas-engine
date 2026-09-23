@@ -118,6 +118,23 @@ def test_source_rejects_tampered_package(settings: Settings):
     assert res.data_status == DataStatus.BLOCKED_MISSING_SECRET and "package_sha256" in res.detail
 
 
+def test_source_rejects_package_with_stripped_hashes(settings: Settings):
+    # review PR #9: usuniecie wszystkich evidence_hash nie moze omijac wykrywania edycji dowodu
+    raw = _load("host_compliant.json")
+    raw["checks"][3]["evidence"]["tamper_protected"] = False
+    for c in raw["checks"]:
+        c.pop("evidence_hash", None)
+    res = UkscSource(settings).fetch(source_path=_put_upload(settings, raw, "stripped.json"))
+    assert res.data_status == DataStatus.BLOCKED_MISSING_SECRET
+    assert "evidence_hash missing" in res.detail and res.records == []
+    # wystarczy jedna kontrola collectora bez hasha
+    raw = _load("host_compliant.json")
+    raw["checks"][0].pop("evidence_hash", None)
+    res = UkscSource(settings).fetch(source_path=_put_upload(settings, raw, "one_missing.json"))
+    assert res.data_status == DataStatus.BLOCKED_MISSING_SECRET
+    assert "evidence_hash missing" in res.detail
+
+
 def test_source_rejects_path_outside_uploads(settings: Settings, tmp_path: Path):
     outside = tmp_path / "elsewhere.json"
     outside.write_text(json.dumps(_load("host_compliant.json")), encoding="utf-8")
@@ -167,6 +184,9 @@ def test_pipeline_run_writes_db_and_report(runner: PipelineRunner):
     md = Path(res.report_path).read_text(encoding="utf-8")
     assert "Dowod UKSC" in md and "art. 8 ust. 1 pkt 2 lit. k" in md
     assert "Demo Sp. z o.o." in md
+    # review PR #9: raport musi zawierac hash paczki i status integralnosci, zeby dalo sie go zweryfikowac
+    pkg_hash = _load("host_compliant.json")["package_sha256"]
+    assert pkg_hash in md and "Integralnosc paczki przy imporcie: **ok**" in md
     for banned in ("certyfikuje", "gwarantuje zgodnosc", "pelna zgodnosc"):
         assert banned not in md.lower()
     html = Path(res.report_html_path).read_text(encoding="utf-8")

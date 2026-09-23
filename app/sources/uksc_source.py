@@ -80,6 +80,12 @@ class UkscSource:
             errs = "; ".join(f"{'.'.join(str(x) for x in e['loc'])}: {e['msg']}" for e in exc.errors()[:3])
             return _blocked(f"package failed schema validation: {errs}")
 
+        # 0) kontrola z collectora BEZ hasha = paczka nieweryfikowalna. Usuniecie hashy nie moze
+        #    omijac wykrywania edycji (review PR #9). Brak hasha dopuszczamy tylko dla zrodel innych
+        #    niz collector (np. przyszle poswiadczenia reczne).
+        missing = [c.control_id for c in pkg.checks if c.evidence_source == "powershell" and not c.evidence_hash]
+        if missing:
+            return _blocked(f"evidence_hash missing for collector checks: {', '.join(missing[:5])}")
         # 1) kazdy dowod: hash policzony z tresci musi zgadzac sie z zadeklarowanym (wykrywa edycje evidence)
         for c in pkg.checks:
             if c.evidence_hash and c.evidence_source == "powershell" and compute_evidence_hash(c.evidence) != c.evidence_hash:

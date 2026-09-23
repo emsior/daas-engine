@@ -172,6 +172,8 @@ class PipelineRunner:
         prev_id = self.db.previous_uksc_run(host["name"], run_id)
         prev_df = self.db.read_uksc_checks(prev_id) if prev_id else None
         metrics = transform_uksc(src.records, host, src.raw_meta["collected_at_utc"], prev_df)
+        metrics.package_sha256 = src.raw_meta.get("package_sha256")
+        metrics.integrity = src.raw_meta.get("integrity")
         return src, metrics, n
 
     # ------------------------------------------------------------------

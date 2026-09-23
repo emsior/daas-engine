@@ -285,3 +285,6 @@ class UkscMetrics(BaseModel):
     failed_controls: list[dict[str, Any]]
     manual_controls: list[dict[str, Any]]
     diff_vs_previous: dict[str, Any] | None = None
+    # metryka paczki drukowana w raporcie, zeby odbiorca mogl sam zweryfikowac hash (review PR #9)
+    package_sha256: str | None = None
+    integrity: str | None = None
