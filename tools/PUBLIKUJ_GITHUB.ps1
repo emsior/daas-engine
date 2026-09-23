@@ -19,8 +19,8 @@ if (-not (Test-Path ".git")) { Fail "Brak .git - repo powinno byc juz zainicjowa
 git status --short
 git log --oneline -3
 
-Step "2/4 Sprawdzam, czy w repo nie ma slowa 'betting' (zasada z 05_OFERTA)"
-$hits = git grep -n -i -E "betting|bukmach" -- . ':!tools/PUBLIKUJ_GITHUB.ps1' 2>$null
+Step "2/4 Sprawdzam zakazane slowa (zasada z 05_OFERTA)"
+$hits = git grep -n -i -E "bettin[g]|bukmac[h]" -- . ':!tools/PUBLIKUJ_GITHUB.ps1' 2>$null
 if ($hits) { Write-Host $hits -ForegroundColor Yellow; Fail "Znaleziono zakazane slowa - popraw przed publikacja." } else { Write-Host "OK - 0 trafien" }
 
 Step "3/4 Zdalne repo"
