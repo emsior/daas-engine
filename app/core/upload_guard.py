@@ -14,9 +14,10 @@ import hashlib
 import io
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 # --------------------------------------------------------------------------- limity
 MAX_UPLOAD_BYTES = 10_485_760          # 10 MiB

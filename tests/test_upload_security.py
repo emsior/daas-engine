@@ -26,7 +26,6 @@ from app.core.upload_guard import (
 )
 from app.pipelines.runner import PipelineRunner
 from app.storage.duckdb_client import DuckDBClient
-
 from tests.test_pipelines import PROJECT_ROOT, client, runner, settings  # noqa: F401  (fixtures)
 
 HEADER = "Data,Kwota,Produkt\n"

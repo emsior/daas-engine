@@ -13,7 +13,7 @@ PipelineName = Literal["cs2_demo", "ecommerce_demo"]
 class DataStatus(str, Enum):
     LIVE_DATA = "LIVE_DATA"
     MOCK_DATA = "MOCK_DATA"
-    BLOCKED_MISSING_SECRET = "BLOCKED_MISSING_SECRET"
+    BLOCKED_MISSING_SECRET = "BLOCKED_MISSING_SECRET"  # noqa: S105  nazwa statusu, nie sekret
 
 
 class RunStatus(str, Enum):
