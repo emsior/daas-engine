@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -128,7 +127,9 @@ def main() -> None:
     for kind, name in (("compliant", "host_compliant.json"), ("noncompliant", "host_noncompliant.json"), ("no_admin", "host_no_admin.json")):
         (OUT / name).write_text(json.dumps(build(kind), indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         print("wrote", OUT / name)
-    from app.core.models import UkscPackage  # noqa: WPS433 - import lokalny, zeby skrypt dzialal bez instalacji pakietu
+    from app.core.models import (
+        UkscPackage,  # noqa: WPS433 - import lokalny, zeby skrypt dzialal bez instalacji pakietu
+    )
     SCHEMA_OUT.parent.mkdir(parents=True, exist_ok=True)
     schema = UkscPackage.model_json_schema()
     schema["$schema"] = "https://json-schema.org/draft/2020-12/schema"

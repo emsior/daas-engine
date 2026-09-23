@@ -189,7 +189,7 @@ UKSC_SCHEMA_VERSION = "1.0"
 
 
 class CheckStatus(str, Enum):
-    PASS = "PASS"
+    PASS = "PASS"  # noqa: S105  status kontroli, nie haslo
     FAIL = "FAIL"
     WARN = "WARN"
     MANUAL = "MANUAL"            # wymaga poswiadczenia dokumentem / oswiadczeniem

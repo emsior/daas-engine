@@ -28,7 +28,7 @@ def transform_uksc(records: list[dict[str, Any]], host: dict[str, Any], collecte
     coverage = round(100.0 * automated / n, 1) if n else 0.0
     pass_pct = round(100.0 * counts["PASS"] / automated, 1) if automated else 0.0
 
-    by_article: "OrderedDict[str, dict[str, Any]]" = OrderedDict()
+    by_article: OrderedDict[str, dict[str, Any]] = OrderedDict()
     for r in records:
         ref = str(r.get("uksc_ref") or "brak odniesienia")
         row = by_article.setdefault(ref, {"uksc_ref": ref, "controls": 0, "pass": 0, "fail": 0, "warn": 0,

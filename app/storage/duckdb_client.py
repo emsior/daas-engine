@@ -10,7 +10,7 @@ import json
 import threading
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -306,7 +306,7 @@ class DuckDBClient:
                     df[col] = pd.to_datetime(df[col], utc=True, errors="coerce").dt.tz_localize(None)
                 df["last_test_date"] = pd.to_datetime(df["last_test_date"], errors="coerce").dt.date
                 con.register("_uksc_tmp", df)
-                con.execute(f"INSERT OR REPLACE INTO uksc_checks SELECT {', '.join(UKSC_CHECK_COLUMNS)} FROM _uksc_tmp")
+                con.execute(f"INSERT OR REPLACE INTO uksc_checks SELECT {', '.join(UKSC_CHECK_COLUMNS)} FROM _uksc_tmp")  # noqa: S608  kolumny = stala UKSC_CHECK_COLUMNS
                 con.unregister("_uksc_tmp")
             inv = (meta.get("inventory") or {})
             inv_rows = [
@@ -361,7 +361,7 @@ def _ts(v: Any) -> datetime | None:
     if v is None or v == "":
         return None
     if isinstance(v, datetime):
-        return v if v.tzinfo is None else v.astimezone(timezone.utc).replace(tzinfo=None)
+        return v if v.tzinfo is None else v.astimezone(UTC).replace(tzinfo=None)
     try:
         t = pd.to_datetime(v, utc=True)
         return t.tz_localize(None).to_pydatetime()

@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.core.config import Settings, reset_settings_cache
 from app.core.models import DataStatus, RunRequest, RunStatus, UkscPackage
@@ -66,11 +67,11 @@ def test_fixtures_validate_and_hashes_consistent():
 def test_package_rejects_unknown_fields_and_bad_schema_version():
     raw = _load("host_compliant.json")
     raw["checks"][0]["surprise"] = 1
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         UkscPackage.model_validate(raw)
     raw = _load("host_compliant.json")
     raw["schema_version"] = "9.9"
-    with pytest.raises(Exception):
+    with pytest.raises(ValidationError):
         UkscPackage.model_validate(raw)
 
 
