@@ -5,7 +5,8 @@ All notable changes to DaaS Engine. Dates are merge dates (Europe/Warsaw).
 ## [1.0.0] — 2026-09-28
 
 Closure release. The engine is complete for its current scope and moves to maintenance mode:
-the offer stays live, the code is frozen, and only documentation changes land on `main`.
+the offer stays live and the code is frozen. `app/` and `tests/` change only for a paying client's
+concrete requirement or the same request from three different clients (`AGENTS.md`, rule 8).
 
 ### Merged pull requests
 

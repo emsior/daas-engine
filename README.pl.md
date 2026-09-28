@@ -19,7 +19,7 @@ Dostawa: uruchamiane przyciskiem (webhook n8n) albo automatycznie wg harmonogram
 spadku przychodu ≥15% lub marży ≥3 pp. Dostajesz kod źródłowy i workflow — rozwiązanie jest Twoje.
 Możesz hostować u siebie (Docker) albo zlecić hosting.
 
-*In short (EN): upload any messy sales export (CSV/XLSX) → get an automated weekly HTML report with
+*In short (EN): send any messy sales export (CSV/XLSX) → get an automated weekly HTML report with
 KPIs, week-over-week deltas, loss-making orders and anomaly flags. FastAPI + DuckDB + n8n, tests included.*
 
 Kontakt: prochpc@gmail.com
@@ -149,7 +149,7 @@ n8n bez Dockera: `npx n8n` (wymaga Node 18+). W workflow podmień URL `http://ap
 |---|---|---|
 | GET | `/health` | status, wersja, ścieżka bazy, mapa obecności sekretów (bez wartości) |
 | GET | `/pipelines` | lista pipeline'ów + jaki `data_status` jest oczekiwany przy obecnej konfiguracji |
-| POST | `/run` | uruchom pipeline; body `{"pipeline": "cs2_demo" \| "ecommerce_demo", "force_mock": false, "notify": false}` |
+| POST | `/run` | uruchom pipeline; body `{"pipeline": "cs2_demo" \| "ecommerce_demo" \| "uksc_evidence", "force_mock": false, "notify": false}` |
 | GET | `/runs/latest?pipeline=` | ostatni run (opcjonalnie per pipeline) |
 | GET | `/runs?limit=20` | historia runów |
 | GET | `/runs/{run_id}` | konkretny run |

@@ -2,7 +2,7 @@
 
 Live: https://prochpc.pl
 
-Source-agnostic **Data-as-a-Service** engine. A client drops in a CSV/XLSX export; the engine detects the column mapping, loads it into DuckDB, computes KPIs and anomalies, and returns a ready-to-send HTML report with week-over-week deltas and a plain-language summary.
+Source-agnostic **Data-as-a-Service** engine. A client sends a CSV/XLSX export; the engine detects the column mapping, loads it into DuckDB, computes KPIs and anomalies, and returns a ready-to-send HTML report with week-over-week deltas and a plain-language summary.
 
 **Stack:** Python 3.11+ (CI: 3.11, 3.12) · FastAPI · DuckDB · n8n · Docker
 

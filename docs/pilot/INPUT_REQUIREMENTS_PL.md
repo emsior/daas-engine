@@ -5,6 +5,8 @@ DaaS Engine obsługuje elastyczne formaty plików, jednak aby raport był w 100%
 ### 1. Formaty plików
 - Obsługiwane rozszerzenia: `.csv`, `.xlsx`, `.xls`, `.tsv`, `.txt`.
 - Maksymalny rozmiar pliku w pilocie: **25 MB**.
+- Formaty i limit powyżej dotyczą plików przekazanych w pilocie. Samoobsługowy endpoint
+  `POST /upload` przyjmuje wyłącznie `.csv` do 10 MiB.
 - Kodowanie: UTF-8 lub Windows-1250 (auto-detekcja).
 
 ### 2. Wymagane informacje w wierszach
