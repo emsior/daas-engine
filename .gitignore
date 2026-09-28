@@ -60,3 +60,7 @@ runtime/*.jsonl
 uksc_*_[0-9]*.json
 uksc_*_[0-9]*.json.sha256
 uksc/raw/
+
+# Robocze propozycje agentow i lokalny raport demo - nie do repo
+.agents-proponowane/
+runtime/**/latest_demo_report.html
