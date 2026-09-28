@@ -1,8 +1,10 @@
 # DaaS Engine — automated weekly reports from any client dataset
 
+Live: https://prochpc.pl
+
 Source-agnostic **Data-as-a-Service** engine. A client drops in a CSV/XLSX export; the engine detects the column mapping, loads it into DuckDB, computes KPIs and anomalies, and returns a ready-to-send HTML report with week-over-week deltas and a plain-language summary.
 
-**Stack:** Python 3.11 · FastAPI · DuckDB · n8n · Docker
+**Stack:** Python 3.11+ (CI: 3.11, 3.12) · FastAPI · DuckDB · n8n · Docker
 
 *[Polski README →](README.pl.md)*
 
@@ -37,12 +39,13 @@ app/
 └── reporting/    HTML / Markdown / JSON generators + narrative
 ```
 
-Two reference pipelines ship with the engine:
+Three reference pipelines ship with the engine:
 
 | Pipeline | Domain | Source |
 |---|---|---|
-| `ecommerce_demo` | orders, revenue, margin | Apify, CSV/XLSX upload, or fixture |
+| `ecommerce_demo` | orders, revenue, margin | Apify, CSV upload, local CSV/XLSX file, or fixture |
 | `cs2_demo` | esports match performance | FACEIT API or fixture |
+| `uksc_evidence` | compliance evidence: Windows workstation controls mapped to UKSC/NIS2 | JSON package from `tools/uksc-collector.ps1`, or fixture |
 
 ---
 
@@ -106,7 +109,7 @@ curl "http://localhost:8000/reports/ecommerce_demo/latest?fmt=html"
 | `GET` | `/health` | Service status, version, secret availability map |
 | `GET` | `/pipelines` | Available pipelines and their data status |
 | `POST` | `/run` | Execute a pipeline (`pipeline`, `force_mock`, `notify`) |
-| `POST` | `/upload` | Accept CSV/XLSX, return detected column mapping |
+| `POST` | `/upload` | Accept a CSV file (XLSX is rejected), return detected column mapping |
 | `GET` | `/runs/latest` | Most recent run, optionally filtered |
 | `GET` | `/runs?limit=20` | Run history |
 | `GET` | `/runs/{run_id}` | A specific run |
@@ -155,3 +158,7 @@ pytest
 `tests/test_pipelines.py` covers pipeline orchestration and metric computation; `tests/test_client_upload.py` covers column detection and the upload → run flow. CI runs on every push (`.github/workflows/ci.yml`).
 
 See [VALIDATION.md](VALIDATION.md) for the manual validation checklist and known limitations.
+
+---
+
+Contact: prochpc@gmail.com · https://prochpc.pl

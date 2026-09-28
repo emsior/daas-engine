@@ -1,4 +1,6 @@
 # DaaS Engine — automatyczny raport tygodniowy z Twoich danych
+Live: https://prochpc.pl
+
 *[English README →](README.md)*
 
 **Wysyłasz eksport CSV/XLSX ze sklepu, CRM-a albo księgowości → dostajesz gotowy raport HTML.
@@ -28,14 +30,15 @@ Kontakt: prochpc@gmail.com
 
 Silnik analityczny, który bierze dane z dowolnego źródła (API / CSV / fixtures), liczy metryki biznesowe i generuje raport JSON + Markdown — orkiestrowany przez n8n, sterowany przez HTTP.
 
-Stack: **FastAPI · DuckDB · pandas · n8n · Docker Compose**. Python 3.11.
+Stack: **FastAPI · DuckDB · pandas · n8n · Docker Compose**. Python 3.11+ (CI: 3.11, 3.12).
 
-Dwa pipeline'y demo na jednym silniku (ta sama baza, ten sam kontrakt API):
+Trzy pipeline'y na jednym silniku (ta sama baza, ten sam kontrakt API):
 
 | pipeline | domena | metryki | źródło LIVE | fallback |
 |---|---|---|---|---|
 | `cs2_demo` | esports (portfolio) | win rate, K/D, rating, ADR, HS%, form score, breakdown map | FACEIT Data API (`FACEIT_API_KEY` + `FACEIT_PLAYER_NICKNAME`) | `data/fixtures/cs2_matches.json` |
 | `ecommerce_demo` | e-commerce B2B | zamówienia, przychód, koszt, zysk, marża %, AOV, zamówienia stratne, anomalie, top kategorie/produkty | Apify dataset (`APIFY_TOKEN` + `APIFY_DATASET_ID`) lub własny CSV (`ECOMMERCE_CSV_PATH`) | `data/fixtures/ecommerce_orders.csv` |
+| `uksc_evidence` | zgodność (UKSC/NIS2) | kontrole techniczne stacji Windows zmapowane na art. 8 UKSC, status i dowód każdej kontroli, `package_sha256` | paczka JSON z `tools/uksc-collector.ps1` | `data/fixtures/uksc/host_compliant.json` |
 
 **Zasada nr 1: brak klucza nie jest błędem.** Pipeline automatycznie przełącza się na fixtures i oznacza wynik jako `MOCK_DATA`. Wszystko działa od pierwszego `docker compose up` bez żadnego sekretu.
 
@@ -43,7 +46,7 @@ Dwa pipeline'y demo na jednym silniku (ta sama baza, ten sam kontrakt API):
 
 *Powyżej: raport z przykładowego eksportu sklepu (15 zamówień) — od uploadu pliku do gotowego HTML w < 1 s, bez ręcznej roboty. Pełny raport: `runtime/reports/<pipeline>_latest.html` po pierwszym runie.*
 
-**Zasada nr 2 (v0.2): plik klienta zamiast integracji.** `POST /upload` przyjmuje dowolny eksport CSV/XLSX (Allegro, Shoper, WooCommerce, Baselinker, Excel "po swojemu" — polskie nagłówki, `1 299,00 zł`, `30%`, `Zrealizowane`), mapuje kolumny heurystycznie i zwraca gotowy payload do `POST /run`. Wynik = `LIVE_DATA`, raport HTML pod linkiem. Demo dla klienta: 2 requesty, zero kodu.
+**Zasada nr 2 (v0.2): plik klienta zamiast integracji.** `POST /upload` przyjmuje dowolny eksport CSV — plik XLSX odrzuca, więc Excel najpierw zapisz jako CSV (Allegro, Shoper, WooCommerce, Baselinker, Excel "po swojemu" — polskie nagłówki, `1 299,00 zł`, `30%`, `Zrealizowane`), mapuje kolumny heurystycznie i zwraca gotowy payload do `POST /run`. Wynik = `LIVE_DATA`, raport HTML pod linkiem. Demo dla klienta: 2 requesty, zero kodu.
 
 ---
 
@@ -284,8 +287,12 @@ Kontrakt API i workflow n8n nie zmieniają się.
 pytest -v
 ```
 
-34 testy: detekcja sekretów, oba pipeline'y w trybie mock, `force_mock`, zapis i idempotencja w tymczasowej bazie DuckDB, transformacje na pustym wejściu, monotoniczność form score, kody odpowiedzi wszystkich endpointów (200/400/404/415/422), mapper CSV (formaty liczb PL/EN, polskie nagłówki, dopełnianie kolumn, odrzucenie pliku bez przychodu), flow upload→run→HTML, fallback narracji przy braku klucza i przy błędzie sieci.
+195 testów, m.in.: detekcja sekretów, pipeline'y w trybie mock, `force_mock`, zapis i idempotencja w tymczasowej bazie DuckDB, transformacje na pustym wejściu, monotoniczność form score, kody odpowiedzi wszystkich endpointów (200/400/404/415/422), mapper CSV (formaty liczb PL/EN, polskie nagłówki, dopełnianie kolumn, odrzucenie pliku bez przychodu), flow upload→run→HTML, fallback narracji przy braku klucza i przy błędzie sieci.
 
 CI: `.github/workflows/ci.yml` — pytest na Python 3.11/3.12, smoke API przez curl, build obrazu Docker + smoke w kontenerze.
 
 Szczegółowa lista kontrolna: [VALIDATION.md](VALIDATION.md).
+
+---
+
+Kontakt: prochpc@gmail.com · https://prochpc.pl
