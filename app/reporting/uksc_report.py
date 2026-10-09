@@ -13,6 +13,7 @@ from typing import Any
 
 from app.core.models import UkscMetrics
 from app.reporting import uksc_pl
+from app.reporting.narrative import LLM_ANNOTATION
 from app.reporting.safe import md_code, md_text
 
 STATUS_LABEL = uksc_pl.STATUS_LABEL
@@ -34,6 +35,9 @@ def render_uksc_markdown(payload: dict[str, Any], m: UkscMetrics) -> str:
     lines.append(f"# Dowód UKSC — raport zgodności technicznej stacji `{md_code(m.host)}`")
     lines.append("")
     lines.append(f"> {md_text(payload.get('narrative', ''))}")
+    if payload.get("narrative_source") == "LLM":
+        lines.append(">")
+        lines.append(f"> _{LLM_ANNOTATION}_")
     lines.append("")
     lines.append(f"- Klient: **{client}** · Stacja: **{host}** · Zebrano (UTC): {m.collected_at_utc:%Y-%m-%d %H:%M}")
     lines.append(f"- Uprawnienia collectora: {'administrator' if m.is_admin_run else 'UŻYTKOWNIK (część kontroli niezebrana)'}")

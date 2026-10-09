@@ -341,7 +341,8 @@ def test_u11_same_filename_twice_distinct_ids(client: TestClient, settings):  # 
 # U12 — policy wyłączona (kompatybilność MVP)
 # ===========================================================================
 def test_u12_policy_disabled_keeps_working(client: TestClient, settings):  # noqa: F811
-    """DAAS_POLICY_ENFORCE=false: upload działa, brak nieoczekiwanych odmów."""
+    """DAAS_POLICY_ENFORCE=false (jawnie; domyslnie policy jest wlaczone): upload dziala, brak nieoczekiwanych odmow."""
+    settings.daas_policy_enforce = False
     assert settings.daas_policy_enforce is False
     r = client.post("/upload", files={"file": ("dane.csv", csv_bytes(5), "text/csv")})
     assert r.status_code == 200, r.text[:200]

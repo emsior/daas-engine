@@ -15,9 +15,14 @@ from app.storage.duckdb_client import DuckDBClient
 from tests.conftest import PROJECT_ROOT
 
 
-@pytest.fixture()
-def secure_runner(tmp_path, monkeypatch):
-    """Runner z izolowanym tmp środowiskiem."""
+@pytest.fixture(params=[False, True], ids=["policy-off", "policy-on"])
+def secure_runner(tmp_path, monkeypatch, request):
+    """Runner z izolowanym tmp środowiskiem.
+
+    Dwa warianty: policy wylaczone (straznik sciezki w zrodle — jedyna bariera, jak w v1.0) i policy
+    wlaczone (domyslne od 2.0.0 — odmowa wczesniej, jako PolicyError). Obie bariery musza trzymac.
+    """
+    monkeypatch.setenv("DAAS_POLICY_ENFORCE", "true" if request.param else "false")
     rt = tmp_path / "runtime"
     rt.mkdir()
     (rt / "reports").mkdir()
@@ -36,6 +41,15 @@ def secure_runner(tmp_path, monkeypatch):
     reset_settings_cache()
 
 
+def _denied(runner: PipelineRunner, error: str | None) -> bool:
+    """Policy-off: odmowa ze strazniki zrodla ("outside allowed uploads..."). Policy-on: PolicyError (katalog
+    roboczy = runtime/) albo, dla sciezek w runtime/ poza uploads/, nadal straznik zrodla (obrona warstwowa)."""
+    err = error or ""
+    if runner.settings.daas_policy_enforce:
+        return "PolicyError" in err or "outside" in err
+    return "outside" in err
+
+
 # -----------------------------------------------------------------------
 # PATH TRAVERSAL
 # -----------------------------------------------------------------------
@@ -49,7 +63,7 @@ class TestPathTraversal:
             source_path="C:/Windows/System32/drivers/etc/hosts",
         ))
         assert res.run_status == RunStatus.FAILED
-        assert "outside" in (res.error or "")
+        assert _denied(runner, res.error)
 
     def test_rejects_relative_traversal(self, secure_runner):
         runner, _ = secure_runner
@@ -58,7 +72,7 @@ class TestPathTraversal:
             source_path="../../../etc/passwd",
         ))
         assert res.run_status == RunStatus.FAILED
-        assert "outside" in (res.error or "")
+        assert _denied(runner, res.error)
 
     def test_rejects_path_outside_uploads(self, secure_runner):
         runner, tmp_path = secure_runner
@@ -72,7 +86,7 @@ class TestPathTraversal:
             source_path=str(evil),
         ))
         assert res.run_status == RunStatus.FAILED
-        assert "outside" in (res.error or "")
+        assert _denied(runner, res.error)
 
     def test_accepts_file_inside_uploads(self, secure_runner):
         runner, tmp_path = secure_runner
@@ -105,7 +119,7 @@ class TestPathTraversal:
             source_path=str(payload),
         ))
         assert res.run_status == RunStatus.FAILED
-        assert "outside" in (res.error or "")
+        assert _denied(runner, res.error)
 
 
 # -----------------------------------------------------------------------
@@ -170,7 +184,7 @@ class TestTenantIsolation:
         foreign = next((sa.reports_path.parent / "uploads").glob("*.csv"))
         r = cb.post("/run", json={"pipeline": "ecommerce_demo", "source_path": str(foreign)})
         body = r.json()
-        assert body["run_status"] == "FAILED" and body["error"].startswith("SOURCE_UNAVAILABLE")
+        assert body["run_status"] == "FAILED" and body["error"].startswith("POLICY_DENIED")
         assert str(foreign) not in r.text
 
     @pytest.mark.parametrize("ident", ["..%2f..%2fetc%2fpasswd", "%2e%2e%2f%2e%2e%2fsecret", "..\\..\\x"])

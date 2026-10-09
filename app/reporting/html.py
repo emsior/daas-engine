@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 from datetime import datetime
 
+from app.reporting.narrative import source_label
 from app.reporting.safe import render_markdown
 
 CSS = """
@@ -39,9 +40,11 @@ def render_html(md_text: str, *, title: str, data_status: str, narrative: str | 
     badge_cls = {"LIVE_DATA": "b-live", "MOCK_DATA": "b-mock"}.get(data_status, "b-blocked")
     summary_html = ""
     if narrative:
+        src_text = (source_label(narrative_source) if narrative_source == "LLM"
+                    else f"źródło streszczenia: {narrative_source or 'TEMPLATE'}")
         summary_html = (
             f'<div class="summary"><strong>Streszczenie</strong><br>{html.escape(narrative)}'
-            f'<div class="src">źródło streszczenia: {narrative_source or "TEMPLATE"} · liczby pochodzą wyłącznie z policzonych metryk</div></div>'
+            f'<div class="src">{html.escape(src_text)} · liczby pochodzą wyłącznie z policzonych metryk</div></div>'
         )
     head = (
         f'<div class="meta">{html.escape(client_name) + " · " if client_name else ""}'

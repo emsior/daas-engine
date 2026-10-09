@@ -58,3 +58,25 @@ def test_powershell_launcher_sends_the_key():
     ps1 = (PROJECT_ROOT / "URUCHOM_DAAS_PYTHON.ps1").read_text(encoding="utf-8")
     assert "X-API-Key" in ps1 and "DAAS_API_KEY" in ps1
     assert "--host 127.0.0.1" in ps1
+
+
+# ---------------------------------------------------------------- Docker / compose (H2)
+def test_dockerfile_takes_host_from_config_not_from_cmd():
+    df = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    cmd = next(line for line in df.splitlines() if line.startswith("CMD"))
+    assert "--host" not in cmd and "0.0.0.0" not in cmd  # noqa: S104
+    assert "APP_HOST=0.0.0.0" in df  # noqa: S104  (tylko w obrazie, jawnie)
+    assert "APP_ENV=prod" in df
+    assert "/health" in df  # HEALTHCHECK na publicznym /health
+
+
+def test_compose_publishes_ports_on_loopback_only_and_requires_the_key():
+    import yaml
+
+    compose = yaml.safe_load((PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    for name, svc in compose["services"].items():
+        for port in svc.get("ports", []):
+            assert str(port).startswith("127.0.0.1:"), (name, port)
+    for name in ("app", "n8n"):
+        assert "DAAS_API_KEY" in compose["services"][name]["environment"]
+        assert ":?" in compose["services"][name]["environment"]["DAAS_API_KEY"]

@@ -13,7 +13,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.routes import public_router, router
 from app.core.auth import API_KEY_HEADER
-from app.core.config import Settings, get_settings
+from app.core.config import Settings, get_settings, installed_version
 from app.core.observability import (
     RequestIdMiddleware,
     SecurityHeadersMiddleware,
@@ -53,7 +53,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     app = FastAPI(
         title=settings.app_name,
-        version=settings.app_version,
+        version=installed_version(settings.app_version),
         description="Source-Agnostic B2B Data-as-a-Service Engine (FastAPI + DuckDB + n8n)",
         lifespan=lifespan,
         # /docs, /redoc i /openapi.json wylacznie przy APP_ENV=dev

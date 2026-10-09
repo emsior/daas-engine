@@ -6,6 +6,7 @@ i oznacza wynik jako MOCK_DATA.
 from __future__ import annotations
 
 from functools import lru_cache
+from importlib import metadata
 from pathlib import Path
 
 from pydantic import Field
@@ -33,12 +34,20 @@ class Settings(BaseSettings):
     #: "dev" wlacza /docs, /redoc, /openapi.json i auto-reload. Wszystko inne (domyslnie "prod") je wylacza.
     app_env: str = "prod"
     app_name: str = "DaaS Engine"
-    app_version: str = "0.3.0"
+    #: Wersja awaryjna; zrodlem prawdy w /health jest wersja zainstalowanego pakietu (installed_version()).
+    app_version: str = "2.0.0"
     #: Domyslnie loopback. W kontenerze obraz ustawia APP_HOST=0.0.0.0 jawnie (Dockerfile).
     app_host: str = "127.0.0.1"
     app_port: int = 8000
     log_level: str = "INFO"
-    daas_policy_enforce: bool = Field(default=False, description="Wymuszenie sprawdzania uprawnień policy w runtime")
+    daas_policy_enforce: bool = Field(
+        default=True,
+        description="Policy w runtime (granica katalogu roboczego, audyt, fail-closed). DAAS_POLICY_ENFORCE=false wyłącza.",
+    )
+    daas_llm_narrative: bool = Field(
+        default=False,
+        description="Opt-in: streszczenie raportu przez zewnętrzny LLM. Sam ANTHROPIC_API_KEY niczego nie włącza.",
+    )
     #: Klucz API (naglowek X-API-Key). Brak = fail-closed: kazda trasa poza /health i /ready odpowiada 401,
     #: a start na adresie innym niz loopback jest odmawiany. Minimum 16 znakow. Nigdy nie trafia do odpowiedzi ani logow.
     daas_api_key: str | None = Field(default=None, repr=False)
@@ -61,6 +70,13 @@ class Settings(BaseSettings):
 
     # --- HTTP do źródeł zewnętrznych ---
     source_timeout_sec: float = 10.0
+
+    @property
+    def llm_api_key(self) -> str | None:
+        """Klucz LLM tylko gdy wlaczono DAAS_LLM_NARRATIVE. Inaczej None: zadne dane nie wychodza do dostawcy."""
+        if self.daas_llm_narrative and not _is_blank(self.anthropic_api_key):
+            return (self.anthropic_api_key or "").strip()
+        return None
 
     # ---------- ścieżki absolutne ----------
     def _abs(self, p: str) -> Path:
@@ -126,6 +142,14 @@ class Settings(BaseSettings):
     def ensure_dirs(self) -> None:
         self.duckdb_file.parent.mkdir(parents=True, exist_ok=True)
         self.reports_path.mkdir(parents=True, exist_ok=True)
+
+
+def installed_version(fallback: str) -> str:
+    """Wersja zainstalowanego pakietu `daas-engine` (metadane); `fallback` gdy pakiet nie jest zainstalowany."""
+    try:
+        return metadata.version("daas-engine")
+    except metadata.PackageNotFoundError:
+        return fallback
 
 
 @lru_cache(maxsize=1)

@@ -45,7 +45,29 @@ def isolated_env(tmp_path: Path):
     }
 
 
-def test_policy_runtime_disabled_by_default(isolated_env):
+def test_policy_runtime_enabled_by_default(isolated_env, monkeypatch):
+    """H3: bez jawnej konfiguracji policy jest WLACZONE i fail-closed (wczesniej test utrwalal false)."""
+    import app.core.policy as policy_mod
+    monkeypatch.delenv("DAAS_POLICY_ENFORCE", raising=False)
+    monkeypatch.setattr(policy_mod, "WORKSPACE", isolated_env["runtime_dir"].resolve())
+
+    settings = Settings(
+        _env_file=None,
+        duckdb_path=str(isolated_env["duckdb_file"]),
+        reports_dir=str(isolated_env["reports_dir"]),
+    )
+    assert settings.daas_policy_enforce is True
+    runner = PipelineRunner(settings=settings)
+    result = runner.run(RunRequest(pipeline="ecommerce_demo", source_path=str(isolated_env["evil_csv"])))
+
+    assert result.run_status == RunStatus.FAILED
+    assert "PolicyError" in (result.error or "")
+    audit_log = isolated_env["duckdb_file"].parent / "audit.jsonl"
+    assert audit_log.exists()
+
+
+def test_policy_runtime_can_be_disabled_explicitly(isolated_env):
+    """Zachowana zgodnosc wsteczna: DAAS_POLICY_ENFORCE=false wylacza policy (stare pokrycie testu 'disabled')."""
     settings = Settings(
         duckdb_path=str(isolated_env["duckdb_file"]),
         reports_dir=str(isolated_env["reports_dir"]),

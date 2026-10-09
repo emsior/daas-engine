@@ -5,13 +5,14 @@ services:
     env_file:
       - .env
     environment:
+      DAAS_API_KEY: ${DAAS_API_KEY:?DAAS_API_KEY must be set (min. 16 characters)}
       DUCKDB_PATH: /srv/app/runtime/daas.duckdb
       REPORTS_DIR: /srv/app/runtime/reports
       FIXTURES_DIR: /srv/app/data/fixtures
     volumes:
       - ./runtime:/srv/app/runtime
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"   # tylko loopback; publiczny dostep przez reverse proxy z TLS
     networks:
       - daas_network
     restart: unless-stopped
@@ -32,11 +33,12 @@ services:
       N8N_BASIC_AUTH_PASSWORD: ${N8N_BASIC_AUTH_PASSWORD:?N8N_BASIC_AUTH_PASSWORD must be set}
       N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?N8N_ENCRYPTION_KEY must be set}
       DAAS_APP_URL: http://app:8000
+      DAAS_API_KEY: ${DAAS_API_KEY:?DAAS_API_KEY must be set (min. 16 characters)}  # workflowy wysylaja go w X-API-Key
     volumes:
       - n8n_data:/home/node/.n8n
       - ./n8n:/srv/workflows:ro
     ports:
-      - "5678:5678"
+      - "127.0.0.1:5678:5678"
     depends_on:
       - app
     networks:

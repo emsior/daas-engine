@@ -49,7 +49,7 @@ class PipelineRunner:
     def __init__(self, settings: Settings | None = None, db: DuckDBClient | None = None):
         self.settings = settings or get_settings()
         self.db = db or DuckDBClient(self.settings.duckdb_file)
-        self.reports = ReportGenerator(self.settings.reports_path)
+        self.reports = ReportGenerator(self.settings.reports_path, llm_api_key=self.settings.llm_api_key)
 
     # ------------------------------------------------------------------
     def list_pipelines(self) -> list[PipelineInfo]:

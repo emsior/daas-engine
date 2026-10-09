@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from app.core import audit
 from app.core.auth import require_api_key
+from app.core.config import installed_version
 from app.core.models import (
     HealthResponse,
     PipelineInfo,
@@ -55,7 +56,7 @@ def _runner(request: Request) -> PipelineRunner:
 def health(request: Request) -> HealthResponse:
     """Liveness. Publiczny i minimalny: status, wersja, tryb. Bez sciezek, konfiguracji i sekretow."""
     s = request.app.state.settings
-    return HealthResponse(app=s.app_name, version=s.app_version, timestamp=datetime.utcnow())
+    return HealthResponse(app=s.app_name, version=installed_version(s.app_version), timestamp=datetime.utcnow())
 
 
 @public_router.get("/ready", response_model=ReadyResponse, tags=["system"], responses={503: {"model": ReadyResponse}})

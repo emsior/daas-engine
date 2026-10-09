@@ -110,7 +110,7 @@ def test_narrative_falls_back_to_template(monkeypatch):
 
 
 def test_narrative_llm_error_falls_back(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-fake")
+    # H7: LLM jest opt-in; klucz przekazuje wywolujacy (runner robi to tylko przy DAAS_LLM_NARRATIVE=true)
     import app.reporting.narrative as n
 
     def boom(*a, **k):
@@ -118,7 +118,7 @@ def test_narrative_llm_error_falls_back(monkeypatch):
 
     monkeypatch.setattr(n.httpx, "post", boom)
     m = transform_ecommerce([])
-    _, source = build_narrative("ecommerce_demo", m)
+    _, source = build_narrative("ecommerce_demo", m, api_key="sk-fake")
     assert source == "TEMPLATE"
 
 
@@ -152,7 +152,9 @@ def test_runner_with_client_file_is_live(runner):  # noqa: F811
 def test_runner_missing_source_path_fails_cleanly(runner):  # noqa: F811
     res = runner.run(RunRequest(pipeline="ecommerce_demo", source_path="/does/not/exist.csv"))
     assert res.run_status == RunStatus.FAILED
-    assert "outside" in (res.error or "") or "not found" in (res.error or "")
+    # H3: policy jest domyslnie wlaczone, wiec sciezka poza workspace konczy sie PolicyError zanim zrodlo ja zobaczy
+    err = res.error or ""
+    assert "outside" in err or "not found" in err or "PolicyError" in err
 
 
 # ---------------------------------------------------------------------------

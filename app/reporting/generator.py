@@ -10,7 +10,7 @@ from typing import Any
 
 from app.core.models import CS2Metrics, DataStatus, EcommerceMetrics, UkscMetrics
 from app.reporting.html import render_html
-from app.reporting.narrative import build_narrative
+from app.reporting.narrative import build_narrative, source_label
 from app.reporting.safe import md_text
 
 
@@ -24,8 +24,10 @@ class ReportPaths:
 
 
 class ReportGenerator:
-    def __init__(self, reports_dir: Path):
+    def __init__(self, reports_dir: Path, llm_api_key: str | None = None):
+        """`llm_api_key` ustawiony tylko przy DAAS_LLM_NARRATIVE=true; None = zawsze szablon, zero ruchu do dostawcy."""
         self.reports_dir = Path(reports_dir)
+        self.llm_api_key = llm_api_key
         self.reports_dir.mkdir(parents=True, exist_ok=True)
 
     # ------------------------------------------------------------------
@@ -38,7 +40,7 @@ class ReportGenerator:
         md_path = self.reports_dir / f"{base}.md"
         html_path = self.reports_dir / f"{base}.html"
 
-        narrative, narrative_source = build_narrative(pipeline, metrics, client_name)
+        narrative, narrative_source = build_narrative(pipeline, metrics, client_name, api_key=self.llm_api_key)
 
         payload = {
             "run_id": run_id,
@@ -128,7 +130,7 @@ def render_cs2_markdown(payload: dict[str, Any], m: CS2Metrics) -> str:
     s += f"## WNIOSEK\n\n**{verdict}** — form score **{m.form_score}/100**, trend **{m.form_trend}**, "
     s += f"win rate {m.win_rate}% z {m.matches} meczów, K/D {m.kd_ratio}, rating {m.avg_rating}.\n\n"
     if payload.get("narrative"):
-        s += f"> {md_text(payload['narrative'])}\n>\n> _streszczenie: {payload.get('narrative_source', 'TEMPLATE')}_\n\n"
+        s += f"> {md_text(payload['narrative'])}\n>\n> _{source_label(payload.get('narrative_source'))}_\n\n"
     s += "## Metryki zbiorcze\n\n"
     s += _table([
         {"metryka": "Mecze (W/L/T)", "wartość": f"{m.matches} ({m.wins}/{m.losses}/{m.ties})"},
@@ -172,7 +174,7 @@ def render_ecommerce_markdown(payload: dict[str, Any], m: EcommerceMetrics) -> s
               f"zamówienia {w['orders']} vs {w['orders_prev']}"
               + (" — ⚠ ostatni tydzień niepełny" if w.get("partial_week") else "") + ".\n\n")
     if payload.get("narrative"):
-        s += f"> {md_text(payload['narrative'])}\n>\n> _streszczenie: {payload.get('narrative_source', 'TEMPLATE')}_\n\n"
+        s += f"> {md_text(payload['narrative'])}\n>\n> _{source_label(payload.get('narrative_source'))}_\n\n"
     s += "## Metryki zbiorcze\n\n"
     s += _table([
         {"metryka": "Zamówienia (wszystkie)", "wartość": m.orders_total},

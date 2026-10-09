@@ -104,12 +104,15 @@ def test_internal_runner_contract_keeps_absolute_paths(runner: PipelineRunner):
     assert Path(res.report_path).is_absolute() and Path(res.report_path).exists()
 
 
-def test_failed_run_error_is_a_code_with_a_generic_message(client: TestClient, settings: Settings):
+@pytest.mark.parametrize(("policy_on", "code"), [(True, "POLICY_DENIED"), (False, "SOURCE_UNAVAILABLE")])
+def test_failed_run_error_is_a_code_with_a_generic_message(client: TestClient, runner: PipelineRunner,
+                                                           settings: Settings, policy_on: bool, code: str):
+    runner.settings.daas_policy_enforce = policy_on
     r = client.post("/run", json={"pipeline": "ecommerce_demo", "source_path": "/etc/passwd"})
     assert r.status_code == 200
     body = r.json()
     assert body["run_status"] == "FAILED"
-    assert body["error"].startswith("SOURCE_UNAVAILABLE: ")
+    assert body["error"].startswith(f"{code}: ")
     assert body["run_id"] in body["error"]
     assert "/etc/passwd" not in r.text and "outside" not in r.text
     _no_abs_paths(r.text, settings)
