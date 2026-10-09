@@ -20,7 +20,9 @@ from app.core.observability import (
     configure_logging,
     get_request_id,
 )
+from app.core.ratelimit import RateLimiter
 from app.core.startup import validate_startup
+from app.core.upload_guard import cleanup_stale_tmp
 from app.pipelines.runner import PipelineRunner
 
 #: Kod bledu wg statusu HTTP (stabilny, czytelny maszynowo). Reszta 4xx -> "client_error".
@@ -46,6 +48,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         app.state.runner = PipelineRunner(settings)
+        # po twardym przerwaniu procesu moga zostac pliki *.tmp (jeden worker = zaden upload nie trwa)
+        removed = cleanup_stale_tmp(settings.reports_path.parent / "uploads", max_age_sec=0)
+        if removed:
+            logging.getLogger("daas").info("removed %d leftover upload temp files", removed)
         logging.getLogger("daas").info(
             "DaaS Engine up · env=%s · api_key=%s", settings.app_env, "set" if auth.configured else "MISSING"
         )
@@ -63,6 +69,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.auth = auth
+    app.state.limiter = RateLimiter()
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(_request: Request, exc: StarletteHTTPException) -> JSONResponse:

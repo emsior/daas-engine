@@ -51,6 +51,13 @@ class Settings(BaseSettings):
     #: Klucz API (naglowek X-API-Key). Brak = fail-closed: kazda trasa poza /health i /ready odpowiada 401,
     #: a start na adresie innym niz loopback jest odmawiany. Minimum 16 znakow. Nigdy nie trafia do odpowiedzi ani logow.
     daas_api_key: str | None = Field(default=None, repr=False)
+    # --- limity zadan i uploadow (0 = wylaczone). Liczniki w pamieci procesu: wymagany jeden worker. ---
+    daas_rate_limit_run_per_min: int = Field(default=30, ge=0, description="POST /run, per klucz API")
+    daas_rate_limit_upload_per_min: int = Field(default=30, ge=0, description="POST /upload, per klucz API")
+    daas_rate_limit_ip_per_min: int = Field(default=300, ge=0, description="wszystkie trasy chronione, per adres IP")
+    daas_rate_limit_auth_fail_per_min: int = Field(default=10, ge=0, description="nieudane klucze, per adres IP")
+    daas_upload_quota_bytes: int = Field(
+        default=1_073_741_824, ge=0, description="laczna kwota bajtow w uploads/ (1 GiB); 0 = bez limitu")
     # CORS domyslnie wylaczony: n8n i klienci API wolaja serwer-serwer, przegladarka niepotrzebna.
     # Wlaczenie: CORS_ORIGINS='["https://prochpc.pl"]' w .env
     cors_origins: list[str] = Field(default_factory=list)

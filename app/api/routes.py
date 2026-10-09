@@ -26,13 +26,16 @@ from app.core.models import (
     RunResult,
     UploadResponse,
 )
+from app.core.ratelimit import limit_ip, limit_run, limit_upload
 from app.core.redact import redact_run
 from app.core.upload_guard import (
     CHUNK_SIZE,
     MAX_UPLOAD_BYTES,
     ReasonCode,
     UploadRejected,
+    cleanup_stale_tmp,
     content_hash,
+    dir_usage_bytes,
     ensure_inside_root,
     final_path_for,
     new_upload_id,
@@ -45,7 +48,8 @@ from app.pipelines.runner import PIPELINES, PipelineRunner
 log = logging.getLogger(__name__)
 
 public_router = APIRouter()
-router = APIRouter(dependencies=[Depends(require_api_key)])
+# kolejnosc ma znaczenie: limit per IP (takze dla anonimowych), potem klucz API
+router = APIRouter(dependencies=[Depends(limit_ip), Depends(require_api_key)])
 
 
 def _runner(request: Request) -> PipelineRunner:
@@ -75,7 +79,7 @@ def pipelines(request: Request) -> list[PipelineInfo]:
     return _runner(request).list_pipelines()
 
 
-@router.post("/run", response_model=RunResult, tags=["pipelines"])
+@router.post("/run", response_model=RunResult, tags=["pipelines"], dependencies=[Depends(limit_run)])
 def run(body: RunRequest, request: Request) -> RunResult:
     if body.pipeline not in PIPELINES:
         raise HTTPException(status_code=404, detail=f"unknown pipeline: {body.pipeline}")
@@ -131,7 +135,7 @@ def _uploads_root(settings) -> Path:
     return root
 
 
-async def _stream_to_temp(upload_file: UploadFile, tmp_path: Path) -> int:
+async def _stream_to_temp(upload_file: UploadFile, tmp_path: Path, quota_remaining: int | None = None) -> int:
     """Zapisuje strumien do pliku tymczasowego, pilnujac limitu w trakcie.
 
     Limit egzekwowany jest PODCZAS odbierania, a nie po wczytaniu calosci —
@@ -153,6 +157,8 @@ async def _stream_to_temp(upload_file: UploadFile, tmp_path: Path) -> int:
                     ReasonCode.FILE_TOO_LARGE, 413,
                     f"plik przekracza {MAX_UPLOAD_BYTES} bajtow",
                 )
+            if quota_remaining is not None and total > quota_remaining:
+                raise UploadRejected(ReasonCode.QUOTA_EXCEEDED, 413, "kwota uploadow wyczerpana")
             fh.write(chunk)
     return total
 
@@ -183,7 +189,7 @@ def _enforce_policy_on_path(settings, final_path: Path, root: Path, audit_log: P
         raise UploadRejected(ReasonCode.POLICY_DENIED, 403, "odmowa polityki dostepu") from exc
 
 
-@router.post("/upload", response_model=UploadResponse, tags=["pipelines"])
+@router.post("/upload", response_model=UploadResponse, tags=["pipelines"], dependencies=[Depends(limit_upload)])
 async def upload(request: Request, file: UploadFile = File(...),
                  client_name: str | None = Form(default=None)) -> UploadResponse:
     """Przyjmuje plik CSV klienta i zwraca wykryte mapowanie kolumn.
@@ -201,6 +207,11 @@ async def upload(request: Request, file: UploadFile = File(...),
     root = _uploads_root(settings)
     audit_log = settings.audit_log_path
 
+    # Porzucone *.tmp (przerwane uploady) nie licza sie do kwoty i sa sprzatane przy kazdym uploadzie.
+    cleanup_stale_tmp(root)
+    quota = settings.daas_upload_quota_bytes
+    quota_remaining = max(0, quota - dir_usage_bytes(root)) if quota > 0 else None
+
     upload_id = new_upload_id()
     tmp_path = ensure_inside_root(temp_path_for(upload_id, root), root)
     final_path = ensure_inside_root(final_path_for(upload_id, root), root)
@@ -210,7 +221,7 @@ async def upload(request: Request, file: UploadFile = File(...),
 
     try:
         validate_original_filename(file.filename)
-        size_bytes = await _stream_to_temp(file, tmp_path)
+        size_bytes = await _stream_to_temp(file, tmp_path, quota_remaining)
 
         raw = tmp_path.read_bytes()
         result = validate_csv_bytes(raw)

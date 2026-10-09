@@ -22,6 +22,7 @@ from fastapi import HTTPException, Request, Security
 from fastapi.security import APIKeyHeader
 
 from app.core.config import Settings
+from app.core.ratelimit import throttle_auth_failure
 from app.core.upload_guard import ReasonCode
 
 API_KEY_HEADER = "X-API-Key"
@@ -95,6 +96,7 @@ def require_api_key(request: Request, presented: str | None = Security(api_key_s
     reason = auth.check(presented)
     if reason == ReasonCode.OK:
         return
+    throttle_auth_failure(request)  # po wyczerpaniu budzetu bledow: 429 i brak wpisu audytu
     audit.record(request, action="auth_denied", allowed=False, reason=reason)
     raise HTTPException(
         status_code=401,

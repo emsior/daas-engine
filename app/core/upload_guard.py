@@ -12,6 +12,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import re
 import time
 import uuid
 from collections.abc import Iterator
@@ -63,6 +64,7 @@ class ReasonCode:
     AUTH_INVALID = "auth_invalid"
     AUTH_NOT_CONFIGURED = "auth_not_configured"
     RUN_FAILED = "run_failed"
+    QUOTA_EXCEEDED = "quota_exceeded"
 
 
 class UploadRejected(Exception):
@@ -145,6 +147,49 @@ def temp_path_for(upload_id: str, root: Path) -> Path:
 
 def final_path_for(upload_id: str, root: Path) -> Path:
     return root / f"{upload_id}{ALLOWED_SUFFIX}"
+
+
+#: Wzorzec nazwy pliku tymczasowego tworzonego przez `temp_path_for` (obce pliki *.tmp nie sa ruszane).
+_TMP_NAME = re.compile(r"^[0-9a-f]{32}\.tmp$")
+
+#: Po tylu sekundach plik *.tmp po przerwanym uploadzie (np. zabity proces) uznajemy za porzucony.
+STALE_TMP_AGE_SEC = 900.0
+
+
+def cleanup_stale_tmp(root: Path, max_age_sec: float = STALE_TMP_AGE_SEC, now: float | None = None) -> int:
+    """Usuwa porzucone pliki `<uuid>.tmp` starsze niz `max_age_sec` (0 = wszystkie). Zwraca liczbe usunietych.
+
+    Normalna sciezka uploadu sprząta sama (blok finally w handlerze); ta funkcja zbiera to, co zostaje po
+    twardym przerwaniu procesu. Brak katalogu nie jest bledem.
+    """
+    if not root.is_dir():
+        return 0
+    cutoff = (time.time() if now is None else now) - max_age_sec
+    removed = 0
+    for entry in root.iterdir():
+        if not entry.is_file() or not _TMP_NAME.match(entry.name):
+            continue
+        try:
+            if max_age_sec <= 0 or entry.stat().st_mtime <= cutoff:
+                entry.unlink()
+                removed += 1
+        except OSError:
+            continue  # plik zniknal miedzy listowaniem a usunieciem (rownolegly upload) — nie jest bledem
+    return removed
+
+
+def dir_usage_bytes(root: Path) -> int:
+    """Suma rozmiarow plikow w katalogu uploadow (finalne i trwajace tymczasowe)."""
+    if not root.is_dir():
+        return 0
+    total = 0
+    for entry in root.iterdir():
+        try:
+            if entry.is_file():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 # --------------------------------------------------------------------------- dekodowanie
