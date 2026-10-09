@@ -11,6 +11,7 @@ from typing import Any
 from app.core.models import CS2Metrics, DataStatus, EcommerceMetrics, UkscMetrics
 from app.reporting.html import render_html
 from app.reporting.narrative import build_narrative
+from app.reporting.safe import md_text
 
 
 @dataclass
@@ -64,7 +65,8 @@ class ReportGenerator:
             md = render_uksc_markdown(payload, metrics)
             title = "Dowód UKSC — raport zgodności technicznej stacji"
         else:
-            md = f"# Report {pipeline}\n\n```json\n{json.dumps(payload, indent=2, default=str)}\n```\n"
+            dump = json.dumps(payload, indent=2, default=str).replace("```", "'" * 3)
+            md = f"# Report {pipeline}\n\n```json\n{dump}\n```\n"
             title = f"Report {pipeline}"
         md_path.write_text(md, encoding="utf-8")
 
@@ -84,7 +86,7 @@ class ReportGenerator:
 # ----------------------------------------------------------------------
 def _header(payload: dict[str, Any], title: str) -> str:
     badge = {"LIVE_DATA": "🟢 LIVE_DATA", "MOCK_DATA": "🟡 MOCK_DATA", "BLOCKED_MISSING_SECRET": "🔴 BLOCKED"}
-    client = f"| klient | {payload['client_name']} |\n" if payload.get("client_name") else ""
+    client = f"| klient | {md_text(payload['client_name'])} |\n" if payload.get("client_name") else ""
     return (
         f"# {title}\n\n"
         f"| pole | wartość |\n|---|---|\n"
@@ -92,7 +94,7 @@ def _header(payload: dict[str, Any], title: str) -> str:
         f"| run_id | `{payload['run_id']}` |\n"
         f"| pipeline | `{payload['pipeline']}` |\n"
         f"| źródło danych | {badge.get(payload['data_status'], payload['data_status'])} |\n"
-        f"| szczegół źródła | {payload['source_detail']} |\n"
+        f"| szczegół źródła | {md_text(payload['source_detail'])} |\n"
         f"| rekordów | {payload['records_processed']} |\n"
         f"| wygenerowano | {payload['generated_at']} |\n\n"
     )
@@ -116,7 +118,7 @@ def _table(rows: list[dict[str, Any]], cols: list[str]) -> str:
     if not rows:
         return "_brak danych_\n"
     head = "| " + " | ".join(cols) + " |\n|" + "---|" * len(cols) + "\n"
-    body = "".join("| " + " | ".join(str(r.get(c, "")) for c in cols) + " |\n" for r in rows)
+    body = "".join("| " + " | ".join(md_text(r.get(c, "")) for c in cols) + " |\n" for r in rows)
     return head + body
 
 
@@ -126,7 +128,7 @@ def render_cs2_markdown(payload: dict[str, Any], m: CS2Metrics) -> str:
     s += f"## WNIOSEK\n\n**{verdict}** — form score **{m.form_score}/100**, trend **{m.form_trend}**, "
     s += f"win rate {m.win_rate}% z {m.matches} meczów, K/D {m.kd_ratio}, rating {m.avg_rating}.\n\n"
     if payload.get("narrative"):
-        s += f"> {payload['narrative']}\n>\n> _streszczenie: {payload.get('narrative_source', 'TEMPLATE')}_\n\n"
+        s += f"> {md_text(payload['narrative'])}\n>\n> _streszczenie: {payload.get('narrative_source', 'TEMPLATE')}_\n\n"
     s += "## Metryki zbiorcze\n\n"
     s += _table([
         {"metryka": "Mecze (W/L/T)", "wartość": f"{m.matches} ({m.wins}/{m.losses}/{m.ties})"},
@@ -137,7 +139,7 @@ def render_cs2_markdown(payload: dict[str, Any], m: CS2Metrics) -> str:
         {"metryka": "Avg ADR", "wartość": m.avg_adr},
         {"metryka": "HS%", "wartość": f"{m.hs_pct}%"},
         {"metryka": "Form score", "wartość": f"{m.form_score}/100 ({m.form_trend})"},
-        {"metryka": "Najlepsza / najgorsza mapa", "wartość": f"{m.best_map} / {m.worst_map}"},
+        {"metryka": "Najlepsza / najgorsza mapa", "wartość": f"{md_text(m.best_map)} / {md_text(m.worst_map)}"},
     ], ["metryka", "wartość"])
     s += "\n## Mapy\n\n" + _table(m.map_breakdown, ["map", "matches", "win_rate", "avg_rating", "avg_adr", "kd"])
     s += "\n## Ostatnie 5 meczów\n\n" + _table(
@@ -145,7 +147,8 @@ def render_cs2_markdown(payload: dict[str, Any], m: CS2Metrics) -> str:
     )
     s += "\n## PRAKTYCZNE WNIOSKI\n\n"
     if m.worst_map and m.best_map and m.worst_map != m.best_map:
-        s += f"- Trenuj **{m.worst_map}** (najsłabszy WR) albo banuj ją w veto; graj **{m.best_map}** gdy masz wybór.\n"
+        s += (f"- Trenuj **{md_text(m.worst_map)}** (najsłabszy WR) albo banuj ją w veto; "
+              f"graj **{md_text(m.best_map)}** gdy masz wybór.\n")
     if m.form_trend == "DOWN":
         s += "- Trend ratingu spada — ogranicz sesje do 2-3 meczów i wróć do DM/aim-trainera przed kolejną serią.\n"
     elif m.form_trend == "UP":
@@ -169,7 +172,7 @@ def render_ecommerce_markdown(payload: dict[str, Any], m: EcommerceMetrics) -> s
               f"zamówienia {w['orders']} vs {w['orders_prev']}"
               + (" — ⚠ ostatni tydzień niepełny" if w.get("partial_week") else "") + ".\n\n")
     if payload.get("narrative"):
-        s += f"> {payload['narrative']}\n>\n> _streszczenie: {payload.get('narrative_source', 'TEMPLATE')}_\n\n"
+        s += f"> {md_text(payload['narrative'])}\n>\n> _streszczenie: {payload.get('narrative_source', 'TEMPLATE')}_\n\n"
     s += "## Metryki zbiorcze\n\n"
     s += _table([
         {"metryka": "Zamówienia (wszystkie)", "wartość": m.orders_total},
@@ -201,11 +204,11 @@ def render_ecommerce_markdown(payload: dict[str, Any], m: EcommerceMetrics) -> s
             s += f"- Marża wzrosła o {w['margin_delta_pp']} pp ({w['margin_prev']}% → {w['margin_pct']}%) — utrzymaj politykę rabatową z tego tygodnia.\n"
     if m.loss_orders_count:
         worst = m.loss_orders[0]
-        s += f"- Zablokuj rabaty > 20% na **{worst['product']}** — każde takie zamówienie kończy się stratą.\n"
+        s += f"- Zablokuj rabaty > 20% na **{md_text(worst['product'])}** — każde takie zamówienie kończy się stratą.\n"
         s += f"- Ustaw twardy floor marży 5% w koszyku; {m.loss_orders_count} zamówień by go nie przeszło.\n"
     if m.top_categories:
         top = m.top_categories[0]
-        s += f"- **{top['category']}** = {top['revenue_share_pct']}% przychodu — koncentracja ryzyka, dywersyfikuj ofertę lub zabezpiecz dostawcę.\n"
+        s += f"- **{md_text(top['category'])}** = {top['revenue_share_pct']}% przychodu — koncentracja ryzyka, dywersyfikuj ofertę lub zabezpiecz dostawcę.\n"
     if m.orders_refunded:
         s += f"- {m.orders_refunded} zwrot(y) — sprawdź opis/foto produktu, zwroty to najtańszy do naprawienia wyciek marży.\n"
     s += "- Kolejny run: tygodniowo (poniedziałek 07:00) przez n8n — sekcja „Tydzień do tygodnia” porówna się automatycznie.\n"

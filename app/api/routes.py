@@ -258,8 +258,18 @@ def report_by_run(run_id: str, request: Request, fmt: str = Query(default="html"
     return _serve_report(path, fmt)
 
 
+#: Naglowki kazdej odpowiedzi z raportem. Raport jest samodzielnym dokumentem (inline CSS, bez skryptow):
+#: CSP zabrania wszystkiego poza stylem inline i obrazami data:. `frame-ancestors 'self'` pozwala osadzic
+#: raport w <iframe sandbox> tej samej domeny, dlatego brak X-Frame-Options.
+REPORT_HEADERS: dict[str, str] = {
+    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:; frame-ancestors 'self'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+}
+
+
 def _serve_report(path: Path, fmt: str):
     if fmt == "html":
-        return HTMLResponse(path.read_text(encoding="utf-8"))
+        return HTMLResponse(path.read_text(encoding="utf-8"), headers=REPORT_HEADERS)
     media = "application/json" if fmt == "json" else "text/markdown; charset=utf-8"
-    return FileResponse(path, media_type=media, filename=path.name)
+    return FileResponse(path, media_type=media, filename=path.name, headers=REPORT_HEADERS)
