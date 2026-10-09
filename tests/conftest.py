@@ -6,6 +6,7 @@ z naglowkiem klucza API. Testy, ktore buduja wlasnego `TestClient`, uzywaja `aut
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 #: Klucz uzywany wylacznie w testach (syntetyczny, >= 16 znakow).
 TEST_API_KEY = "test-key-0123456789abcdef-synthetic"
 API_KEY_HEADER = "X-API-Key"
+
+#: Sekret podpisu sesji uzywany wylacznie w testach (>= 32 znaki).
+TEST_SECRET_KEY = "test-secret-0123456789abcdef0123456789abcdef-synthetic"
 
 # Import `app.main` tworzy aplikacje na poziomie modulu; klucz musi istniec wczesniej.
 os.environ.setdefault("DAAS_API_KEY", TEST_API_KEY)
@@ -47,15 +51,37 @@ def iter_api_routes(app):
     yield from walk(app.routes)
 
 
+def default_tenant(settings: Settings):
+    """Sciezki organizacji `default` (tryb selfhost) dla ustawien testu: tenants/default/{uploads,reports,audit}."""
+    from app.control.tenancy import TenantPaths
+
+    return TenantPaths.for_org(settings, "default")
+
+
 def auth_headers(key: str = TEST_API_KEY) -> dict[str, str]:
     """Naglowki uwierzytelniajace dla `TestClient(app, headers=auth_headers())`."""
     return {API_KEY_HEADER: key}
 
 
+@pytest.fixture(scope="session")
+def _control_db_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Baza control plane po `alembic upgrade head`, zrobiona raz na sesje i kopiowana do kazdego testu
+    (start aplikacji nie musi wtedy uruchamiac migracji od zera przy kazdym tescie)."""
+    from app.control.db import upgrade_sync
+
+    path = tmp_path_factory.mktemp("control_template") / "template.db"
+    upgrade_sync(Settings(_env_file=None, daas_control_db_url=f"sqlite+aiosqlite:///{path}"))
+    return path
+
+
 @pytest.fixture(autouse=True)
-def _api_key_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Kazdy test dostaje klucz w srodowisku; test negatywny nadpisuje go sam."""
+def _api_key_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, _control_db_template: Path) -> None:
+    """Kazdy test dostaje klucz, sekret sesji i wlasna baze control plane w srodowisku;
+    test negatywny nadpisuje je sam. Domyslna baza (`runtime/control.db`) nie jest nigdy dotykana."""
     monkeypatch.setenv("DAAS_API_KEY", TEST_API_KEY)
+    monkeypatch.setenv("DAAS_SECRET_KEY", TEST_SECRET_KEY)
+    shutil.copy(_control_db_template, tmp_path / "control.db")
+    monkeypatch.setenv("DAAS_CONTROL_DB_URL", f"sqlite+aiosqlite:///{tmp_path / 'control.db'}")
     reset_settings_cache()
 
 
@@ -98,4 +124,33 @@ def anon_client(settings: Settings, runner: PipelineRunner) -> TestClient:
     app = create_app()
     with TestClient(app) as c:
         app.state.runner = runner
+        yield c
+
+
+# --------------------------------------------------------------------------- tryb cloud
+@pytest.fixture()
+def cloud_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
+    """Ustawienia trybu `cloud` na katalogu tymczasowym: runtime/ w tmp_path, e-maile do runtime/outbox/."""
+    for key in _SECRET_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("DAAS_MODE", "cloud")
+    monkeypatch.delenv("DAAS_API_KEY", raising=False)
+    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "runtime" / "daas.duckdb"))
+    monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "runtime" / "reports"))
+    monkeypatch.setenv("FIXTURES_DIR", str(PROJECT_ROOT / "data" / "fixtures"))
+    monkeypatch.setenv("DAAS_COCKPIT_ORIGIN", "https://cockpit.example.test")
+    reset_settings_cache()
+    s = Settings(_env_file=None)
+    s.ensure_dirs()
+    yield s
+    reset_settings_cache()
+
+
+@pytest.fixture()
+def cloud_client(cloud_settings: Settings) -> TestClient:
+    """Klient trybu `cloud` po https (cookie sesji ma atrybut Secure)."""
+    from app.main import create_app
+
+    app = create_app(cloud_settings)
+    with TestClient(app, base_url="https://testserver") as c:
         yield c

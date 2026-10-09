@@ -64,3 +64,9 @@ uksc/raw/
 # Robocze propozycje agentow i lokalny raport demo - nie do repo
 .agents-proponowane/
 runtime/**/latest_demo_report.html
+
+# control plane i dane najemcow (2.0): baza control, katalogi organizacji, skrzynka e-mail trybu console
+runtime/control.db*
+runtime/tenants/*
+!runtime/tenants/demo/
+runtime/outbox/
