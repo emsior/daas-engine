@@ -58,3 +58,32 @@ def test_openapi_version_matches_health(monkeypatch: pytest.MonkeyPatch):
     reset_settings_cache()
     with TestClient(create_app()) as c:
         assert c.get("/openapi.json").json()["info"]["version"] == c.get("/health").json()["version"]
+
+
+# ---------------------------------------------------------------- .env.example zgodny z Settings
+def test_env_example_lists_every_hardening_setting_with_safe_defaults():
+    from app.core.config import Settings
+    from tests.conftest import PROJECT_ROOT
+
+    lines = (PROJECT_ROOT / ".env.example").read_text(encoding="utf-8").splitlines()
+    values = {}
+    for line in lines:
+        if "=" in line and not line.lstrip().startswith("#"):
+            key, _, val = line.partition("=")
+            values[key.strip()] = val.strip()
+
+    for name in ("DAAS_API_KEY", "DAAS_LLM_NARRATIVE", "DAAS_POLICY_ENFORCE", "DAAS_UPLOAD_QUOTA_BYTES",
+                 "DAAS_RATE_LIMIT_RUN_PER_MIN", "DAAS_RATE_LIMIT_UPLOAD_PER_MIN",
+                 "DAAS_RATE_LIMIT_IP_PER_MIN", "DAAS_RATE_LIMIT_AUTH_FAIL_PER_MIN"):
+        assert name in values, name
+    s = Settings(_env_file=None)
+    assert values["APP_ENV"] == s.app_env == "prod"
+    assert values["APP_HOST"] == s.app_host == "127.0.0.1"
+    assert values["DAAS_POLICY_ENFORCE"] == "true" and s.daas_policy_enforce is True
+    assert values["DAAS_LLM_NARRATIVE"] == "false" and s.daas_llm_narrative is False
+    assert int(values["DAAS_UPLOAD_QUOTA_BYTES"]) == s.daas_upload_quota_bytes
+    assert int(values["DAAS_RATE_LIMIT_RUN_PER_MIN"]) == s.daas_rate_limit_run_per_min
+    assert int(values["DAAS_RATE_LIMIT_UPLOAD_PER_MIN"]) == s.daas_rate_limit_upload_per_min
+    assert int(values["DAAS_RATE_LIMIT_IP_PER_MIN"]) == s.daas_rate_limit_ip_per_min
+    assert int(values["DAAS_RATE_LIMIT_AUTH_FAIL_PER_MIN"]) == s.daas_rate_limit_auth_fail_per_min
+    assert values["DAAS_API_KEY"] == ""  # w szablonie nigdy realny klucz

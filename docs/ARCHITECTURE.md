@@ -5,7 +5,8 @@ One FastAPI process, one DuckDB file, one deployment per client. Sources degrade
 ## Data flow
 
 ```
-client CSV ─► POST /upload ─► core/upload_guard   name, 10 MiB streamed limit, content, audit event
+client CSV/XLSX ─► POST /upload ─► core/upload_guard   name, 10 MiB streamed limit, quota, content, audit event
+                   │            └─► core/xlsx_import  ZIP/macro/sheet limits, converted to CSV (XLSX only)
                    │            └─► core/policy     enforce() on the final path (DAAS_POLICY_ENFORCE)
                    ▼
             sources/csv_mapper  detect PL/EN column names ─► run_payload
@@ -36,15 +37,19 @@ n8n (`n8n/*.json`) calls the same HTTP endpoints on a schedule or from a webhook
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | status, version, secret availability |
+| `GET` | `/health`, `/ready` | public, redacted status and version (no key needed) |
 | `GET` | `/pipelines` | pipelines and their data status |
-| `POST` | `/upload` | accept a client CSV, return the detected mapping and `run_payload` |
+| `POST` | `/upload` | accept a client CSV or XLSX, return the detected mapping and `run_payload` (with `upload_id`) |
 | `POST` | `/run` | execute a pipeline |
 | `GET` | `/runs`, `/runs/latest`, `/runs/{run_id}` | run history |
 | `GET` | `/reports/{pipeline}/latest`, `/reports/run/{run_id}` | reports |
 | `GET` | `/stats` | DuckDB row counts |
 
-## Tests (`tests/`, 195 in total, all offline)
+Every route except `/health` and `/ready` requires the `X-API-Key` header (`core/auth.py`) and passes the in-memory
+rate limits (`core/ratelimit.py`). Middleware (`core/observability.py`) adds `X-Request-ID`, security headers and JSON
+logs; responses are redacted at the API edge (`core/redact.py`). The limits are per process, so the app runs a single worker.
+
+## Tests (`tests/`, all offline)
 
 | File | Covers |
 |---|---|
@@ -55,6 +60,9 @@ n8n (`n8n/*.json`) calls the same HTTP endpoints on a schedule or from a webhook
 | `test_policy.py`, `test_policy_runtime.py` | policy layer and its runtime wiring |
 | `test_audit_log_unification.py` | single audit log path, concurrent writes |
 | `test_uksc_pipeline.py` | UKSC package validation, scoring, report |
+| `test_auth.py`, `test_limits.py`, `test_redaction.py` | API key on every route, rate limits and quota, response redaction |
+| `test_report_xss.py`, `test_xlsx_upload.py` | inert report output, XLSX container and sheet limits |
+| `test_observability.py`, `test_narrative.py`, `test_hardening_defaults.py`, `test_consumers.py` | request tracing and headers, LLM opt-in, secure defaults, n8n/CI/Docker consumers and locks |
 
 CI (`.github/workflows/ci.yml`): `test` on Python 3.11 and 3.12 (OPSEC grep, ruff, pytest, API smoke),
 `security` (gitleaks, semgrep, zizmor), `docker` (image build and smoke).

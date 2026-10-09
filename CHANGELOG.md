@@ -2,6 +2,45 @@
 
 All notable changes to DaaS Engine. Dates are merge dates (Europe/Warsaw).
 
+## [2.0.0] — Unreleased
+
+Hardening release. Behaviour changes below are breaking for existing deployments: configure `DAAS_API_KEY`
+and update API clients before upgrading.
+
+### Changed
+
+- All routes except `GET /health` and `GET /ready` require the `X-API-Key` header. Without a configured key the
+  protected routes answer `401`, and the server refuses to start on a non-loopback address.
+- The default listen address is `127.0.0.1`; the container image sets `0.0.0.0` explicitly and Compose publishes ports on loopback only.
+- The policy layer is on by default (`DAAS_POLICY_ENFORCE=true`).
+- `POST /run` takes `upload_id` instead of a file path. `GET /health` returns a redacted status (no paths, no configuration); `/docs`, `/redoc`
+  and `/openapi.json` exist only with `APP_ENV=dev`.
+- API responses no longer contain absolute paths or raw exception text. Errors are `{detail, code, request_id}`.
+- The LLM summary is opt-in (`DAAS_LLM_NARRATIVE=true`); an API key alone does not enable it. Identifying fields are removed from the request and the report labels the summary as model-generated.
+- The audit log records `upload`, `run` and `auth_denied` events with request id and client address.
+- Version bumped to 2.0.0.
+
+### Added
+
+- In-memory token-bucket rate limits for `/run`, `/upload`, per-IP traffic and failed keys (`429` with `Retry-After`), a 1 GiB upload quota (`413`) and cleanup of stale `*.tmp` files.
+- XLSX support in `POST /upload` with container, macro, embedded-object, sheet and size limits; a workbook with several sheets needs the `sheet` field.
+- Request id, JSON logging and security headers on every response; report responses add a restrictive `Content-Security-Policy`.
+- A startup check that refuses more than one worker.
+- `requirements.lock` and `requirements-dev.lock` with SHA-256 hashes; Docker and CI install with `--require-hashes`.
+- Tests: an auth matrix over all routes, endpoint-level isolation, redaction, report output, limits, XLSX and consumers.
+
+### Fixed
+
+- Client-supplied values are escaped before they reach HTML reports in all three report builders; the HTML renderer drops raw HTML, links and images.
+- n8n workflows, the CI smoke test, the container health check and the PowerShell launcher send the API key.
+- Docker Compose pins `n8nio/n8n` to `2.43.1` instead of `latest`.
+
+### Known limitations
+
+- Rate limits and the quota counter live in process memory (one worker, reset on restart).
+- Docker was not run during this change; the image build and container smoke test are covered by CI only.
+- A single instance key replaces per-user authentication; there are no roles.
+
 ## [1.0.0] — 2026-09-28
 
 Closure release. The engine is complete for its current scope and moves to maintenance mode:
