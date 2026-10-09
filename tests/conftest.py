@@ -35,18 +35,16 @@ _SECRET_ENV_KEYS = (
 
 
 def iter_api_routes(app):
-    """Wszystkie `APIRoute` aplikacji, takze z routerow dolaczonych (FastAPI >= 0.13x trzyma je zagniezdzone)."""
-    from fastapi.routing import APIRoute
+    """Wszystkie trasy aplikacji z PELNA sciezka (z prefiksami dolaczonych routerow) i `dependant` obejmujacym
+    zaleznosci poziomu routera. FastAPI >= 0.13x trzyma dolaczone routery leniwie (`_IncludedRouter`), a
+    sciezki z prefiksem sa dopiero w `effective_candidates()`; obiekty maja `.path`, `.methods`, `.dependant`."""
 
-    def walk(routes):
-        for route in routes:
-            inner = getattr(route, "original_router", None)
-            if inner is not None:
-                yield from walk(inner.routes)
-            elif isinstance(route, APIRoute):
+    def walk(candidates):
+        for route in candidates:
+            if hasattr(route, "effective_candidates"):
+                yield from walk(route.effective_candidates())
+            elif getattr(route, "dependant", None) is not None and getattr(route, "methods", None):
                 yield route
-            elif hasattr(route, "routes"):
-                yield from walk(route.routes)
 
     yield from walk(app.routes)
 
@@ -154,3 +152,24 @@ def cloud_client(cloud_settings: Settings) -> TestClient:
     app = create_app(cloud_settings)
     with TestClient(app, base_url="https://testserver") as c:
         yield c
+
+
+@pytest.fixture()
+def cloud_factory(cloud_settings: Settings, monkeypatch: pytest.MonkeyPatch):
+    """Fabryka klientow cloud z nadpisanymi zmiennymi srodowiska: `make(DAAS_UPLOAD_QUOTA_BYTES=10)`."""
+    from contextlib import ExitStack
+
+    from app.main import create_app
+
+    stack = ExitStack()
+
+    def make(**env) -> tuple[TestClient, Settings]:
+        for key, value in env.items():
+            monkeypatch.setenv(key, str(value))
+        reset_settings_cache()
+        s = Settings(_env_file=None)
+        app = create_app(s)
+        return stack.enter_context(TestClient(app, base_url="https://testserver")), s
+
+    yield make
+    stack.close()

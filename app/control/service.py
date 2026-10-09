@@ -5,11 +5,12 @@ import re
 import unicodedata
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.control import scopes as sc
-from app.control.models import ApiKey, Membership, Org, User
+from app.control.models import ApiKey, Invitation, Membership, Org, UsageCounter, User
 from app.control.security import new_api_key
 from app.control.types import utcnow
 
@@ -123,3 +124,56 @@ async def ensure_default_org(db: AsyncSession, *, retention_days: int = 90) -> O
         db, name=DEFAULT_ORG_NAME, owner=None, plan="selfhost", retention_days=retention_days,
         org_id=DEFAULT_ORG_ID,
     )
+
+
+async def memberships_of(db: AsyncSession, user_id: str) -> list[tuple[Membership, Org]]:
+    """Czlonkostwa uzytkownika wraz z organizacjami (najstarsze pierwsze)."""
+    rows = await db.execute(
+        select(Membership, Org).join(Org, Org.id == Membership.org_id)
+        .where(Membership.user_id == user_id).order_by(Membership.created_at, Org.id))
+    return [(m, o) for m, o in rows.all()]
+
+
+async def accept_pending_invitations(db: AsyncSession, user: User) -> int:
+    """Zamienia oczekujace zaproszenia na adres uzytkownika w czlonkostwa. Nie robi commitu.
+
+    Wolane po udowodnieniu wlasnosci adresu (magic link) i przy `GET /me` sesji. Wygasle zaproszenia sa pomijane.
+    """
+    now = utcnow()
+    pending = (await db.execute(select(Invitation).where(
+        Invitation.email == user.email, Invitation.accepted_at.is_(None), Invitation.expires_at > now,
+    ))).scalars().all()
+    accepted = 0
+    for invitation in pending:
+        exists = await db.get(Membership, (invitation.org_id, user.id))
+        if exists is None:
+            db.add(Membership(org_id=invitation.org_id, user_id=user.id, role=invitation.role))
+            accepted += 1
+        invitation.accepted_at = now
+    if pending:
+        await db.flush()
+    return accepted
+
+
+def current_period(now: datetime | None = None) -> str:
+    return (now or utcnow()).strftime("%Y-%m")
+
+
+async def add_usage(db: AsyncSession, org_id: str, *, runs: int = 0, upload_bytes: int = 0) -> None:
+    """Zwieksza licznik uzycia biezacego miesiaca (upsert odporny na wyscig dwoch pierwszych zapisow)."""
+    period = current_period()
+
+    async def bump() -> int:
+        result = await db.execute(update(UsageCounter).where(
+            UsageCounter.org_id == org_id, UsageCounter.period == period,
+        ).values(runs=UsageCounter.runs + runs, upload_bytes=UsageCounter.upload_bytes + upload_bytes))
+        return result.rowcount
+
+    if await bump():
+        return
+    try:
+        async with db.begin_nested():
+            db.add(UsageCounter(org_id=org_id, period=period, runs=runs, upload_bytes=upload_bytes))
+            await db.flush()
+    except IntegrityError:
+        await bump()

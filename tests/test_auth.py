@@ -17,7 +17,10 @@ from app.main import app as module_app
 from app.main import create_app
 from tests.conftest import API_KEY_HEADER, TEST_API_KEY, auth_headers, iter_api_routes
 
-PUBLIC_PATHS = {"/health", "/ready"}
+#: Trasy bez klucza: sonda zywotnosci/gotowosci, metryki (osobna kontrola: petla zwrotna albo token — zob.
+#: test_metrics_ready.py) oraz dwa wejscia logowania magic linkiem (z natury publiczne; limity per e-mail/IP).
+PUBLIC_GET_PATHS = {"/health", "/ready", "/api/v1/health", "/api/v1/ready"}
+PUBLIC_PATHS = PUBLIC_GET_PATHS | {"/metrics", "/api/v1/auth/magic-link", "/api/v1/auth/magic-link/verify"}
 
 
 def _route_cases() -> list[tuple[str, str]]:
@@ -36,18 +39,30 @@ PROTECTED = [c for c in ROUTE_CASES if c[1] not in PUBLIC_PATHS]
 def test_route_inventory_is_not_empty():
     # zabezpieczenie testu: parametryzacja musi cos obejmowac, w tym trasy publiczne
     assert len(PROTECTED) >= 9
-    assert {p for _, p in ROUTE_CASES} >= PUBLIC_PATHS
+    assert {p for _, p in ROUTE_CASES} - PUBLIC_PATHS == {p for _, p in PROTECTED}
+    assert PUBLIC_PATHS - {"/metrics"} <= {p for _, p in ROUTE_CASES}
+
+
+def _all_dependency_calls(dependant) -> set:
+    calls = set()
+    for sub in dependant.dependencies:
+        calls.add(sub.call)
+        calls |= _all_dependency_calls(sub)
+    return calls
 
 
 def test_module_app_exposes_no_unexpected_unprotected_routes():
-    # kazda trasa spoza listy publicznej MUSI miec zaleznosc auth (statycznie, bez wywolan)
+    # kazda trasa spoza listy publicznej MUSI miec zaleznosc auth (statycznie, bez wywolan):
+    # trasy legacy -> require_api_key, trasy /api/v1 -> get_principal (takze zagniezdzone w org_access)
+    from app.api.v1.deps import get_principal
     from app.core.auth import require_api_key
 
     for route in iter_api_routes(module_app):
         if route.path in PUBLIC_PATHS:
             continue
-        deps = [d.call for d in route.dependant.dependencies]
-        assert require_api_key in deps, f"trasa bez auth: {route.path}"
+        calls = _all_dependency_calls(route.dependant)
+        required = get_principal if route.path.startswith("/api/v1/") else require_api_key
+        assert required in calls, f"trasa bez auth: {route.path}"
 
 
 @pytest.mark.parametrize(("method", "path"), PROTECTED)
@@ -71,7 +86,7 @@ def test_protected_route_with_valid_key_passes_auth(client: TestClient, method: 
     assert r.status_code != 401, (method, path)
 
 
-@pytest.mark.parametrize("path", sorted(PUBLIC_PATHS))
+@pytest.mark.parametrize("path", sorted(PUBLIC_GET_PATHS))
 def test_public_routes_need_no_key(anon_client: TestClient, path: str):
     assert anon_client.get(path).status_code == 200
 

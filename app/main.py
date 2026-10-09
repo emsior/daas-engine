@@ -16,8 +16,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.api.problems import PROBLEM_MEDIA_TYPE, code_for, is_v1_path, problem_body
 from app.api.routes import LEGACY_PREFIXES, public_router, router
+from app.api.v1 import build_router as build_v1_router
 from app.control import db as control_db
 from app.control import service as control_service
+from app.control.mailer import build_mailer
 from app.control.tenancy import TenantRegistry
 from app.core.auth import API_KEY_HEADER
 from app.core.config import Settings, get_settings, installed_version
@@ -73,6 +75,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             removed = cleanup_stale_tmp(registry.paths("default").uploads, max_age_sec=0)
             if removed:
                 log.info("removed %d leftover upload temp files", removed)
+        if settings.cloud and settings.daas_email_backend == "console":
+            log.warning("DAAS_EMAIL_BACKEND=console: sign-in links are written to runtime/outbox/ and the log; "
+                        "use smtp in production")
         log.info(
             "DaaS Engine up · mode=%s · env=%s · api_key=%s", settings.daas_mode, settings.app_env,
             "set" if auth.configured else ("n/a" if settings.cloud else "MISSING"),
@@ -97,6 +102,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.auth = auth
     app.state.limiter = RateLimiter()
     app.state.metrics = Metrics()
+    app.state.mailer = build_mailer(settings)
     app.state.runner = None  # ustawiane w lifespan (selfhost); w cloud zostaje None
 
     @app.exception_handler(StarletteHTTPException)
@@ -131,6 +137,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             allow_methods=["GET", "POST"],
             allow_headers=["Content-Type", API_KEY_HEADER],
         )
+    if settings.daas_cockpit_origin:
+        # kokpit: jeden origin, z credentials (cookie sesji); zadne inne pochodzenie nie dostaje CORS
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=[settings.daas_cockpit_origin.rstrip("/")],
+            allow_credentials=True,
+            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            allow_headers=["Content-Type", API_KEY_HEADER, "X-CSRF-Token"],
+            expose_headers=["X-Request-ID", "Location", "ETag"],
+        )
     app.add_middleware(MetricsMiddleware, metrics=app.state.metrics)
     if not settings.cloud:
         app.add_middleware(DeprecationMiddleware, paths=LEGACY_PREFIXES)
@@ -138,6 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Swagger UI potrzebuje wlasnych skryptow, wiec w dev wylaczamy dla nich domyslne CSP API.
     app.add_middleware(SecurityHeadersMiddleware, csp_exempt_paths=DOCS_PATHS if dev else ())
     app.include_router(public_router)
+    app.include_router(build_v1_router())
     if not settings.cloud:
         app.include_router(router)  # trasy legacy: tylko selfhost; w cloud odpowiadaja 404
     return app
