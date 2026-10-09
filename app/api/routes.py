@@ -1,50 +1,72 @@
-"""Endpointy FastAPI: /health, /pipelines, /run, /runs/latest (+ /runs, /runs/{id})."""
+"""Endpointy FastAPI.
+
+Dwa routery:
+    * `public_router` — `/health` i `/ready` (zredagowane, bez klucza),
+    * `router`        — wszystko inne, z zaleznoscia `require_api_key` na calym routerze.
+Nowa trasa dodana do `router` jest chroniona automatycznie; test `tests/test_auth.py` pilnuje reszty.
+"""
 from __future__ import annotations
 
+import logging
 import os
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from app.core.models import HealthResponse, PipelineInfo, RunRequest, RunResult, UploadResponse
+from app.core import audit
+from app.core.auth import require_api_key
+from app.core.models import (
+    HealthResponse,
+    PipelineInfo,
+    ReadyResponse,
+    RunRequest,
+    RunResult,
+    UploadResponse,
+)
+from app.core.redact import redact_run
 from app.core.upload_guard import (
     CHUNK_SIZE,
     MAX_UPLOAD_BYTES,
     ReasonCode,
     UploadRejected,
-    append_audit,
-    build_audit_event,
     content_hash,
     ensure_inside_root,
     final_path_for,
     new_upload_id,
-    safe_deployment_id,
     temp_path_for,
     validate_csv_bytes,
     validate_original_filename,
 )
 from app.pipelines.runner import PIPELINES, PipelineRunner
 
-router = APIRouter()
+log = logging.getLogger(__name__)
+
+public_router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_api_key)])
 
 
 def _runner(request: Request) -> PipelineRunner:
     return request.app.state.runner
 
 
-@router.get("/health", response_model=HealthResponse, tags=["system"])
+@public_router.get("/health", response_model=HealthResponse, tags=["system"])
 def health(request: Request) -> HealthResponse:
-    s = _runner(request).settings
-    return HealthResponse(
-        app=s.app_name,
-        version=s.app_version,
-        env=s.app_env,
-        duckdb_path=str(s.duckdb_file),
-        secrets=s.secrets_status(),
-        timestamp=datetime.utcnow(),
-    )
+    """Liveness. Publiczny i minimalny: status, wersja, tryb. Bez sciezek, konfiguracji i sekretow."""
+    s = request.app.state.settings
+    return HealthResponse(app=s.app_name, version=s.app_version, timestamp=datetime.utcnow())
+
+
+@public_router.get("/ready", response_model=ReadyResponse, tags=["system"], responses={503: {"model": ReadyResponse}})
+def ready(request: Request):
+    """Readiness: runner istnieje, a baza odpowiada. Przy bledzie 503 bez szczegolow (szczegoly w logu)."""
+    try:
+        _runner(request).db.table_counts()
+    except Exception:  # noqa: BLE001
+        log.exception("readiness check failed")
+        return JSONResponse(ReadyResponse(status="not_ready").model_dump(), status_code=503)
+    return ReadyResponse(status="ready")
 
 
 @router.get("/pipelines", response_model=list[PipelineInfo], tags=["pipelines"])
@@ -56,7 +78,20 @@ def pipelines(request: Request) -> list[PipelineInfo]:
 def run(body: RunRequest, request: Request) -> RunResult:
     if body.pipeline not in PIPELINES:
         raise HTTPException(status_code=404, detail=f"unknown pipeline: {body.pipeline}")
-    return _runner(request).run(body)
+    runner = _runner(request)
+    if body.upload_id:
+        # plik z POST /upload: sciezke sklada serwer z identyfikatora (wzorzec ^[0-9a-f]{32}$), nie klient
+        path = _uploads_root(runner.settings) / f"{body.upload_id}.csv"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="upload not found")
+        body = body.model_copy(update={"source_path": str(path), "upload_id": None})
+    result = runner.run(body)
+    audit.record(
+        request, action="run", allowed=True,
+        reason=ReasonCode.RUN_FAILED if result.run_status.value == "FAILED" else ReasonCode.OK,
+        pipeline=result.pipeline, run_id=result.run_id,
+    )
+    return redact_run(result)
 
 
 @router.get("/runs/latest", response_model=RunResult, tags=["runs"])
@@ -64,12 +99,12 @@ def runs_latest(request: Request, pipeline: str | None = Query(default=None)) ->
     row = _runner(request).db.latest_run(pipeline)
     if not row:
         raise HTTPException(status_code=404, detail="no runs yet")
-    return RunResult.model_validate(row)
+    return redact_run(RunResult.model_validate(row))
 
 
 @router.get("/runs", response_model=list[RunResult], tags=["runs"])
 def runs_list(request: Request, limit: int = Query(default=20, ge=1, le=200)) -> list[RunResult]:
-    return [RunResult.model_validate(r) for r in _runner(request).db.list_runs(limit)]
+    return [redact_run(RunResult.model_validate(r)) for r in _runner(request).db.list_runs(limit)]
 
 
 @router.get("/runs/{run_id}", response_model=RunResult, tags=["runs"])
@@ -77,7 +112,7 @@ def runs_get(run_id: str, request: Request) -> RunResult:
     row = _runner(request).db.get_run(run_id)
     if not row:
         raise HTTPException(status_code=404, detail="run not found")
-    return RunResult.model_validate(row)
+    return redact_run(RunResult.model_validate(row))
 
 
 @router.get("/stats", tags=["system"])
@@ -164,7 +199,6 @@ async def upload(request: Request, file: UploadFile = File(...),
     settings = _runner(request).settings
     root = _uploads_root(settings)
     audit_log = settings.audit_log_path
-    deployment_id = safe_deployment_id(root)
 
     upload_id = new_upload_id()
     tmp_path = ensure_inside_root(temp_path_for(upload_id, root), root)
@@ -188,15 +222,14 @@ async def upload(request: Request, file: UploadFile = File(...),
         df = read_client_csv(str(final_path))
         _, rep = map_dataframe(df)
 
-        append_audit(build_audit_event(
-            allowed=True, reason=ReasonCode.OK, deployment_id=deployment_id,
+        audit.record(
+            request, action="upload", allowed=True, reason=ReasonCode.OK,
             size_bytes=size_bytes, upload_id=upload_id,
             encoding=result.encoding, content_sha256=content_hash(raw),
-        ), audit_log)
+        )
 
         return UploadResponse(
             upload_id=upload_id,
-            source_path=str(final_path),
             filename=final_path.name,
             rows=rep.rows_out,
             columns=[str(c) for c in df.columns],
@@ -206,26 +239,22 @@ async def upload(request: Request, file: UploadFile = File(...),
             warnings=rep.warnings,
             confidence=rep.confidence,
             ready=rep.rows_out > 0,
-            run_payload={"pipeline": "ecommerce_demo", "source_path": str(final_path),
+            run_payload={"pipeline": "ecommerce_demo", "upload_id": upload_id,
                          "client_name": client_name},
         )
 
     except UploadRejected as rejected:
-        append_audit(build_audit_event(
-            allowed=False, reason=rejected.reason, deployment_id=deployment_id,
-            size_bytes=size_bytes,
-        ), audit_log)
+        audit.record(request, action="upload", allowed=False, reason=rejected.reason, size_bytes=size_bytes)
         raise HTTPException(status_code=rejected.http_status, detail=rejected.message) from None
 
     except Exception as exc:  # noqa: BLE001
         # Parser moze podniesc wyjatek niosacy tresc pliku klienta w komunikacie —
         # dlatego do odpowiedzi trafia wylacznie komunikat ogolny.
+        log.exception("upload processing failed upload_id=%s", upload_id)
         if finalized:
             final_path.unlink(missing_ok=True)
-        append_audit(build_audit_event(
-            allowed=False, reason=ReasonCode.PARSER_ERROR, deployment_id=deployment_id,
-            size_bytes=size_bytes,
-        ), audit_log)
+        audit.record(request, action="upload", allowed=False, reason=ReasonCode.PARSER_ERROR,
+                     size_bytes=size_bytes)
         raise HTTPException(status_code=422, detail="nie udalo sie przetworzyc pliku") from exc
 
     finally:

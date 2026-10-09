@@ -53,6 +53,12 @@
       "parameters": {
         "method": "POST",
         "url": "http://app:8000/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.DAAS_API_KEY }}" }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify({ pipeline: $json.pipeline, force_mock: false, notify: false }) }}",

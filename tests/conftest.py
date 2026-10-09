@@ -30,6 +30,23 @@ _SECRET_ENV_KEYS = (
 )
 
 
+def iter_api_routes(app):
+    """Wszystkie `APIRoute` aplikacji, takze z routerow dolaczonych (FastAPI >= 0.13x trzyma je zagniezdzone)."""
+    from fastapi.routing import APIRoute
+
+    def walk(routes):
+        for route in routes:
+            inner = getattr(route, "original_router", None)
+            if inner is not None:
+                yield from walk(inner.routes)
+            elif isinstance(route, APIRoute):
+                yield route
+            elif hasattr(route, "routes"):
+                yield from walk(route.routes)
+
+    yield from walk(app.routes)
+
+
 def auth_headers(key: str = TEST_API_KEY) -> dict[str, str]:
     """Naglowki uwierzytelniajace dla `TestClient(app, headers=auth_headers())`."""
     return {API_KEY_HEADER: key}
@@ -69,5 +86,16 @@ def client(settings: Settings, runner: PipelineRunner) -> TestClient:
 
     app = create_app()
     with TestClient(app, headers=auth_headers()) as c:
+        app.state.runner = runner
+        yield c
+
+
+@pytest.fixture()
+def anon_client(settings: Settings, runner: PipelineRunner) -> TestClient:
+    """Klient BEZ naglowka klucza (testy odmowy). Runner testowy jak w `client`."""
+    from app.main import create_app
+
+    app = create_app()
+    with TestClient(app) as c:
         app.state.runner = runner
         yield c

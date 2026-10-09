@@ -5,7 +5,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PipelineName = Literal["cs2_demo", "ecommerce_demo", "uksc_evidence"]
 
@@ -29,16 +29,27 @@ class RunRequest(BaseModel):
     pipeline: PipelineName = Field(..., description="Nazwa pipeline'u do uruchomienia")
     force_mock: bool = Field(default=False, description="Wymuś fixtures nawet gdy sekret istnieje")
     notify: bool = Field(default=False, description="Wyślij podsumowanie na Discord (jeśli webhook skonfigurowany)")
+    upload_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{32}$",
+        description="Identyfikator pliku z POST /upload — ma priorytet nad API i fixtures; wynik = LIVE_DATA",
+    )
     source_path: str | None = Field(
         default=None,
-        description="Ścieżka do pliku klienta (z POST /upload) — ma priorytet nad API i fixtures; wynik = LIVE_DATA",
+        description="Zaawansowane: ścieżka lokalna wewnątrz katalogu uploads/ (np. paczka UKSC). "
+                    "Dla plików z POST /upload użyj upload_id. Wykluczone z upload_id.",
     )
     client_name: str | None = Field(default=None, description="Nazwa klienta do nagłówka raportu")
+
+    @model_validator(mode="after")
+    def _one_source(self) -> RunRequest:
+        if self.upload_id and self.source_path:
+            raise ValueError("podaj upload_id albo source_path, nie oba")
+        return self
 
 
 class UploadResponse(BaseModel):
     upload_id: str
-    source_path: str
     filename: str
     rows: int
     columns: list[str]
@@ -80,13 +91,16 @@ class PipelineInfo(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """Publiczny, zredagowany status: bez sciezek, bez konfiguracji, bez mapy sekretow."""
     status: Literal["ok"] = "ok"
     app: str
     version: str
-    env: str
-    duckdb_path: str
-    secrets: dict[str, bool]
+    mode: Literal["selfhost"] = "selfhost"
     timestamp: datetime
+
+
+class ReadyResponse(BaseModel):
+    status: Literal["ready", "not_ready"]
 
 
 # ---------------------------------------------------------------------------

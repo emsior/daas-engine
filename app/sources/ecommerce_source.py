@@ -60,7 +60,7 @@ class EcommerceSource:
         external = os.getenv("ECOMMERCE_CSV_PATH", "").strip()
         if external and Path(external).exists():
             try:
-                return self._load_csv(Path(external), DataStatus.LIVE_DATA, f"external csv: {external}")
+                return self._load_csv(Path(external), DataStatus.LIVE_DATA, "external csv")
             except Exception as exc:  # noqa: BLE001
                 log.warning("External CSV failed (%s) -> fixture fallback", exc)
 
@@ -71,7 +71,7 @@ class EcommerceSource:
     def _load_csv(self, path: Path, status: DataStatus, detail: str) -> SourceResult:
         if not path.exists():
             return SourceResult(records=[], data_status=DataStatus.BLOCKED_MISSING_SECRET,
-                                detail=f"{detail}; csv not found at {path}")
+                                detail=f"{detail}; csv not found")
         df = pd.read_csv(path)
         return SourceResult(
             records=_normalize(df),

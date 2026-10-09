@@ -110,7 +110,8 @@ def test_api_health(client: TestClient):
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
-    assert body["secrets"]["FACEIT_API_KEY"] is False
+    # H5: /health jest publiczny i zredagowany (bez mapy sekretow i sciezek); pokrycie w test_auth.py
+    assert "secrets" not in body and "duckdb_path" not in body
 
 
 def test_api_pipelines(client: TestClient):

@@ -1,15 +1,18 @@
 """Testy bezpieczeństwa: path traversal, tenant isolation, OPSEC."""
 from __future__ import annotations
 
+import json
 import uuid
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from app.core.config import Settings, reset_settings_cache
 from app.core.models import DataStatus, RunRequest, RunStatus
 from app.pipelines.runner import PipelineRunner
 from app.storage.duckdb_client import DuckDBClient
+from tests.conftest import PROJECT_ROOT
 
 
 @pytest.fixture()
@@ -106,33 +109,89 @@ class TestPathTraversal:
 
 
 # -----------------------------------------------------------------------
-# TENANT ISOLATION
+# TENANT ISOLATION (na endpointach)
 # -----------------------------------------------------------------------
+# Model E1: jeden klient = jedno wdrozenie (wlasny klucz, baza, uploads, raporty, audyt). Izolacja
+# jest granica wdrozenia; testujemy ja przez HTTP na dwoch niezaleznych aplikacjach, nie na tmp_path.
+KEY_A = "klucz-wdrozenia-A-0123456789"
+KEY_B = "klucz-wdrozenia-B-9876543210"
+CSV_BYTES = (PROJECT_ROOT / "data" / "fixtures" / "client_export_pl.csv").read_bytes()
+
+
+@pytest.fixture()
+def two_deployments(tmp_path):
+    from contextlib import ExitStack
+
+    from app.main import create_app
+
+    def make(name: str, key: str) -> Settings:
+        base = tmp_path / name
+        s = Settings(_env_file=None, daas_api_key=key, duckdb_path=str(base / "daas.duckdb"),
+                     reports_dir=str(base / "reports"), fixtures_dir=str(PROJECT_ROOT / "data" / "fixtures"))
+        s.ensure_dirs()
+        return s
+
+    sa, sb = make("a", KEY_A), make("b", KEY_B)
+    with ExitStack() as stack:
+        ca = stack.enter_context(TestClient(create_app(sa), headers={"X-API-Key": KEY_A}))
+        cb = stack.enter_context(TestClient(create_app(sb), headers={"X-API-Key": KEY_B}))
+        yield ca, cb, sa, sb
+
+
 class TestTenantIsolation:
-    """Dane tenanta A nie mogą być odczytane przez tenanta B."""
+    """Dane wdrozenia A nie sa dostepne dla wdrozenia B ani przez klucz, ani przez identyfikatory, ani przez sciezki."""
 
-    def test_tenant_dirs_are_separate(self, tmp_path):
-        tenants = tmp_path / "runtime" / "tenants"
-        tenant_a = tenants / "alpha" / "uploads"
-        tenant_b = tenants / "beta" / "uploads"
-        tenant_a.mkdir(parents=True)
-        tenant_b.mkdir(parents=True)
+    def test_key_of_one_deployment_does_not_open_the_other(self, two_deployments):
+        ca, cb, _, _ = two_deployments
+        assert ca.get("/pipelines").status_code == 200
+        assert cb.get("/pipelines").status_code == 200
+        assert cb.get("/pipelines", headers={"X-API-Key": KEY_A}).status_code == 401
+        assert ca.get("/pipelines", headers={"X-API-Key": KEY_B}).status_code == 401
 
-        file_a = tenant_a / "secret_data.csv"
-        file_a.write_text("order_id,date,product,category,revenue,cost,profit,discount,status\n")
+    def test_runs_and_reports_are_not_shared(self, two_deployments):
+        ca, cb, _, _ = two_deployments
+        run_id = ca.post("/run", json={"pipeline": "cs2_demo"}).json()["run_id"]
+        assert ca.get(f"/runs/{run_id}").status_code == 200
+        assert cb.get("/runs").json() == []
+        assert cb.get(f"/runs/{run_id}").status_code == 404
+        assert cb.get(f"/reports/run/{run_id}").status_code == 404
+        assert cb.get("/reports/cs2_demo/latest").status_code == 404
 
-        # B nie powinien widzieć pliku A
-        assert not (tenant_b / "secret_data.csv").exists()
-        # Traversal z B do A — resolved path nie zaczyna się od B
-        traversal = tenant_b / ".." / ".." / "alpha" / "uploads" / "secret_data.csv"
-        resolved = traversal.resolve()
-        assert not str(resolved).startswith(str(tenant_b.resolve()))
+    def test_upload_id_of_one_deployment_is_unknown_to_the_other(self, two_deployments):
+        ca, cb, _, _ = two_deployments
+        up = ca.post("/upload", files={"file": ("dane.csv", CSV_BYTES, "text/csv")}).json()
+        assert ca.post("/run", json=up["run_payload"]).json()["run_status"] == "SUCCESS"
+        r = cb.post("/run", json=up["run_payload"])
+        assert r.status_code == 404 and r.json()["detail"] == "upload not found"
 
-    def test_report_urls_use_random_ids(self):
-        """Raporty identyfikowane przez UUID, nie przewidywalne nazwy."""
-        run_id = str(uuid.uuid4())
-        assert len(run_id) == 36
-        assert "-" in run_id
+    def test_source_path_into_another_deployment_is_blocked(self, two_deployments):
+        ca, cb, sa, _ = two_deployments
+        ca.post("/upload", files={"file": ("dane.csv", CSV_BYTES, "text/csv")})
+        foreign = next((sa.reports_path.parent / "uploads").glob("*.csv"))
+        r = cb.post("/run", json={"pipeline": "ecommerce_demo", "source_path": str(foreign)})
+        body = r.json()
+        assert body["run_status"] == "FAILED" and body["error"].startswith("SOURCE_UNAVAILABLE")
+        assert str(foreign) not in r.text
+
+    @pytest.mark.parametrize("ident", ["..%2f..%2fetc%2fpasswd", "%2e%2e%2f%2e%2e%2fsecret", "..\\..\\x"])
+    def test_traversal_in_identifiers_never_reaches_the_filesystem(self, two_deployments, ident):
+        _, cb, _, _ = two_deployments
+        assert cb.get(f"/reports/run/{ident}").status_code == 404
+        assert cb.get(f"/runs/{ident}").status_code == 404
+
+    def test_audit_trails_are_separate(self, two_deployments):
+        ca, cb, sa, sb = two_deployments
+        ca.post("/run", json={"pipeline": "cs2_demo"})
+        cb.get("/pipelines", headers={"X-API-Key": KEY_A})  # odmowa na B
+        a_events = [json.loads(x)["action"] for x in sa.audit_log_path.read_text(encoding="utf-8").splitlines()]
+        b_events = [json.loads(x)["action"] for x in sb.audit_log_path.read_text(encoding="utf-8").splitlines()]
+        assert a_events == ["run"]
+        assert b_events == ["auth_denied"]
+
+    def test_run_ids_are_unguessable_uuids(self, two_deployments):
+        ca, _, _, _ = two_deployments
+        run_id = ca.post("/run", json={"pipeline": "cs2_demo"}).json()["run_id"]
+        assert str(uuid.UUID(run_id)) == run_id and uuid.UUID(run_id).version == 4
 
 
 # -----------------------------------------------------------------------

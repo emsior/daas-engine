@@ -52,7 +52,7 @@ Three reference pipelines ship with the engine:
 ## Quickstart — Docker
 
 ```bash
-cp .env.example .env
+cp .env.example .env          # set DAAS_API_KEY (min. 16 characters) before the first start
 docker compose up --build
 ```
 
@@ -73,7 +73,7 @@ py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
 pytest
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 If `Activate.ps1` is blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
@@ -83,19 +83,23 @@ If `Activate.ps1` is blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSign
 ## The "client file → report" flow
 
 ```bash
+# Every route except /health and /ready needs the key from DAAS_API_KEY (header X-API-Key)
+export DAAS_API_KEY="<the value from your .env>"
+
 # 1. Upload — returns the detected column mapping and a ready run_payload
-curl -F "file=@client_export_pl.csv" http://localhost:8000/upload
+curl -H "X-API-Key: $DAAS_API_KEY" -F "file=@client_export_pl.csv" http://localhost:8000/upload
 # {"rows":15,"confidence":1.0,"ready":true,
 #  "mapping":{"revenue":"Wartość brutto", ...},
-#  "run_payload":{"pipeline":"ecommerce_demo","source_path":"...","client_name":"Sklep Demo"}}
+#  "run_payload":{"pipeline":"ecommerce_demo","upload_id":"...","client_name":"Sklep Demo"}}
 
 # 2. Run the pipeline with the payload from step 1
 curl -X POST http://localhost:8000/run \
+     -H "X-API-Key: $DAAS_API_KEY" \
      -H "Content-Type: application/json" \
-     -d '{"pipeline":"ecommerce_demo","source_path":"...","client_name":"Sklep Demo"}'
+     -d '{"pipeline":"ecommerce_demo","upload_id":"...","client_name":"Sklep Demo"}'
 
 # 3. Fetch the report (fmt: html | md | json)
-curl "http://localhost:8000/reports/ecommerce_demo/latest?fmt=html"
+curl -H "X-API-Key: $DAAS_API_KEY" "http://localhost:8000/reports/ecommerce_demo/latest?fmt=html"
 ```
 
 ![n8n workflow: webhook → POST /upload → validation → POST /run → response with a link to the report](docs/n8n_client_workflow.png)

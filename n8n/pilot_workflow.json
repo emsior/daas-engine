@@ -45,6 +45,12 @@
       "parameters": {
         "method": "POST",
         "url": "={{ $env.DAAS_APP_URL || 'http://app:8000' }}/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.DAAS_API_KEY }}" }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={\n  \"pipeline\": \"ecommerce_demo\",\n  \"client_name\": \"Pilot Client\",\n  \"force_mock\": false,\n  \"notify\": false\n}",

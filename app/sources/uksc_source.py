@@ -66,7 +66,7 @@ class UkscSource:
     # ------------------------------------------------------------------
     def _load(self, path: Path, status: DataStatus, detail: str) -> SourceResult:
         if not path.exists():
-            return _blocked(f"{detail}; package not found at {path}")
+            return _blocked(f"{detail}; package not found")
         if path.stat().st_size > MAX_PACKAGE_BYTES:
             return _blocked(f"package too large (> {MAX_PACKAGE_BYTES} bytes)")
         try:

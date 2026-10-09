@@ -30,13 +30,18 @@ class Settings(BaseSettings):
     )
 
     # --- aplikacja ---
-    app_env: str = "dev"
+    #: "dev" wlacza /docs, /redoc, /openapi.json i auto-reload. Wszystko inne (domyslnie "prod") je wylacza.
+    app_env: str = "prod"
     app_name: str = "DaaS Engine"
     app_version: str = "0.3.0"
-    app_host: str = "0.0.0.0"  # noqa: S104  wymagane w kontenerze; lokalnie nadpisz APP_HOST=127.0.0.1
+    #: Domyslnie loopback. W kontenerze obraz ustawia APP_HOST=0.0.0.0 jawnie (Dockerfile).
+    app_host: str = "127.0.0.1"
     app_port: int = 8000
     log_level: str = "INFO"
     daas_policy_enforce: bool = Field(default=False, description="Wymuszenie sprawdzania uprawnień policy w runtime")
+    #: Klucz API (naglowek X-API-Key). Brak = fail-closed: kazda trasa poza /health i /ready odpowiada 401,
+    #: a start na adresie innym niz loopback jest odmawiany. Minimum 16 znakow. Nigdy nie trafia do odpowiedzi ani logow.
+    daas_api_key: str | None = Field(default=None, repr=False)
     # CORS domyslnie wylaczony: n8n i klienci API wolaja serwer-serwer, przegladarka niepotrzebna.
     # Wlaczenie: CORS_ORIGINS='["https://prochpc.pl"]' w .env
     cors_origins: list[str] = Field(default_factory=list)
@@ -85,6 +90,10 @@ class Settings(BaseSettings):
         return self.duckdb_file.parent / AUDIT_LOG_FILENAME
 
     # ---------- auto-detekcja sekretów ----------
+    @property
+    def has_api_key(self) -> bool:
+        return not _is_blank(self.daas_api_key)
+
     @property
     def has_faceit(self) -> bool:
         return not _is_blank(self.faceit_api_key)

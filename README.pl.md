@@ -134,7 +134,7 @@ Copy-Item .env.example .env
 pytest
 
 # 4. start API
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
 Jeśli `Activate.ps1` jest blokowany: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
@@ -162,17 +162,18 @@ n8n bez Dockera: `npx n8n` (wymaga Node 18+). W workflow podmień URL `http://ap
 
 ```bash
 # 1. upload — zwraca wykryte mapowanie kolumn + run_payload
-curl -s -F "file=@data/fixtures/client_export_pl.csv" -F "client_name=Sklep Demo" localhost:8000/upload | jq
+# (każda trasa poza /health i /ready wymaga nagłówka X-API-Key z DAAS_API_KEY)
+curl -s -H "X-API-Key: $DAAS_API_KEY" -F "file=@data/fixtures/client_export_pl.csv" -F "client_name=Sklep Demo" localhost:8000/upload | jq
 # {"rows":15,"confidence":1.0,"ready":true,"mapping":{"revenue":"Wartość brutto",...},
-#  "run_payload":{"pipeline":"ecommerce_demo","source_path":"/srv/app/runtime/uploads/..._client_export_pl.csv","client_name":"Sklep Demo"}}
+#  "run_payload":{"pipeline":"ecommerce_demo","upload_id":"<32 znaki hex>","client_name":"Sklep Demo"}}
 
 # 2. run z run_payload z kroku 1
-curl -s -X POST localhost:8000/run -H "Content-Type: application/json" \
-  -d '{"pipeline":"ecommerce_demo","source_path":"<source_path z uploadu>","client_name":"Sklep Demo"}' | jq
+curl -s -X POST localhost:8000/run -H "X-API-Key: $DAAS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"pipeline":"ecommerce_demo","upload_id":"<upload_id z uploadu>","client_name":"Sklep Demo"}' | jq
 
 # 3. raport dla klienta (HTML w przeglądarce / MD / JSON)
-open http://localhost:8000/reports/ecommerce_demo/latest
-curl -s "localhost:8000/reports/run/<run_id>?fmt=json" | jq .narrative
+curl -s -H "X-API-Key: $DAAS_API_KEY" "localhost:8000/reports/ecommerce_demo/latest?fmt=html" -o raport.html && open raport.html
+curl -s -H "X-API-Key: $DAAS_API_KEY" "localhost:8000/reports/run/<run_id>?fmt=json" | jq .narrative
 ```
 
 Mapper (`app/sources/csv_mapper.py`): aliasy PL/EN dla `order_id, date, product, category, quantity, revenue, cost, profit, discount, status`; auto-detekcja separatora (`;`/`,`/tab) i kodowania (utf-8/cp1250); liczby `1 299,00 zł` / `1,299.00` / `12,5%`; statusy `Zrealizowane/Wysłane/Zwrot/Anulowane/Oczekujące` → `completed/refunded/cancelled/pending`. Brakujące kolumny są dopełniane (`profit = revenue - cost`, `status = completed`, `category = Inne`) i raportowane w polu `generated`; `confidence` mówi, ile z kolumn kluczowych znaleziono w pliku.
@@ -180,22 +181,22 @@ Mapper (`app/sources/csv_mapper.py`): aliasy PL/EN dla `order_id, date, product,
 ### Przykłady curl
 
 ```bash
-curl -s localhost:8000/health | jq
-curl -s localhost:8000/pipelines | jq
+curl -s localhost:8000/health | jq                       # publiczny, bez klucza
+curl -s -H "X-API-Key: $DAAS_API_KEY" localhost:8000/pipelines | jq
 
-curl -s -X POST localhost:8000/run -H "Content-Type: application/json" \
+curl -s -X POST localhost:8000/run -H "X-API-Key: $DAAS_API_KEY" -H "Content-Type: application/json" \
   -d '{"pipeline":"cs2_demo"}' | jq
 
-curl -s -X POST localhost:8000/run -H "Content-Type: application/json" \
+curl -s -X POST localhost:8000/run -H "X-API-Key: $DAAS_API_KEY" -H "Content-Type: application/json" \
   -d '{"pipeline":"ecommerce_demo"}' | jq
 
-curl -s "localhost:8000/runs/latest?pipeline=ecommerce_demo" | jq
+curl -s -H "X-API-Key: $DAAS_API_KEY" "localhost:8000/runs/latest?pipeline=ecommerce_demo" | jq
 ```
 
 PowerShell:
 
 ```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/run -ContentType "application/json" -Body '{"pipeline":"cs2_demo"}' | ConvertTo-Json -Depth 5
+Invoke-RestMethod -Method Post -Uri http://localhost:8000/run -Headers @{ "X-API-Key" = $env:DAAS_API_KEY } -ContentType "application/json" -Body '{"pipeline":"cs2_demo"}' | ConvertTo-Json -Depth 5
 ```
 
 ### Odpowiedź `POST /run`

@@ -39,12 +39,15 @@ jobs:
         run: pytest -v -p no:cacheprovider
       - name: Smoke API
         run: |
+          export DAAS_API_KEY="$(openssl rand -hex 24)"
           uvicorn app.main:app --port 8000 &
           sleep 4
           curl -sf localhost:8000/health
-          curl -sf -X POST localhost:8000/run -H "Content-Type: application/json" -d '{"pipeline":"ecommerce_demo"}' | grep -q '"MOCK_DATA"'
-          curl -sf -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
-          curl -sf localhost:8000/reports/ecommerce_demo/latest | grep -q "<table>"
+          # bez klucza: odmowa (401), z kluczem: dziala
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/run -H 'Content-Type: application/json' -d '{"pipeline":"ecommerce_demo"}')" = "401"
+          curl -sf -X POST localhost:8000/run -H "X-API-Key: $DAAS_API_KEY" -H "Content-Type: application/json" -d '{"pipeline":"ecommerce_demo"}' | grep -q '"MOCK_DATA"'
+          curl -sf -H "X-API-Key: $DAAS_API_KEY" -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
+          curl -sf -H "X-API-Key: $DAAS_API_KEY" localhost:8000/reports/ecommerce_demo/latest | grep -q "<table>"
 
   security:
     runs-on: ubuntu-latest
@@ -82,8 +85,10 @@ jobs:
         run: docker build -t daas-engine:ci .
       - name: Run container & smoke
         run: |
-          docker run -d --rm --name daas -p 8000:8000 daas-engine:ci
+          KEY="$(openssl rand -hex 24)"
+          docker run -d --rm --name daas -e DAAS_API_KEY="$KEY" -p 127.0.0.1:8000:8000 daas-engine:ci
           for i in $(seq 1 20); do curl -sf localhost:8000/health && break || sleep 1; done
-          curl -sf -X POST localhost:8000/run -H "Content-Type: application/json" -d '{"pipeline":"cs2_demo"}' | grep -q '"SUCCESS"'
-          curl -sf -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/run -H 'Content-Type: application/json' -d '{"pipeline":"cs2_demo"}')" = "401"
+          curl -sf -X POST localhost:8000/run -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d '{"pipeline":"cs2_demo"}' | grep -q '"SUCCESS"'
+          curl -sf -H "X-API-Key: $KEY" -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
           docker stop daas

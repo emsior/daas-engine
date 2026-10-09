@@ -58,6 +58,11 @@ class ReasonCode:
     POLICY_DENIED = "policy_denied"
     PARSER_ERROR = "parser_error"
     INTERNAL_ERROR = "internal_error"
+    # uwierzytelnianie i uruchomienia (zdarzenia audytowe poza uploadem)
+    AUTH_MISSING = "auth_missing"
+    AUTH_INVALID = "auth_invalid"
+    AUTH_NOT_CONFIGURED = "auth_not_configured"
+    RUN_FAILED = "run_failed"
 
 
 class UploadRejected(Exception):
@@ -288,44 +293,57 @@ def _assert_schema(header: list[str]) -> None:
 
 
 # --------------------------------------------------------------------------- audyt
+#: Dozwolone wartosci pola `action` w zdarzeniu audytowym.
+AUDIT_ACTIONS: frozenset[str] = frozenset({"upload", "run", "auth_denied"})
+
+
 def build_audit_event(
     *,
     allowed: bool,
     reason: str,
     deployment_id: str,
-    size_bytes: int,
+    size_bytes: int = 0,
+    action: str = "upload",
     upload_id: str | None = None,
     encoding: str | None = None,
     content_sha256: str | None = None,
+    pipeline: str | None = None,
+    run_id: str | None = None,
+    request_id: str | None = None,
+    client_ip: str | None = None,
+    route: str | None = None,
 ) -> dict[str, Any]:
-    """Buduje zdarzenie audytowe o scisle ograniczonym zestawie pol.
+    """Buduje zdarzenie audytowe o scisle ograniczonym zestawie pol (`AUDIT_ALLOWED_KEYS`).
 
-    Swiadomie NIE przyjmuje nazwy pliku od klienta ani sciezki — funkcja nie
-    ma jak ich wyciec, bo ich nie widzi. To mocniejsza gwarancja niz
-    filtrowanie na wyjsciu.
+    Swiadomie NIE przyjmuje nazwy pliku od klienta, sciezki, nazwy klienta ani podanego klucza API —
+    funkcja nie ma jak ich wyciec, bo ich nie widzi. To mocniejsza gwarancja niz filtrowanie na wyjsciu.
+    `action` ∈ AUDIT_ACTIONS: `upload`, `run`, `auth_denied`.
     """
+    if action not in AUDIT_ACTIONS:
+        raise ValueError(f"unknown audit action: {action!r}")
     event: dict[str, Any] = {
         "event_id": uuid.uuid4().hex,
         "ts": round(time.time(), 3),
         "deployment_id": deployment_id,
-        "action": "upload",
+        "action": action,
         "decision": "allow" if allowed else "deny",
         "reason_code": reason,
         "size_bytes": size_bytes,
     }
-    if upload_id:
-        event["upload_id"] = upload_id
-    if encoding:
-        event["encoding"] = encoding
-    if content_sha256:
-        event["content_sha256"] = content_sha256
+    optional = {
+        "upload_id": upload_id, "encoding": encoding, "content_sha256": content_sha256,
+        "pipeline": pipeline, "run_id": run_id, "request_id": request_id,
+        "client_ip": client_ip, "route": route,
+    }
+    event.update({key: value for key, value in optional.items() if value})
     return event
 
 
-#: Jedyne dopuszczalne klucze zdarzenia audytowego uploadu.
+#: Jedyne dopuszczalne klucze zdarzenia audytowego (upload, run, auth_denied).
 AUDIT_ALLOWED_KEYS: frozenset[str] = frozenset({
     "event_id", "ts", "deployment_id", "action", "decision",
     "reason_code", "size_bytes", "upload_id", "encoding", "content_sha256",
+    "pipeline", "run_id", "request_id", "client_ip", "route",
 })
 
 
