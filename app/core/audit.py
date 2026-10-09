@@ -19,7 +19,7 @@ log = logging.getLogger(__name__)
 
 def deployment_id_for(settings: Settings) -> str:
     """Pseudonim wdrozenia (skrot sciezki uploads/); te sama wartosc co w audycie uploadow."""
-    return safe_deployment_id(settings.reports_path.parent / "uploads")
+    return safe_deployment_id(settings.uploads_path)
 
 
 def record(request: Request, *, action: str, allowed: bool, reason: str, size_bytes: int = 0,

@@ -6,7 +6,7 @@ import os
 from collections.abc import Mapping
 
 from app.core.auth import ApiKeyAuth, is_loopback_host
-from app.core.config import Settings
+from app.core.config import MIN_SECRET_KEY_LENGTH, Settings
 
 log = logging.getLogger(__name__)
 
@@ -37,8 +37,23 @@ def validate_startup(settings: Settings) -> ApiKeyAuth:
     * klucz zbyt krotki -> RuntimeError (z `ApiKeyAuth.from_settings`),
     * brak klucza + adres inny niz loopback -> RuntimeError,
     * brak klucza + loopback -> start dozwolony, ale kazda trasa chroniona odpowiada 401 (ostrzezenie w logu).
+
+    Tryb `cloud`: klucze leza w control plane, wiec DAAS_API_KEY nie jest wymagany ani uzywany; za to
+    DAAS_SECRET_KEY (min. 32 znaki) jest wymagany na kazdym adresie — bez niego nie da sie podpisac sesji.
+    Tryb `selfhost`: DAAS_SECRET_KEY jest opcjonalny (bez niego logowanie magic linkiem jest wylaczone),
+    ale jesli ustawiony, musi miec min. 32 znaki.
     """
     check_single_worker()
+    configured_secret = (settings.daas_secret_key or "").strip()
+    if settings.cloud and not settings.has_secret_key:
+        raise RuntimeError(
+            f"DAAS_SECRET_KEY is required in cloud mode (at least {MIN_SECRET_KEY_LENGTH} characters). "
+            "Generate one with: openssl rand -hex 32"
+        )
+    if configured_secret and not settings.has_secret_key:
+        raise RuntimeError(f"DAAS_SECRET_KEY is too short: at least {MIN_SECRET_KEY_LENGTH} characters are required.")
+    if settings.cloud:
+        return ApiKeyAuth(None)
     auth = ApiKeyAuth.from_settings(settings)
     if not auth.configured:
         if not is_loopback_host(settings.app_host):

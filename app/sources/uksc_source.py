@@ -55,7 +55,7 @@ class UkscSource:
             reason = "force_mock=true" if force_mock else "no source_path -> fixture fallback"
             return self._load(self.fixture_path, DataStatus.MOCK_DATA, reason)
 
-        uploads_root = (self.settings.reports_path.parent / "uploads").resolve()
+        uploads_root = self.settings.uploads_path.resolve()
         p = Path(source_path).resolve()
         if not p.is_relative_to(uploads_root):
             return _blocked("source_path outside allowed uploads directory")

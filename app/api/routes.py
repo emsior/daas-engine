@@ -15,6 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from sqlalchemy import text
 
 from app.core import audit, xlsx_import
 from app.core.auth import require_api_key
@@ -50,6 +51,9 @@ from app.pipelines.runner import PIPELINES, PipelineRunner
 
 log = logging.getLogger(__name__)
 
+#: Prefiksy tras legacy (tylko selfhost); dostaja naglowek `Deprecation`.
+LEGACY_PREFIXES: tuple[str, ...] = ("/pipelines", "/run", "/runs", "/stats", "/upload", "/reports")
+
 public_router = APIRouter()
 # kolejnosc ma znaczenie: limit per IP (takze dla anonimowych), potem klucz API
 router = APIRouter(dependencies=[Depends(limit_ip), Depends(require_api_key)])
@@ -63,14 +67,29 @@ def _runner(request: Request) -> PipelineRunner:
 def health(request: Request) -> HealthResponse:
     """Liveness. Publiczny i minimalny: status, wersja, tryb. Bez sciezek, konfiguracji i sekretow."""
     s = request.app.state.settings
-    return HealthResponse(app=s.app_name, version=installed_version(s.app_version), timestamp=datetime.utcnow())
+    return HealthResponse(app=s.app_name, version=installed_version(s.app_version), mode=s.daas_mode,
+                          timestamp=datetime.utcnow())
+
+
+def _probe_runtime_dir(directory: Path) -> None:
+    """Sprawdza, ze katalog runtime jest zapisywalny (tworzy i usuwa plik probny)."""
+    directory.mkdir(parents=True, exist_ok=True)
+    probe = directory / f".ready-{os.getpid()}"
+    probe.write_bytes(b"ok")
+    probe.unlink()
 
 
 @public_router.get("/ready", response_model=ReadyResponse, tags=["system"], responses={503: {"model": ReadyResponse}})
-def ready(request: Request):
-    """Readiness: runner istnieje, a baza odpowiada. Przy bledzie 503 bez szczegolow (szczegoly w logu)."""
+async def ready(request: Request):
+    """Readiness: baza control plane odpowiada (`SELECT 1`), katalog runtime jest zapisywalny, a w trybie
+    selfhost takze baza organizacji `default`. Przy bledzie 503 bez szczegolow (szczegoly w logu)."""
+    state = request.app.state
     try:
-        _runner(request).db.table_counts()
+        async with state.db_sessionmaker() as db:
+            await db.execute(text("SELECT 1"))
+        await run_in_threadpool(_probe_runtime_dir, state.settings.runtime_dir)
+        if state.runner is not None:
+            await run_in_threadpool(state.runner.db.table_counts)
     except Exception:  # noqa: BLE001
         log.exception("readiness check failed")
         return JSONResponse(ReadyResponse(status="not_ready").model_dump(), status_code=503)
@@ -133,7 +152,7 @@ def stats(request: Request) -> dict:
 # ---------------------------------------------------------------------------
 def _uploads_root(settings) -> Path:
     """Runtime root tego wdrozenia. Model: jeden klient = jedna instancja."""
-    root = settings.reports_path.parent / "uploads"
+    root = settings.uploads_path
     root.mkdir(parents=True, exist_ok=True)
     return root
 

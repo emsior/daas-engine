@@ -95,7 +95,7 @@ class HealthResponse(BaseModel):
     status: Literal["ok"] = "ok"
     app: str
     version: str
-    mode: Literal["selfhost"] = "selfhost"
+    mode: Literal["selfhost", "cloud"] = "selfhost"
     timestamp: datetime
 
 

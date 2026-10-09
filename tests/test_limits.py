@@ -13,7 +13,7 @@ from app.core.config import Settings
 from app.core.ratelimit import RateLimiter
 from app.core.upload_guard import ReasonCode, cleanup_stale_tmp
 from app.main import create_app
-from tests.conftest import API_KEY_HEADER, PROJECT_ROOT, TEST_API_KEY, auth_headers
+from tests.conftest import API_KEY_HEADER, PROJECT_ROOT, TEST_API_KEY, auth_headers, default_tenant
 
 CSV = (PROJECT_ROOT / "data" / "fixtures" / "client_export_pl.csv").read_bytes()
 
@@ -53,7 +53,7 @@ def limited(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def _audit(s: Settings) -> list[dict]:
-    p = s.audit_log_path
+    p = default_tenant(s).audit_log
     return [json.loads(x) for x in p.read_text(encoding="utf-8").splitlines() if x.strip()] if p.exists() else []
 
 
@@ -126,7 +126,7 @@ def test_rejected_upload_does_not_leave_files_behind_when_limited(limited):
     c, s = limited(daas_rate_limit_upload_per_min=1)
     c.post("/upload", files={"file": ("a.csv", CSV, "text/csv")})
     c.post("/upload", files={"file": ("a.csv", CSV, "text/csv")})
-    up = s.reports_path.parent / "uploads"
+    up = default_tenant(s).uploads
     assert len(list(up.glob("*.csv"))) == 1 and list(up.glob("*.tmp")) == []
 
 
@@ -183,7 +183,7 @@ def test_defaults_are_enabled_and_sane():
 # ---------------------------------------------------------------- kwota uploadow
 def test_upload_quota_blocks_when_storage_is_full(limited):
     c, s = limited(daas_upload_quota_bytes=len(CSV) * 2 + 10)
-    up = s.reports_path.parent / "uploads"
+    up = default_tenant(s).uploads
     assert c.post("/upload", files={"file": ("a.csv", CSV, "text/csv")}).status_code == 200
     assert c.post("/upload", files={"file": ("b.csv", CSV, "text/csv")}).status_code == 200
     r = c.post("/upload", files={"file": ("c.csv", CSV, "text/csv")})
@@ -200,7 +200,7 @@ def test_upload_quota_blocks_when_storage_is_full(limited):
 def test_upload_quota_counts_the_incoming_bytes_while_streaming(limited):
     c, s = limited(daas_upload_quota_bytes=len(CSV) - 1)
     assert c.post("/upload", files={"file": ("a.csv", CSV, "text/csv")}).status_code == 413
-    assert list((s.reports_path.parent / "uploads").glob("*")) == []
+    assert list((default_tenant(s).uploads).glob("*")) == []
 
 
 # ---------------------------------------------------------------- sprzatanie *.tmp
@@ -239,7 +239,7 @@ def test_cleanup_on_a_missing_directory_is_a_noop(tmp_path: Path):
 
 def test_upload_cleans_stale_tmp_files_of_crashed_requests(limited):
     c, s = limited()
-    up = s.reports_path.parent / "uploads"
+    up = default_tenant(s).uploads
     stale = _make_tmp(up, STALE, 3600)
     fresh = _make_tmp(up, FRESH, 5)
     assert c.post("/upload", files={"file": ("a.csv", CSV, "text/csv")}).status_code == 200
@@ -250,7 +250,7 @@ def test_startup_removes_leftover_tmp_files(tmp_path: Path):
     s = Settings(_env_file=None, daas_api_key=TEST_API_KEY, duckdb_path=str(tmp_path / "d.duckdb"),
                  reports_dir=str(tmp_path / "reports"), fixtures_dir=str(PROJECT_ROOT / "data" / "fixtures"))
     s.ensure_dirs()
-    leftover = _make_tmp(s.reports_path.parent / "uploads", FRESH, 0)
+    leftover = _make_tmp(default_tenant(s).uploads, FRESH, 0)
     with TestClient(create_app(s)):
         pass
     assert not leftover.exists()
@@ -258,5 +258,5 @@ def test_startup_removes_leftover_tmp_files(tmp_path: Path):
 
 def test_stale_tmp_does_not_count_against_the_quota(limited):
     c, s = limited(daas_upload_quota_bytes=len(CSV) + 100)
-    _make_tmp(s.reports_path.parent / "uploads", STALE, 3600)
+    _make_tmp(default_tenant(s).uploads, STALE, 3600)
     assert c.post("/upload", files={"file": ("a.csv", CSV, "text/csv")}).status_code == 200

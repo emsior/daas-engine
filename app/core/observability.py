@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import sys
+import threading
 import time
 import uuid
 from collections.abc import Iterable
@@ -22,6 +23,8 @@ from typing import Any
 
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
+
+from app.api.problems import PROBLEM_MEDIA_TYPE, is_v1_path, problem_body
 
 _request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("daas_request_id", default=None)
 _VALID_REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
@@ -130,10 +133,16 @@ class RequestIdMiddleware:
                 log.exception("unhandled exception method=%s path=%s", scope.get("method"), scope.get("path"))
                 if response_started:
                     raise
-                body = json.dumps({"detail": "internal server error", "code": "internal_error",
-                                   "request_id": rid}).encode()
+                path = scope.get("path", "")
+                if is_v1_path(path):
+                    payload = problem_body(500, "internal_error", "internal server error", path, rid)
+                    media = PROBLEM_MEDIA_TYPE
+                else:
+                    payload = {"detail": "internal server error", "code": "internal_error", "request_id": rid}
+                    media = "application/json"
+                body = json.dumps(payload).encode()
                 await send_with_id({"type": "http.response.start", "status": 500, "headers": [
-                    (b"content-type", b"application/json"), (b"content-length", str(len(body)).encode())]})
+                    (b"content-type", media.encode()), (b"content-length", str(len(body)).encode())]})
                 await send_with_id({"type": "http.response.body", "body": body})
         finally:
             access_log.info("request", extra={"fields": {
@@ -171,3 +180,77 @@ class SecurityHeadersMiddleware:
             await send(message)
 
         await self.app(scope, receive, send_with_headers)
+
+
+# --------------------------------------------------------------------------- trasy legacy
+class DeprecationMiddleware:
+    """Dokleja `Deprecation: true` i `Link: </api/v1>; rel="successor-version"` do tras legacy (tryb selfhost).
+
+    Dziala na poziomie ASGI, bo odpowiedzi typu `HTMLResponse`/`FileResponse` nie dziedzicza naglowkow
+    ustawionych przez zaleznosci FastAPI.
+    """
+
+    def __init__(self, app: ASGIApp, paths: Iterable[str]) -> None:
+        self.app = app
+        self.prefixes = tuple(paths)
+
+    def _is_legacy(self, path: str) -> bool:
+        return any(path == p or path.startswith(p + "/") for p in self.prefixes)
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http" or not self._is_legacy(scope.get("path", "")):
+            await self.app(scope, receive, send)
+            return
+
+        async def send_marked(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(scope=message)
+                headers["Deprecation"] = "true"
+                headers["Link"] = '</api/v1>; rel="successor-version"'
+            await send(message)
+
+        await self.app(scope, receive, send_marked)
+
+
+# --------------------------------------------------------------------------- metryki
+class Metrics:
+    """Liczniki HTTP w pamieci procesu. Etykiety: szablon trasy i status — nigdy sciezka z identyfikatorami,
+    parametry ani dane klienta (kardynalnosc ograniczona liczba tras)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.http: dict[tuple[str, int], int] = {}
+
+    def observe(self, route: str, status: int) -> None:
+        with self._lock:
+            self.http[(route, status)] = self.http.get((route, status), 0) + 1
+
+    def snapshot(self) -> dict[tuple[str, int], int]:
+        with self._lock:
+            return dict(self.http)
+
+
+class MetricsMiddleware:
+    """Zlicza zapytania HTTP wg szablonu trasy (`/api/v1/orgs/{org_id}/jobs`) i statusu."""
+
+    def __init__(self, app: ASGIApp, metrics: Metrics) -> None:
+        self.app = app
+        self.metrics = metrics
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        status = 500
+
+        async def send_counting(message: Message) -> None:
+            nonlocal status
+            if message["type"] == "http.response.start":
+                status = message["status"]
+            await send(message)
+
+        try:
+            await self.app(scope, receive, send_counting)
+        finally:
+            route = getattr(scope.get("route"), "path", None) or "unmatched"
+            self.metrics.observe(route, status)

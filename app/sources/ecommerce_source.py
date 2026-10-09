@@ -37,7 +37,7 @@ class EcommerceSource:
         # 0) plik klienta (z POST /upload) — najwyższy priorytet
         #    SECURITY: canonicalization + sprawdzenie, że plik jest w uploads/
         if source_path:
-            uploads_root = (self.settings.reports_path.parent / "uploads").resolve()
+            uploads_root = self.settings.uploads_path.resolve()
             p = Path(source_path).resolve()
             if not p.is_relative_to(uploads_root.resolve()):
                 return SourceResult(

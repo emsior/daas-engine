@@ -12,7 +12,7 @@ from app.core.config import Settings, reset_settings_cache
 from app.core.models import DataStatus, RunRequest, RunStatus
 from app.pipelines.runner import PipelineRunner
 from app.storage.duckdb_client import DuckDBClient
-from tests.conftest import PROJECT_ROOT
+from tests.conftest import PROJECT_ROOT, default_tenant
 
 
 @pytest.fixture(params=[False, True], ids=["policy-off", "policy-on"])
@@ -181,7 +181,7 @@ class TestTenantIsolation:
     def test_source_path_into_another_deployment_is_blocked(self, two_deployments):
         ca, cb, sa, _ = two_deployments
         ca.post("/upload", files={"file": ("dane.csv", CSV_BYTES, "text/csv")})
-        foreign = next((sa.reports_path.parent / "uploads").glob("*.csv"))
+        foreign = next(default_tenant(sa).uploads.glob("*.csv"))
         r = cb.post("/run", json={"pipeline": "ecommerce_demo", "source_path": str(foreign)})
         body = r.json()
         assert body["run_status"] == "FAILED" and body["error"].startswith("POLICY_DENIED")
@@ -197,8 +197,8 @@ class TestTenantIsolation:
         ca, cb, sa, sb = two_deployments
         ca.post("/run", json={"pipeline": "cs2_demo"})
         cb.get("/pipelines", headers={"X-API-Key": KEY_A})  # odmowa na B
-        a_events = [json.loads(x)["action"] for x in sa.audit_log_path.read_text(encoding="utf-8").splitlines()]
-        b_events = [json.loads(x)["action"] for x in sb.audit_log_path.read_text(encoding="utf-8").splitlines()]
+        a_events = [json.loads(x)["action"] for x in default_tenant(sa).audit_log.read_text(encoding="utf-8").splitlines()]
+        b_events = [json.loads(x)["action"] for x in default_tenant(sb).audit_log.read_text(encoding="utf-8").splitlines()]
         assert a_events == ["run"]
         assert b_events == ["auth_denied"]
 
