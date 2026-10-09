@@ -9,11 +9,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /srv/app
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md requirements.lock ./
 COPY app ./app
 COPY data ./data
 
-RUN pip install --upgrade pip && pip install .
+# Zaleznosci wylacznie z requirements.lock (wersje + hashe SHA-256); pakiet instalowany bez rozwiazywania zaleznosci.
+RUN pip install "pip==26.2.1" \
+    && pip install --require-hashes --no-deps -r requirements.lock \
+    && pip install --no-deps --no-build-isolation .
 
 # Kontener nie dziala jako root
 RUN useradd --system --uid 10001 --home-dir /srv/app daas \

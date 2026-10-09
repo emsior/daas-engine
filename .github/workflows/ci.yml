@@ -29,7 +29,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
-        run: pip install -e ".[dev]" "ruff==0.16.8"
+        run: pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
       - name: OPSEC check
         run: |
           ! git grep -iE "mcq089[@]|bukmache[r]|bettin[g]" -- ':!*.png' ':!*.mp4'

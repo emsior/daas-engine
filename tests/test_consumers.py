@@ -80,3 +80,42 @@ def test_compose_publishes_ports_on_loopback_only_and_requires_the_key():
     for name in ("app", "n8n"):
         assert "DAAS_API_KEY" in compose["services"][name]["environment"]
         assert ":?" in compose["services"][name]["environment"]["DAAS_API_KEY"]
+
+
+# ---------------------------------------------------------------- zaleznosci przypiete hashami (H11)
+LOCKS = ("requirements.lock", "requirements-dev.lock")
+
+
+@pytest.mark.parametrize("name", LOCKS)
+def test_lock_files_pin_every_package_with_hashes(name):
+    text = (PROJECT_ROOT / name).read_text(encoding="utf-8")
+    entries = re.findall(r"^([A-Za-z0-9_.\-]+)==([^\s\\]+)", text, flags=re.M)
+    assert len(entries) > 10
+    blocks = re.split(r"^(?=[A-Za-z0-9_.\-]+==)", text, flags=re.M)[1:]
+    assert len(blocks) == len(entries)
+    for block in blocks:
+        assert "--hash=sha256:" in block, block.splitlines()[0]
+    names = {n.lower() for n, _ in entries}
+    assert {"fastapi", "duckdb", "openpyxl", "pandas"} <= names
+
+
+def test_dev_lock_includes_pinned_ruff_and_runtime_lock_does_not():
+    runtime = (PROJECT_ROOT / "requirements.lock").read_text(encoding="utf-8")
+    dev = (PROJECT_ROOT / "requirements-dev.lock").read_text(encoding="utf-8")
+    assert "\nruff==0.16.8" in dev
+    assert "\nruff==" not in runtime and "\npytest==" not in runtime
+
+
+def test_dockerfile_and_ci_install_from_hash_locked_files():
+    df = (PROJECT_ROOT / "Dockerfile").read_text(encoding="utf-8")
+    assert "requirements.lock" in df and "--require-hashes" in df
+    assert "pip install --upgrade pip" not in df and 'pip==' in df
+    ci = (PROJECT_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "--require-hashes -r requirements-dev.lock" in ci
+
+
+def test_n8n_image_is_pinned_to_an_exact_version():
+    import yaml
+
+    compose = yaml.safe_load((PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
+    assert compose["services"]["n8n"]["image"] == "n8nio/n8n:2.43.1"

@@ -28,6 +28,7 @@ dependencies = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "ruff==0.16.8",  # ta sama wersja co w CI; zależność wyłącznie developerska
 ]
 
 [tool.setuptools.packages.find]
