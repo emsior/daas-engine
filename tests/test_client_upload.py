@@ -12,7 +12,7 @@ from app.core.models import DataStatus, RunRequest, RunStatus
 from app.reporting.narrative import build_narrative, template_narrative
 from app.sources.csv_mapper import _to_number, detect_mapping, map_dataframe, read_client_csv
 from app.transforms.ecommerce_transform import transform_ecommerce
-from tests.test_pipelines import PROJECT_ROOT, client, runner, settings  # noqa: F401  (fixtures)
+from tests.conftest import PROJECT_ROOT, auth_headers  # noqa: F401  (fixture'y: tests/conftest.py)
 
 PL_FIXTURE = PROJECT_ROOT / "data" / "fixtures" / "client_export_pl.csv"
 

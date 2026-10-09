@@ -33,6 +33,7 @@ from app.core.models import RunRequest
 from app.core.policy import Budget, RunSQL, default_audit_log, enforce
 from app.pipelines.runner import PipelineRunner
 from app.storage.duckdb_client import DuckDBClient
+from tests.conftest import auth_headers
 
 HEADER = "Data,Kwota,Produkt\n"
 ROW = "2026-03-01,100.00,Produkt testowy\n"
@@ -75,7 +76,7 @@ def deployment(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
     runner = PipelineRunner(settings=settings, db=DuckDBClient(settings.duckdb_file))
     app = create_app()
-    with TestClient(app) as client:
+    with TestClient(app, headers=auth_headers()) as client:
         app.state.runner = runner
         yield {
             "client": client,

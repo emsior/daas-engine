@@ -26,7 +26,7 @@ from app.core.upload_guard import (
 )
 from app.pipelines.runner import PipelineRunner
 from app.storage.duckdb_client import DuckDBClient
-from tests.test_pipelines import PROJECT_ROOT, client, runner, settings  # noqa: F401  (fixtures)
+from tests.conftest import PROJECT_ROOT, auth_headers  # noqa: F401  (fixture'y: tests/conftest.py)
 
 HEADER = "Data,Kwota,Produkt\n"
 ROW = "2026-03-01,100.00,Produkt testowy\n"
@@ -100,7 +100,7 @@ def policy_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     s.ensure_dirs()
     r = PipelineRunner(settings=s, db=DuckDBClient(s.duckdb_file))
     app = create_app()
-    with TestClient(app) as c:
+    with TestClient(app, headers=auth_headers()) as c:
         app.state.runner = r
         yield c, s
     reset_settings_cache()

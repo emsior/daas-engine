@@ -4,49 +4,14 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app.core.config import Settings, reset_settings_cache
+from app.core.config import Settings
 from app.core.models import DataStatus, RunRequest, RunStatus
 from app.pipelines.runner import PipelineRunner
-from app.storage.duckdb_client import DuckDBClient
 from app.transforms.cs2_transform import compute_form_score, transform_cs2
 from app.transforms.ecommerce_transform import transform_ecommerce
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
-
-
-@pytest.fixture()
-def settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
-    # Wyczyść sekrety -> wymuszamy MOCK_DATA niezależnie od .env dewelopera
-    for key in ("FACEIT_API_KEY", "FACEIT_PLAYER_NICKNAME", "LIQUIPEDIA_USER_AGENT", "APIFY_TOKEN",
-                "DISCORD_WEBHOOK_URL", "APIFY_DATASET_ID", "ECOMMERCE_CSV_PATH", "ANTHROPIC_API_KEY"):
-        monkeypatch.delenv(key, raising=False)
-    monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "test.duckdb"))
-    monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "reports"))
-    monkeypatch.setenv("FIXTURES_DIR", str(PROJECT_ROOT / "data" / "fixtures"))
-    reset_settings_cache()
-    s = Settings(_env_file=None)
-    s.ensure_dirs()
-    yield s
-    reset_settings_cache()
-
-
-@pytest.fixture()
-def runner(settings: Settings) -> PipelineRunner:
-    return PipelineRunner(settings=settings, db=DuckDBClient(settings.duckdb_file))
-
-
-@pytest.fixture()
-def client(settings: Settings, runner: PipelineRunner) -> TestClient:
-    from app.main import create_app
-
-    app = create_app()
-    with TestClient(app) as c:
-        # podmieniamy runner na testowy (tymczasowa baza)
-        app.state.runner = runner
-        yield c
+from tests.conftest import PROJECT_ROOT  # noqa: F401  (re-eksport; fixture'y w conftest.py)
 
 
 # ---------------------------------------------------------------------------

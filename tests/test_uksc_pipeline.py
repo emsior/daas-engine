@@ -16,6 +16,7 @@ from app.pipelines.runner import PIPELINES, PipelineRunner
 from app.sources.uksc_source import UkscSource, compute_package_hash
 from app.storage.duckdb_client import DuckDBClient
 from app.transforms.uksc_transform import transform_uksc
+from tests.conftest import auth_headers
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = PROJECT_ROOT / "data" / "fixtures" / "uksc"
@@ -223,7 +224,7 @@ def test_pipeline_failed_run_when_package_bad(runner: PipelineRunner, settings: 
 
 def test_api_accepts_uksc_pipeline(settings: Settings, monkeypatch: pytest.MonkeyPatch):
     from app.main import app
-    with TestClient(app) as client:
+    with TestClient(app, headers=auth_headers()) as client:
         r = client.get("/pipelines")
         assert r.status_code == 200
         assert any(p["name"] == "uksc_evidence" for p in r.json())
