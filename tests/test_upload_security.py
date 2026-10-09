@@ -185,11 +185,13 @@ def test_u04_multiple_files_rejected(client: TestClient, settings):  # noqa: F81
 # U05 — niedozwolone rozszerzenia
 # ===========================================================================
 @pytest.mark.parametrize("name", [
-    "dane.xlsx", "dane.xls", "dane.zip", "dane.gz", "dane.tar",
+    "dane.xlsm", "dane.xls", "dane.zip", "dane.gz", "dane.tar",
     "dane.pdf", "dane.json", "dane.xml", "dane.txt", "dane.tsv",
     "dane.png", "dane.exe", "dane", "dane.csv.exe",
 ])
 def test_u05_forbidden_extensions_rejected(client: TestClient, settings, name):  # noqa: F811
+    # H9: dozwolone sa .csv i .xlsx (import z limitami: tests/test_xlsx_upload.py); .xlsx usuniete z tej listy,
+    # w jego miejsce .xlsm (skoroszyt z makrami)
     r = client.post("/upload", files={"file": (name, csv_bytes(3), "text/csv")})
     assert r.status_code == 415, f"{name}: oczekiwano 415, otrzymano {r.status_code}"
     assert_no_leftovers(settings)

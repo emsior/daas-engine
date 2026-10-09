@@ -13,9 +13,10 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
-from app.core import audit
+from app.core import audit, xlsx_import
 from app.core.auth import require_api_key
 from app.core.config import installed_version
 from app.core.models import (
@@ -30,6 +31,7 @@ from app.core.ratelimit import limit_ip, limit_run, limit_upload
 from app.core.redact import redact_run
 from app.core.upload_guard import (
     CHUNK_SIZE,
+    MAX_RECORDS,
     MAX_UPLOAD_BYTES,
     ReasonCode,
     UploadRejected,
@@ -38,6 +40,7 @@ from app.core.upload_guard import (
     dir_usage_bytes,
     ensure_inside_root,
     final_path_for,
+    is_xlsx_name,
     new_upload_id,
     temp_path_for,
     validate_csv_bytes,
@@ -191,8 +194,12 @@ def _enforce_policy_on_path(settings, final_path: Path, root: Path, audit_log: P
 
 @router.post("/upload", response_model=UploadResponse, tags=["pipelines"], dependencies=[Depends(limit_upload)])
 async def upload(request: Request, file: UploadFile = File(...),
-                 client_name: str | None = Form(default=None)) -> UploadResponse:
-    """Przyjmuje plik CSV klienta i zwraca wykryte mapowanie kolumn.
+                 client_name: str | None = Form(default=None),
+                 sheet: str | None = Form(default=None, max_length=xlsx_import.MAX_SHEET_NAME_LEN)) -> UploadResponse:
+    """Przyjmuje plik CSV lub XLSX klienta i zwraca wykryte mapowanie kolumn.
+
+    XLSX (limity i kontrole: `app.core.xlsx_import`) jest konwertowany do CSV i dalej idzie ta sama
+    sciezka co CSV. Skoroszyt z wieloma arkuszami wymaga pola `sheet`; pole jest ignorowane dla CSV.
 
     Kolejnosc: walidacja nazwy -> strumieniowy zapis tymczasowy -> walidacja
     tresci -> policy -> atomowa finalizacja. Plik finalny powstaje dopiero po
@@ -224,7 +231,14 @@ async def upload(request: Request, file: UploadFile = File(...),
         size_bytes = await _stream_to_temp(file, tmp_path, quota_remaining)
 
         raw = tmp_path.read_bytes()
-        result = validate_csv_bytes(raw)
+        received_sha256 = content_hash(raw)  # skrot pliku w tej postaci, w jakiej przyszedl (XLSX albo CSV)
+        max_records = MAX_RECORDS
+        if is_xlsx_name(file.filename or ""):
+            # parsowanie poza petla zdarzen: odczyt XLSX bywa kosztowny
+            raw, _ = await run_in_threadpool(xlsx_import.xlsx_to_csv_bytes, tmp_path, sheet)
+            tmp_path.write_bytes(raw)  # od tej chwili plik tymczasowy to CSV
+            max_records = xlsx_import.MAX_XLSX_ROWS
+        result = validate_csv_bytes(raw, max_records=max_records)
 
         _enforce_policy_on_path(settings, final_path, root, audit_log)
 
@@ -237,7 +251,7 @@ async def upload(request: Request, file: UploadFile = File(...),
         audit.record(
             request, action="upload", allowed=True, reason=ReasonCode.OK,
             size_bytes=size_bytes, upload_id=upload_id,
-            encoding=result.encoding, content_sha256=content_hash(raw),
+            encoding=result.encoding, content_sha256=received_sha256,
         )
 
         return UploadResponse(

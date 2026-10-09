@@ -198,14 +198,11 @@ def test_api_upload_rejects_bad_input(client: TestClient):  # noqa: F811
     assert "a;b" not in detail and "'a'" not in detail
 
 
-def test_api_upload_rejects_xlsx(client: TestClient, settings):  # noqa: F811
-    """XLSX nie jest już przyjmowany przez /upload — wyłącznie CSV (PR #3, punkt 2 kontraktu).
+def test_api_upload_accepts_xlsx_export(client: TestClient, settings):  # noqa: F811
+    """XLSX jest przyjmowany przez /upload (H9, wariant B) i trafia na te sama sciezke co CSV.
 
-    Zastępuje wcześniejszy test_api_upload_xlsx_export, który sprawdzał, że upload
-    pliku .xlsx kończy się powodzeniem. Kontrakt PR #3 zawęża wejście do .csv, bo
-    parser XLSX to nieporównanie szersza powierzchnia ataku niż tekstowy CSV.
-
-    Skutek dla klienta: eksport z Allegro/Shoper/Excela trzeba zapisać jako CSV.
+    Zastepuje test_api_upload_rejects_xlsx (PR #3: tylko .csv). Limity, makra, arkusze i zip-bomb:
+    tests/test_xlsx_upload.py.
     """
 
     import openpyxl
@@ -223,10 +220,11 @@ def test_api_upload_rejects_xlsx(client: TestClient, settings):  # noqa: F811
                                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
                     data={"client_name": "Sklep XLSX"})
 
-    assert r.status_code == 415, r.text
+    assert r.status_code == 200, r.text
+    up = r.json()
+    assert up["ready"] is True and up["rows"] == len(df)
 
-    # Odmowa nie może zostawić po sobie ani pliku finalnego, ani tymczasowego.
+    # Na dysku zostaje wylacznie CSV; plik tymczasowy jest sprzatniety.
     uploads = settings.reports_path.parent / "uploads"
-    if uploads.exists():
-        assert list(uploads.glob("*.csv")) == []
-        assert list(uploads.glob("*.tmp")) == []
+    assert len(list(uploads.glob("*.csv"))) == 1
+    assert list(uploads.glob("*.tmp")) == []

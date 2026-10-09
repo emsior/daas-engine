@@ -26,7 +26,8 @@ MAX_FILENAME_LEN = 128                 # znakow oryginalnej nazwy
 MAX_RECORDS = 100_000                  # wierszy danych (bez naglowka)
 MAX_CSV_FIELD_BYTES = 65_536           # 64 KiB na pojedyncze pole
 CHUNK_SIZE = 65_536                    # 64 KiB na iteracje odczytu
-ALLOWED_SUFFIX = ".csv"                # jedyne dozwolone rozszerzenie
+ALLOWED_SUFFIX = ".csv"                # rozszerzenie pliku zapisanego na dysku (XLSX jest konwertowany do CSV)
+ALLOWED_UPLOAD_SUFFIXES = (".csv", ".xlsx")  # rozszerzenia przyjmowane od klienta
 
 #: Kolejnosc prob dekodowania. Bez heurystyk i bez errors="replace" —
 #: plik albo dekoduje sie jednym z tych trzech, albo jest odrzucany.
@@ -65,6 +66,14 @@ class ReasonCode:
     AUTH_NOT_CONFIGURED = "auth_not_configured"
     RUN_FAILED = "run_failed"
     QUOTA_EXCEEDED = "quota_exceeded"
+    # import XLSX (app.core.xlsx_import)
+    XLSX_INVALID = "xlsx_invalid"
+    XLSX_MACROS = "xlsx_macros_not_allowed"
+    XLSX_UNPACKED_TOO_LARGE = "xlsx_unpacked_too_large"
+    XLSX_MULTIPLE_SHEETS = "xlsx_multiple_sheets"
+    XLSX_TOO_MANY_SHEETS = "xlsx_too_many_sheets"
+    XLSX_SHEET_NOT_FOUND = "xlsx_sheet_not_found"
+    XLSX_TOO_WIDE = "xlsx_too_wide"
 
 
 class UploadRejected(Exception):
@@ -108,13 +117,18 @@ def validate_original_filename(name: str | None) -> str:
                 "nazwa pliku zawiera niedozwolone znaki",
             )
 
-    if not name.lower().endswith(ALLOWED_SUFFIX):
+    if not name.lower().endswith(ALLOWED_UPLOAD_SUFFIXES):
         raise UploadRejected(
             ReasonCode.EXTENSION_NOT_ALLOWED, 415,
-            f"dozwolone jest wylacznie rozszerzenie {ALLOWED_SUFFIX}",
+            "dozwolone sa wylacznie rozszerzenia .csv i .xlsx",
         )
 
     return name
+
+
+def is_xlsx_name(name: str) -> bool:
+    """True dla nazwy z rozszerzeniem .xlsx (bez wzgledu na wielkosc liter). Wywolywac po walidacji nazwy."""
+    return name.lower().endswith(".xlsx")
 
 
 # --------------------------------------------------------------------------- sciezki
@@ -236,7 +250,7 @@ def _sniff_delimiter(sample: str) -> str:
         return best if counts[best] > 0 else ","
 
 
-def iter_validated_rows(text: str) -> Iterator[list[str]]:
+def iter_validated_rows(text: str, max_records: int = MAX_RECORDS) -> Iterator[list[str]]:
     """Przechodzi CSV wiersz po wierszu, pilnujac limitow.
 
     Iteracyjnie, bez budowania listy wszystkich wierszy — inaczej limit
@@ -284,10 +298,10 @@ def iter_validated_rows(text: str) -> Iterator[list[str]]:
             continue
 
         count += 1
-        if count > MAX_RECORDS:
+        if count > max_records:
             raise UploadRejected(
                 ReasonCode.TOO_MANY_RECORDS, 413,
-                f"plik zawiera wiecej niz {MAX_RECORDS} rekordow",
+                f"plik zawiera wiecej niz {max_records} rekordow",
             )
         yield row
 
@@ -299,18 +313,19 @@ class CsvValidationResult:
     record_count: int
 
 
-def validate_csv_bytes(raw: bytes) -> CsvValidationResult:
+def validate_csv_bytes(raw: bytes, *, max_records: int = MAX_RECORDS) -> CsvValidationResult:
     """Pelna walidacja zawartosci przed finalizacja zapisu.
 
     Kolejnosc ma znaczenie: dekodowanie -> naglowek -> limity -> schemat.
-    Kazdy krok konczy sie odmowa z wlasnym reason code.
+    Kazdy krok konczy sie odmowa z wlasnym reason code. `max_records` to limit wierszy danych
+    (CSV: `MAX_RECORDS`; CSV skonwertowany z XLSX: `xlsx_import.MAX_XLSX_ROWS`).
     """
     if not raw.strip():
         raise UploadRejected(ReasonCode.FILE_EMPTY, 400, "plik jest pusty")
 
     text, encoding = decode_strict(raw)
 
-    rows = iter_validated_rows(text)
+    rows = iter_validated_rows(text, max_records)
     header = next(rows)
     count = sum(1 for _ in rows)
 
