@@ -38,6 +38,9 @@ def validate_startup(settings: Settings) -> ApiKeyAuth:
     * brak klucza + adres inny niz loopback -> RuntimeError,
     * brak klucza + loopback -> start dozwolony, ale kazda trasa chroniona odpowiada 401 (ostrzezenie w logu).
 
+    Tryb `cloud` + `APP_ENV=prod` + `DAAS_EMAIL_BACKEND=console` -> RuntimeError, chyba ze `DAAS_ALLOW_CONSOLE_MAIL=true`
+    (linki logowania nie moga cicho trafiac na dysk/do logu produkcji).
+
     Tryb `cloud`: klucze leza w control plane, wiec DAAS_API_KEY nie jest wymagany ani uzywany; za to
     DAAS_SECRET_KEY (min. 32 znaki) jest wymagany na kazdym adresie — bez niego nie da sie podpisac sesji.
     Tryb `selfhost`: DAAS_SECRET_KEY jest opcjonalny (bez niego logowanie magic linkiem jest wylaczone),
@@ -52,6 +55,13 @@ def validate_startup(settings: Settings) -> ApiKeyAuth:
         )
     if configured_secret and not settings.has_secret_key:
         raise RuntimeError(f"DAAS_SECRET_KEY is too short: at least {MIN_SECRET_KEY_LENGTH} characters are required.")
+    if (settings.cloud and settings.app_env.strip().lower() == "prod"
+            and settings.daas_email_backend == "console" and not settings.daas_allow_console_mail):
+        raise RuntimeError(
+            "DAAS_EMAIL_BACKEND=console is not allowed in cloud mode with APP_ENV=prod: sign-in links would "
+            "only land in runtime/outbox/. Set DAAS_EMAIL_BACKEND=smtp (with DAAS_SMTP_HOST), or for a trial "
+            "run set DAAS_ALLOW_CONSOLE_MAIL=true."
+        )
     if settings.cloud:
         return ApiKeyAuth(None)
     auth = ApiKeyAuth.from_settings(settings)

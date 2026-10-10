@@ -132,6 +132,7 @@ def cloud_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Settings:
     for key in _SECRET_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DAAS_MODE", "cloud")
+    monkeypatch.setenv("DAAS_ALLOW_CONSOLE_MAIL", "true")  # APP_ENV domyslnie prod; testy czytaja linki z outboxu
     monkeypatch.delenv("DAAS_API_KEY", raising=False)
     monkeypatch.setenv("DUCKDB_PATH", str(tmp_path / "runtime" / "daas.duckdb"))
     monkeypatch.setenv("REPORTS_DIR", str(tmp_path / "runtime" / "reports"))

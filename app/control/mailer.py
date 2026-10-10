@@ -1,8 +1,8 @@
 """Wysylka e-maili: adapter `console` (dev/e2e) i `smtp` (stdlib `smtplib`, STARTTLS).
 
-`console` zapisuje wiadomosc do `runtime/outbox/*.json` (plik 0600) i loguje link — przeznaczony wylacznie
-do rozwoju i testow e2e. Produkcja: `DAAS_EMAIL_BACKEND=smtp`. Wysylka jest blokujaca; wolac przez
-`run_in_threadpool`.
+`console` zapisuje wiadomosc do `runtime/outbox/*.json` (plik 0600); poza APP_ENV=prod loguje tez link — przeznaczony
+wylacznie do rozwoju i testow e2e (cloud + prod wymaga DAAS_ALLOW_CONSOLE_MAIL=true).
+Produkcja: `DAAS_EMAIL_BACKEND=smtp`. Wysylka jest blokujaca; wolac przez `run_in_threadpool`.
 """
 from __future__ import annotations
 
@@ -39,10 +39,15 @@ class Mailer(Protocol):
 
 
 class ConsoleMailer:
-    """Zapisuje wiadomosc do pliku w `outbox_dir` i loguje link logowania (NIE uzywac w produkcji)."""
+    """Zapisuje wiadomosc do pliku w `outbox_dir` (NIE uzywac w produkcji).
 
-    def __init__(self, outbox_dir: Path) -> None:
+    `log_link=True` (dev/testy) loguje tez adresata i link logowania; w prod (`False`) w logu zostaje tylko nazwa
+    pliku, a link jest wylacznie w outboxie (plik 0600).
+    """
+
+    def __init__(self, outbox_dir: Path, log_link: bool = True) -> None:
         self.outbox_dir = outbox_dir
+        self.log_link = log_link
 
     def send(self, mail: OutgoingMail) -> None:
         self.outbox_dir.mkdir(parents=True, exist_ok=True)
@@ -54,8 +59,11 @@ class ConsoleMailer:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False)
-        log.info("console mailer: message for %s written to outbox (%s)%s", mail.to, name,
-                 f" link={mail.link}" if mail.link else "")
+        if self.log_link:
+            log.info("console mailer: message for %s written to outbox (%s)%s", mail.to, name,
+                     f" link={mail.link}" if mail.link else "")
+        else:
+            log.info("console mailer: message written to outbox (%s)", name)
 
 
 class SmtpMailer:
@@ -86,7 +94,7 @@ def build_mailer(settings: Settings) -> Mailer:
         if not settings.daas_smtp_host:
             raise RuntimeError("DAAS_SMTP_HOST is required when DAAS_EMAIL_BACKEND=smtp")
         return SmtpMailer(settings)
-    return ConsoleMailer(settings.outbox_dir)
+    return ConsoleMailer(settings.outbox_dir, log_link=settings.app_env.strip().lower() != "prod")
 
 
 def magic_link_mail(settings: Settings, to: str, token: str, locale: str) -> OutgoingMail:

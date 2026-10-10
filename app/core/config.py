@@ -86,6 +86,9 @@ class Settings(BaseSettings):
     daas_session_ttl_hours: int = Field(default=336, ge=1, description="waznosc sesji (domyslnie 14 dni)")
     daas_magic_link_ttl_minutes: int = Field(default=15, ge=1, le=120)
     daas_email_backend: Literal["console", "smtp"] = "console"
+    #: Jawna zgoda na `console` w trybie cloud przy APP_ENV=prod (linki logowania leza wtedy w runtime/outbox/).
+    #: Bez niej `validate_startup` odmawia startu. Tylko do prob; produkcja: `DAAS_EMAIL_BACKEND=smtp`.
+    daas_allow_console_mail: bool = False
     daas_email_from: str = "DaaS Engine <no-reply@localhost>"
     daas_smtp_host: str | None = None
     daas_smtp_port: int = Field(default=587, ge=1, le=65535)

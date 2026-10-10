@@ -46,7 +46,8 @@ KNOWN_HASH = "ab" * 32
 
 def _enumerate_routes() -> list[tuple[str, str]]:
     probe = create_app(Settings(_env_file=None, daas_mode="cloud", daas_secret_key=TEST_SECRET_KEY,
-                                daas_control_db_url="sqlite+aiosqlite:///:memory:", daas_auto_migrate=False))
+                                daas_control_db_url="sqlite+aiosqlite:///:memory:", daas_auto_migrate=False,
+                                daas_allow_console_mail=True))
     found = set()
     for route in iter_api_routes(probe):
         if "{org_id}" in route.path:
@@ -88,7 +89,7 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
         _env_file=None, daas_mode="cloud", daas_secret_key=TEST_SECRET_KEY, daas_api_key=None,
         daas_control_db_url=f"sqlite+aiosqlite:///{root / 'control.db'}",
         duckdb_path=str(root / "runtime" / "daas.duckdb"), reports_dir=str(root / "runtime" / "reports"),
-        daas_rate_limit_ip_per_min=0, daas_metrics_token=None)
+        daas_rate_limit_ip_per_min=0, daas_metrics_token=None, daas_allow_console_mail=True)
     settings.ensure_dirs()
     with TestClient(create_app(settings), base_url="https://testserver") as client:
         a = seed_org(settings, name="Org A", owner_email="a-owner@example.test")

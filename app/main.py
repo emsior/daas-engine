@@ -81,8 +81,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if removed:
                 log.info("removed %d leftover upload temp files", removed)
         if settings.cloud and settings.daas_email_backend == "console":
-            log.warning("DAAS_EMAIL_BACKEND=console: sign-in links are written to runtime/outbox/ and the log; "
-                        "use smtp in production")
+            log.warning("DAAS_EMAIL_BACKEND=console: sign-in links are written to runtime/outbox/%s; "
+                        "use smtp in production", "" if settings.app_env.strip().lower() == "prod" else " and the log")
         executor = JobExecutor(settings, app.state.db_sessionmaker, registry)
         app.state.executor = executor
         # dostawa webhookow `run.finished`: listener executora, dostawy w tle (nie blokuja runu)

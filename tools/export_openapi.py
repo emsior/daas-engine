@@ -33,7 +33,8 @@ def build_document() -> dict:
     settings = Settings(
         _env_file=None, daas_mode="cloud", app_env="prod", daas_secret_key=_PLACEHOLDER_SECRET,
         daas_api_key=None, daas_cockpit_origin=None, daas_metrics_token=None,
-        daas_control_db_url="sqlite+aiosqlite:///:memory:", daas_auto_migrate=False)
+        daas_control_db_url="sqlite+aiosqlite:///:memory:", daas_auto_migrate=False,
+        daas_allow_console_mail=True)  # tylko budowa dokumentu: nic nie jest wysylane
     return create_app(settings).openapi()
 
 
