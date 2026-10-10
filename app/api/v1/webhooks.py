@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.problems import ProblemError, not_found
 from app.api.v1.deps import OrgContext, org_access
-from app.api.v1.schemas import WebhookCreate, WebhookCreated, WebhookOut, WebhookPingResult
+from app.api.v1.schemas import WebhookCreate, WebhookCreated, WebhookOut, WebhookPingOut
 from app.control import scopes as sc
 from app.control.audit import record_event
 from app.control.db import get_db
@@ -115,16 +115,19 @@ async def delete_webhook(webhook_id: str, request: Request, ctx: OrgContext = De
 
 
 @router.post(
-    "/orgs/{org_id}/webhooks/{webhook_id}/ping", response_model=WebhookPingResult, summary="Send a test event",
-    description="Sends one signed `ping` event (single attempt) and reports whether the endpoint answered 2xx.",
+    "/orgs/{org_id}/webhooks/{webhook_id}/ping", response_model=WebhookPingOut, summary="Send a test event",
+    description="Sends one signed `ping` event (single attempt) and reports whether the endpoint answered 2xx and the "
+                "class of its answer (`status_class`); the exact status code is not returned.",
     responses={404: {"description": "Webhook not found"}},
 )
 async def ping_webhook(webhook_id: str, request: Request, ctx: OrgContext = Depends(_MANAGE),
-                       db: AsyncSession = Depends(get_db)) -> WebhookPingResult:
+                       db: AsyncSession = Depends(get_db)) -> WebhookPingOut:
     hook = await _load(db, ctx.org_id, webhook_id)
     dispatcher = request.app.state.webhooks
     result = await dispatcher.deliver(hook, EVENT_PING, build_body(EVENT_PING, {"org_id": ctx.org_id}),
                                       max_attempts=1)
     await dispatcher.audit_result(request, hook, EVENT_PING, result, actor_type=ctx.principal.actor_type,
                                   actor_id=ctx.principal.actor_id)
-    return WebhookPingResult(delivered=result.delivered, status=result.status_code)
+    code = result.status_code
+    klass = f"{code // 100}xx" if code is not None and 200 <= code < 600 else "error"
+    return WebhookPingOut(delivered=result.delivered, status_class=klass)

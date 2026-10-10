@@ -226,9 +226,9 @@ def test_ping_delivers_a_signed_event(cloud_client, cloud_settings, org, sink):
     created = create(cloud_client, org).json()
     r = cloud_client.post(f"{hooks_url(org.org_id)}/{created['id']}/ping", headers=key_headers(org.api_key))
     assert r.status_code == 200, r.text
-    assert r.json() == {"delivered": True, "status": 200}
+    assert r.json() == {"delivered": True, "status": None, "status_class": "2xx"}
     (req,) = sink.requests
-    assert str(req.url) == URL and req.method == "POST"
+    assert req.url.host == PUBLIC_IP and req.headers["host"] == "hooks.example.test" and req.method == "POST"
     assert req.headers["x-daas-event"] == "ping"
     assert len(req.headers["x-daas-delivery"]) == 26
     assert abs(int(req.headers["x-daas-timestamp"]) - time.time()) < 60
@@ -243,7 +243,7 @@ def test_ping_of_a_failing_endpoint_reports_the_status_without_retrying(cloud_cl
     sink.statuses = [500]
     wid = create(cloud_client, org).json()["id"]
     r = cloud_client.post(f"{hooks_url(org.org_id)}/{wid}/ping", headers=key_headers(org.api_key))
-    assert r.status_code == 200 and r.json() == {"delivered": False, "status": 500}
+    assert r.status_code == 200 and r.json() == {"delivered": False, "status": None, "status_class": "5xx"}
     assert len(sink.requests) == 1 and sink.sleeps == []
     (event,) = audit_actions(cloud_settings, org.org_id, "webhook.failed")
     assert event.meta["status_code"] == 500
@@ -253,7 +253,7 @@ def test_ping_network_error_has_no_status(cloud_client, cloud_settings, org, sin
     sink.raises = httpx.ConnectError("boom with https://hooks.example.test/daas inside")
     wid = create(cloud_client, org).json()["id"]
     r = cloud_client.post(f"{hooks_url(org.org_id)}/{wid}/ping", headers=key_headers(org.api_key))
-    assert r.json() == {"delivered": False, "status": None}
+    assert r.json() == {"delivered": False, "status": None, "status_class": "error"}
     (event,) = audit_actions(cloud_settings, org.org_id, "webhook.failed")
     assert event.meta["error_type"] == "ConnectError"
     assert "hooks.example.test" not in json.dumps(event.meta)  # adres nie trafia do audytu
@@ -271,7 +271,7 @@ def test_redirects_are_not_followed(cloud_client, cloud_settings, org, sink):
     sink.location = "http://127.0.0.1:8080/admin"
     wid = create(cloud_client, org).json()["id"]
     r = cloud_client.post(f"{hooks_url(org.org_id)}/{wid}/ping", headers=key_headers(org.api_key))
-    assert r.json() == {"delivered": False, "status": 302}
+    assert r.json() == {"delivered": False, "status": None, "status_class": "3xx"}
     assert len(sink.requests) == 1  # drugiego zadania (pod Location) nie bylo
 
 
@@ -283,7 +283,7 @@ def test_hostname_resolving_to_a_private_address_is_never_contacted(cloud_client
     sink.addresses = addresses
     wid = create(cloud_client, org).json()["id"]
     r = cloud_client.post(f"{hooks_url(org.org_id)}/{wid}/ping", headers=key_headers(org.api_key))
-    assert r.json() == {"delivered": False, "status": None}
+    assert r.json() == {"delivered": False, "status": None, "status_class": "error"}
     assert sink.requests == []
     (event,) = audit_actions(cloud_settings, org.org_id, "webhook.failed")
     assert event.meta["error_type"] == "private_address"
@@ -304,7 +304,7 @@ def test_a_secret_that_no_longer_matches_is_not_used_for_signing(cloud_client, c
     wid = create(cloud_client, org).json()["id"]
     update_rows(cloud_settings, models.Webhook, {"secret_hash": "0" * 64}, models.Webhook.id == wid)
     r = cloud_client.post(f"{hooks_url(org.org_id)}/{wid}/ping", headers=key_headers(org.api_key))
-    assert r.json() == {"delivered": False, "status": None} and sink.requests == []
+    assert r.json() == {"delivered": False, "status": None, "status_class": "error"} and sink.requests == []
     assert audit_actions(cloud_settings, org.org_id, "webhook.failed")[0].meta["error_type"] == "secret_unavailable"
 
 
@@ -403,7 +403,7 @@ def test_only_webhooks_of_the_same_organization_are_notified(cloud_client, cloud
     start_job(cloud_client, org)
     wait_for(lambda: sink.requests)
     wait_for(lambda: audit_actions(cloud_settings, org.org_id, "webhook.deliv"))
-    assert {str(r.url) for r in sink.requests} == {URL}
+    assert {r.headers["host"] for r in sink.requests} == {"hooks.example.test"}
     assert not audit_actions(cloud_settings, other.org_id)[1:]  # tylko wpis webhook.created
 
 
@@ -412,9 +412,116 @@ def test_every_webhook_of_the_organization_gets_the_event(cloud_client, cloud_se
     create(cloud_client, org, url="https://b.example.test/x")
     start_job(cloud_client, org)
     wait_for(lambda: len(sink.requests) >= 2)
-    assert {str(r.url) for r in sink.requests} == {"https://a.example.test/x", "https://b.example.test/x"}
+    assert {r.headers["host"] for r in sink.requests} == {"a.example.test", "b.example.test"}
 
 
 def test_no_webhooks_means_no_deliveries(cloud_client, cloud_settings, org, sink):
     start_job(cloud_client, org)
     assert sink.requests == [] and not audit_actions(cloud_settings, org.org_id)
+
+
+# ================================================================ pinning IP (M-4)
+def ping(client: TestClient, org, wid: str):
+    return client.post(f"{hooks_url(org.org_id)}/{wid}/ping", headers=key_headers(org.api_key))
+
+
+def test_connection_goes_to_the_validated_ip_with_host_and_sni(cloud_client, cloud_settings, org, sink):
+    wid = create(cloud_client, org, url="https://hooks.example.test:8443/daas?x=1").json()["id"]
+    assert ping(cloud_client, org, wid).json()["delivered"] is True
+    (req,) = sink.requests
+    assert req.url.host == PUBLIC_IP and req.url.port == 8443 and req.url.path == "/daas"
+    assert req.url.query == b"x=1"
+    assert req.headers["host"] == "hooks.example.test:8443"
+    assert req.extensions["sni_hostname"] == "hooks.example.test"        # certyfikat jest weryfikowany po nazwie
+
+
+def test_default_port_host_header_has_no_port(cloud_client, cloud_settings, org, sink):
+    wid = create(cloud_client, org).json()["id"]
+    ping(cloud_client, org, wid)
+    assert sink.requests[0].headers["host"] == "hooks.example.test"
+
+
+def test_dns_is_resolved_once_per_attempt_so_rebinding_cannot_redirect_the_request(cloud_client, cloud_settings,
+                                                                                    org, sink):
+    answers = iter([[PUBLIC_IP], ["127.0.0.1"], ["10.0.0.1"], ["127.0.0.1"]])
+    calls: list[str] = []
+
+    async def rebinding(host: str, port: int) -> list[str]:
+        calls.append(host)
+        return next(answers)
+
+    cloud_client.app.state.webhooks.resolver = rebinding
+    wid = create(cloud_client, org).json()["id"]
+    r = ping(cloud_client, org, wid)
+    assert r.json()["delivered"] is True
+    assert calls == ["hooks.example.test"]                  # jedno rozwiazanie na probe
+    assert [req.url.host for req in sink.requests] == [PUBLIC_IP]   # zadne drugie rozwiazanie nie zmienia celu
+
+
+def test_each_retry_resolves_again_and_pins_again(cloud_client, cloud_settings, org, sink):
+    sink.statuses = [500, 200]
+    addresses = iter([["93.184.216.34"], ["93.184.216.35"]])
+
+    async def changing(host: str, port: int) -> list[str]:
+        return next(addresses)
+
+    cloud_client.app.state.webhooks.resolver = changing
+    create(cloud_client, org)
+    start_job(cloud_client, org)
+    wait_for(lambda: len(sink.requests) >= 2)
+    assert [r.url.host for r in sink.requests[:2]] == ["93.184.216.34", "93.184.216.35"]
+
+
+def test_a_later_private_answer_is_refused_even_if_the_first_was_public(cloud_client, cloud_settings, org, sink):
+    sink.statuses = [500, 200, 200]
+    answers = iter([["93.184.216.34"], ["127.0.0.1"], ["127.0.0.1"]])
+
+    async def rebinding(host: str, port: int) -> list[str]:
+        return next(answers)
+
+    cloud_client.app.state.webhooks.resolver = rebinding
+    create(cloud_client, org)
+    start_job(cloud_client, org)
+    wait_for(lambda: audit_actions(cloud_settings, org.org_id, "webhook.failed"))
+    assert [r.url.host for r in sink.requests] == ["93.184.216.34"]       # po przebindowaniu nic nie wyszlo
+
+
+def test_ip_literal_urls_are_not_rewritten(cloud_client, cloud_settings, org, sink):
+    wid = create(cloud_client, org, url=f"https://{PUBLIC_IP}/hook").json()["id"]
+    ping(cloud_client, org, wid)
+    (req,) = sink.requests
+    assert req.url.host == PUBLIC_IP and "sni_hostname" not in req.extensions
+
+
+def test_second_public_address_is_tried_when_the_first_cannot_connect(cloud_client, cloud_settings, org, sink):
+    sink.addresses = ["93.184.216.34", "93.184.216.35"]
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.host)
+        if request.url.host.endswith(".34"):
+            raise httpx.ConnectError("refused")
+        return httpx.Response(200)
+
+    cloud_client.app.state.webhooks.transport = httpx.MockTransport(handler)
+    wid = create(cloud_client, org).json()["id"]
+    assert ping(cloud_client, org, wid).json()["delivered"] is True
+    assert calls == ["93.184.216.34", "93.184.216.35"]
+
+
+@pytest.mark.parametrize(("status", "klass"), [(200, "2xx"), (204, "2xx"), (301, "3xx"), (404, "4xx"),
+                                                (429, "4xx"), (500, "5xx"), (503, "5xx")])
+def test_ping_reports_only_the_status_class(cloud_client, cloud_settings, org, sink, status, klass):
+    sink.statuses = [status]
+    wid = create(cloud_client, org).json()["id"]
+    body = ping(cloud_client, org, wid).json()
+    assert body == {"delivered": status < 300, "status": None, "status_class": klass}
+
+
+def test_ping_without_a_response_is_class_error(cloud_client, cloud_settings, org, sink):
+    sink.raises = httpx.ConnectError("down")
+    wid = create(cloud_client, org).json()["id"]
+    assert ping(cloud_client, org, wid).json()["status_class"] == "error"
+    sink.raises = None
+    sink.addresses = ["10.0.0.1"]
+    assert ping(cloud_client, org, wid).json() == {"delivered": False, "status": None, "status_class": "error"}

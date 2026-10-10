@@ -386,3 +386,12 @@ class InvitationAccepted(BaseModel):
 # ----------------------------------------------------------------------------- logowanie: potwierdzenie (A1, 10.10)
 class MagicLinkConfirm(MagicLinkVerify):
     confirm: bool = Field(default=False, description="jawne potwierdzenie logowania w tej przegladarce")
+
+
+class WebhookPingOut(BaseModel):
+    delivered: bool
+    status: None = Field(default=None, deprecated=True,
+                         description="DEPRECATED, always `null`: the exact status code of the receiver is no longer "
+                                     "returned. Use `status_class`.")
+    status_class: Literal["2xx", "3xx", "4xx", "5xx", "error"] = Field(
+        ..., description="class of the receiver's answer; `error` = no answer (network, DNS, address refused)")

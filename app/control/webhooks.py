@@ -43,6 +43,7 @@ EVENT_PING = "ping"
 MAX_ATTEMPTS = 3
 REQUEST_TIMEOUT_SEC = 5.0
 MAX_URL_LEN = 2000
+MAX_PINNED_ADDRESSES = 3
 USER_AGENT = "DaaS-Webhook/2.0"
 _BLOCKED_NAMES = ("localhost", "localhost.localdomain")
 _BLOCKED_SUFFIXES = (".localhost", ".local", ".internal", ".lan", ".home.arpa")
@@ -111,8 +112,10 @@ async def system_resolver(host: str, port: int) -> list[str]:
     return sorted({info[4][0] for info in infos})
 
 
-async def check_resolved(host: str, port: int, resolver: Resolver) -> None:
-    """Kazdy adres, na jaki rozwiazuje sie host, ma byc publiczny (inaczej `private_address`)."""
+async def resolve_public(host: str, port: int, resolver: Resolver) -> list[str]:
+    """Rozwiazuje `host` JEDEN raz i wymaga, by KAZDY zwrocony adres byl publiczny (inaczej `private_address`).
+    Zwrocone adresy sa tymi, z ktorymi laczymy sie dalej (pinning): ponowne rozwiazanie nazwy przez klienta HTTP
+    nie ma jak podmienic celu (DNS rebinding)."""
     try:
         ipaddress.ip_address(host)
         addresses = [host]
@@ -123,6 +126,35 @@ async def check_resolved(host: str, port: int, resolver: Resolver) -> None:
             raise UnsafeDestination("dns_failed") from None
     if not addresses or not all(_is_public_ip(a) for a in addresses):
         raise UnsafeDestination("private_address")
+    return addresses
+
+
+def _is_ip_literal(host: str) -> bool:
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return True
+
+
+@dataclass(frozen=True)
+class Target:
+    """Jedno miejsce polaczenia: URL (z IP zamiast nazwy), naglowki i rozszerzenia httpx (SNI)."""
+
+    url: str
+    headers: dict[str, str]
+    extensions: dict[str, str]
+
+
+def pinned_targets(url: str, host: str, addresses: list[str]) -> list[Target]:
+    """Cele pinningu: URL z adresem IP, `Host` z oryginalnego URL-a i `sni_hostname` = nazwa (certyfikat serwera jest
+    weryfikowany wzgledem nazwy, nie adresu). Dla URL-a z literalem IP nic nie przepisujemy."""
+    if _is_ip_literal(host):
+        return [Target(url, {}, {})]
+    base = httpx.URL(url)
+    netloc = urlsplit(url).netloc
+    return [Target(str(base.copy_with(host=ip)), {"Host": netloc}, {"sni_hostname": host})
+            for ip in addresses[:MAX_PINNED_ADDRESSES]]
 
 
 @dataclass(frozen=True)
@@ -247,12 +279,17 @@ class WebhookDispatcher:
 
     async def _attempt(self, hook: Webhook, event_name: str, body: bytes, delivery_id: str,
                        signature: str) -> tuple[int | None, str | None]:
-        """Jedna proba. Zwraca `(status HTTP | None, typ bledu | None)`; adres nie trafia do logow."""
+        """Jedna proba. Zwraca `(status HTTP | None, typ bledu | None)`; adres nie trafia do logow.
+
+        Poza `dev`: nazwa jest rozwiazywana raz, wszystkie adresy musza byc publiczne, a polaczenie idzie na
+        sprawdzony adres IP (nastepny adres z listy tylko po bledzie polaczenia)."""
         dev = is_dev(self.settings)
         try:
             host, port = validate_url(hook.url, dev=dev)
-            if not dev:
-                await check_resolved(host, port, self.resolver)
+            if dev:
+                targets = [Target(hook.url, {}, {})]
+            else:
+                targets = pinned_targets(hook.url, host, await resolve_public(host, port, self.resolver))
         except UnsafeDestination as exc:
             return None, exc.reason
         headers = {
@@ -260,11 +297,17 @@ class WebhookDispatcher:
             "X-DaaS-Delivery": delivery_id, "X-DaaS-Timestamp": str(int(time.time())),
             "X-DaaS-Signature": signature,
         }
-        try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SEC, follow_redirects=False,
-                                         transport=self.transport) as client:
-                # strumien: tresc odpowiedzi odbiorcy nie jest czytana ani zapisywana
-                async with client.stream("POST", hook.url, content=body, headers=headers) as response:
-                    return response.status_code, None
-        except httpx.HTTPError as exc:
-            return None, type(exc).__name__
+        error: str | None = None
+        for target in targets:
+            try:
+                async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SEC, follow_redirects=False,
+                                             transport=self.transport) as client:
+                    # strumien: tresc odpowiedzi odbiorcy nie jest czytana ani zapisywana
+                    async with client.stream("POST", target.url, content=body, headers={**headers, **target.headers},
+                                             extensions=target.extensions) as response:
+                        return response.status_code, None
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                error = type(exc).__name__      # nastepny sprawdzony adres, jesli jest
+            except httpx.HTTPError as exc:
+                return None, type(exc).__name__
+        return None, error
