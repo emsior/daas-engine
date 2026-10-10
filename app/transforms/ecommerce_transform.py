@@ -17,7 +17,9 @@ def detect_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
     - DEEP_DISCOUNT: rabat >= 25%
     - MARGIN_OUTLIER: marża poniżej (mediana - 2*MAD) w danej kategorii
     - REVENUE_OUTLIER: przychód > Q3 + 1.5*IQR
+    Wiersze z ujemnym przychodem (korekty/zwroty) nie są analizowane — to nie są transakcje sprzedaży.
     """
+    df = df[df["revenue"] >= 0]
     if df.empty:
         return []
     out: list[dict[str, Any]] = []
@@ -109,7 +111,8 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
     cost = float(pnl["cost"].sum())
     profit = float(pnl["profit"].sum())
 
-    loss = pnl[pnl["profit"] < 0].sort_values("profit")
+    # Korekta/zwrot (przychod < 0) obniza sumy, ale nie jest "zamowieniem stratnym" do blokowania rabatow.
+    loss = pnl[(pnl["profit"] < 0) & (pnl["revenue"] >= 0)].sort_values("profit")
     loss_rows = loss[["order_id", "date", "product", "category", "revenue", "cost", "profit", "discount"]].copy()
     loss_rows["date"] = loss_rows["date"].astype(str)
     loss_rows = loss_rows.round(2)

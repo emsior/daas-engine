@@ -294,7 +294,11 @@ def map_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, MappingReport]:
     if bad_rev:
         report.warnings.append(f"{bad_rev} wierszy bez przychodu — pominięte.")
         out = out[out["revenue"].notna()]
-    out = out[out["revenue"] >= 0]
+    # Ujemny przychod = korekta/zwrot (np. faktura korygujaca). Zostaje w rekordach — inaczej suma
+    # przychodu zawyzalaby wynik bez sladu — i jest zglaszany jawnie.
+    neg_rev = int((out["revenue"] < 0).sum())
+    if neg_rev:
+        report.warnings.append(f"{neg_rev} wierszy z ujemnym przychodem (korekty/zwroty) — uwzględnione")
 
     dup = int(out["order_id"].duplicated().sum())
     if dup:
