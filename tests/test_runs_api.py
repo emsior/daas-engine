@@ -229,3 +229,51 @@ def test_hash_is_computed_from_the_bytes_that_are_served(cloud_client, cloud_set
     r = cloud_client.get(report_url(org, run["run_id"]), params={"fmt": "md"}, headers=hdr(org))
     assert r.status_code == 200 and len(reads) == 1
     assert r.content == real(path)
+
+
+# ================================================================ C11: sciezki wzgledne / przeniesiony runtime
+def _rewrite_paths(client: TestClient, org, run_id: str, prefix: str) -> None:
+    db = client.app.state.tenants.get(org.org_id).db
+    with db.connect() as con:
+        con.execute(
+            "UPDATE runs SET report_path = ? || regexp_extract(report_path, '[^/]+$'), "
+            "report_json_path = ? || regexp_extract(report_json_path, '[^/]+$'), "
+            "report_html_path = ? || regexp_extract(report_html_path, '[^/]+$') WHERE run_id = ?",
+            [prefix, prefix, prefix, run_id])
+
+
+def test_report_is_served_after_the_runtime_directory_moved(cloud_client, org, run):
+    _rewrite_paths(cloud_client, org, run["run_id"], "/srv/old-host/runtime/tenants/xyz/reports/")
+    for fmt in ("html", "md", "json"):
+        r = cloud_client.get(report_url(org, run["run_id"]), params={"fmt": fmt}, headers=hdr(org))
+        assert r.status_code == 200, fmt
+        assert r.headers["etag"] == f'"{run["sha"][fmt]}"'
+
+
+def test_moved_runtime_with_windows_style_stored_path(cloud_client, org, run):
+    _rewrite_paths(cloud_client, org, run["run_id"], "C:\\\\daas\\\\runtime\\\\")
+    db = cloud_client.app.state.tenants.get(org.org_id).db
+    with db.connect() as con:
+        con.execute("UPDATE runs SET report_path = replace(report_path, '/', '\\\\') WHERE run_id = ?", [run["run_id"]])
+    r = cloud_client.get(report_url(org, run["run_id"]), params={"fmt": "md"}, headers=hdr(org))
+    assert r.status_code == 200
+
+
+def test_stored_path_to_a_foreign_file_is_never_served(cloud_client, cloud_settings, org, run, tmp_path):
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    secret = foreign / "secret-not-a-report.md"
+    secret.write_text("tajne", encoding="utf-8")
+    db = cloud_client.app.state.tenants.get(org.org_id).db
+    with db.connect() as con:
+        con.execute("UPDATE runs SET report_path = ? WHERE run_id = ?", [str(secret), run["run_id"]])
+    r = cloud_client.get(report_url(org, run["run_id"]), params={"fmt": "md"}, headers=hdr(org))
+    assert r.status_code == 404 and "tajne" not in r.text
+
+
+def test_traversal_in_stored_path_is_not_followed(cloud_client, cloud_settings, org, run):
+    db = cloud_client.app.state.tenants.get(org.org_id).db
+    with db.connect() as con:
+        con.execute("UPDATE runs SET report_path = ? WHERE run_id = ?", ["../../../../etc/passwd", run["run_id"]])
+    r = cloud_client.get(report_url(org, run["run_id"]), params={"fmt": "md"}, headers=hdr(org))
+    assert r.status_code == 404

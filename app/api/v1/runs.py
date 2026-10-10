@@ -5,7 +5,7 @@ import asyncio
 import hashlib
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -120,13 +120,27 @@ def _purged(record: RunRecord) -> bool:
 
 
 def _resolve_report(reports_dir: Path, raw_path: str | None) -> Path | None:
-    """Plik raportu w katalogu raportow najemcy albo None (sciezka z bazy najemcy, nie od klienta)."""
+    """Plik raportu w katalogu raportow najemcy albo None.
+
+    Sciezka w bazie najemcy bywa bezwzgledna i po przeniesieniu katalogu runtime (inny host, inny punkt montowania)
+    juz nie istnieje — wtedy szukamy pliku o tej samej nazwie w biezacym katalogu raportow. Zawsze bierzemy tylko
+    nazwe pliku, wiec zadna sciezka z bazy nie wyprowadzi poza katalog raportow tej organizacji.
+    """
     if not raw_path:
         return None
-    path = Path(raw_path)
-    if not path.resolve().is_relative_to(reports_dir.resolve()) or not path.is_file():
-        return None
-    return path
+    base = reports_dir.resolve()
+    name = PureWindowsPath(raw_path).name or PurePosixPath(raw_path).name
+    candidates = [Path(raw_path)]
+    if name and name not in (".", ".."):
+        candidates.append(base / name)
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except (OSError, RuntimeError):
+            continue
+        if resolved.is_relative_to(base) and resolved.is_file():
+            return resolved
+    return None
 
 
 def _etag_matches(header: str, digest: str) -> bool:
