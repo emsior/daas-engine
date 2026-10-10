@@ -66,13 +66,10 @@ def test_szybka_sciezka_nie_zmienia_wyniku_pojedynczej_wartosci(raw):
         assert vect == pytest.approx(scalar)
 
 
-def test_wykladnik_nie_jest_traktowany_jak_liczba():
-    """Regresja: `float('1e5')` to 100000, ale kontrakt mappera daje 15.0.
-
-    Fast path nie moze przechwycic notacji wykladniczej, bo zmienilby wynik.
-    """
-    assert _to_number("1e5") == 15.0
-    assert to_number_series(pd.Series(["1e5"], dtype=object)).iloc[0] == 15.0
+def test_wykladnik_jest_liczba_a_nie_sklejonymi_cyframi():
+    """C3: `1e5` to 100000 (dawniej 'e' bylo wycinane i wychodzilo 15.0 — zmiana rzedu wielkosci)."""
+    assert _to_number("1e5") == 100000.0
+    assert to_number_series(pd.Series(["1e5"], dtype=object)).iloc[0] == 100000.0
 
 
 def test_normalize_status_series_rownowazne_ze_stara_petla():
