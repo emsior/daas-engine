@@ -381,3 +381,8 @@ class MemberRolePatch(BaseModel):
 # ----------------------------------------------------------------------------- zaproszenia: stala odpowiedz (A1, 10.10)
 class InvitationAccepted(BaseModel):
     status: Literal["accepted"] = "accepted"
+
+
+# ----------------------------------------------------------------------------- logowanie: potwierdzenie (A1, 10.10)
+class MagicLinkConfirm(MagicLinkVerify):
+    confirm: bool = Field(default=False, description="jawne potwierdzenie logowania w tej przegladarce")

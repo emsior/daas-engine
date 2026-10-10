@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import logging
+import re
 from datetime import timedelta
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -14,8 +15,8 @@ from app.api.problems import ProblemError
 from app.api.v1.deps import CSRF_COOKIE, SESSION_COOKIE, Principal, get_principal
 from app.api.v1.schemas import (
     MagicLinkAccepted,
+    MagicLinkConfirm,
     MagicLinkRequest,
-    MagicLinkVerify,
     MembershipOut,
     MeOut,
     PrincipalOut,
@@ -31,6 +32,7 @@ from app.control.security import (
     new_csrf_token,
     new_session_id,
     new_token,
+    safe_equal,
     sha256_hex,
     sign_session_id,
 )
@@ -42,6 +44,21 @@ log = logging.getLogger(__name__)
 
 public_router = APIRouter(tags=["auth"])
 router = APIRouter(tags=["auth"])
+
+
+ML_COOKIE = "daas_ml"
+_NONCE_RE = re.compile(r"^[A-Za-z0-9_-]{32,64}$")
+
+
+def ml_cookie_name(settings: Settings) -> str:
+    """`__Host-daas_ml` (wymaga Secure, Path=/, bez Domain); bez TLS (lokalny dev) zwykla nazwa — jak cookie sesji."""
+    return f"__Host-{ML_COOKIE}" if settings.daas_cookie_secure else ML_COOKIE
+
+
+def mask_email(email: str) -> str:
+    """`jan.kowalski@firma.pl` -> `j***@firma.pl` (wskazowka dla osoby, ktora widzi link, nie pelny adres)."""
+    local, _, domain = email.lower().partition("@")
+    return f"{local[:1]}***@{domain}"
 
 
 def set_session_cookies(response: Response, settings: Settings, session: Session) -> None:
@@ -70,7 +87,7 @@ async def _memberships_out(db: AsyncSession, user_id: str) -> list[MembershipOut
     description="Sends a single-use sign-in link (valid 15 minutes) to the e-mail address. The answer is the same "
                 "for known and unknown addresses. Limited per e-mail and per IP.",
 )
-async def request_magic_link(body: MagicLinkRequest, request: Request,
+async def request_magic_link(body: MagicLinkRequest, request: Request, response: Response,
                              db: AsyncSession = Depends(get_db)) -> MagicLinkAccepted:
     state = request.app.state
     settings: Settings = state.settings
@@ -88,10 +105,17 @@ async def request_magic_link(body: MagicLinkRequest, request: Request,
 
     now = utcnow()
     token, digest = new_token()
+    # nonce przegladarki: ta sama przegladarka zachowuje go miedzy prosbami (starsze linki dalej dzialaja)
+    cookie_name = ml_cookie_name(settings)
+    nonce = request.cookies.get(cookie_name, "")
+    if not _NONCE_RE.match(nonce):
+        nonce = new_csrf_token()
+    ttl = timedelta(minutes=settings.daas_magic_link_ttl_minutes)
     await db.execute(delete(MagicLink).where(MagicLink.expires_at < now - timedelta(days=1)))
-    db.add(MagicLink(token_hash=digest, email=body.email,
-                     expires_at=now + timedelta(minutes=settings.daas_magic_link_ttl_minutes)))
+    db.add(MagicLink(token_hash=digest, email=body.email, expires_at=now + ttl, nonce_hash=sha256_hex(nonce)))
     await db.commit()
+    response.set_cookie(cookie_name, nonce, max_age=int(ttl.total_seconds()), path="/",
+                        secure=settings.daas_cookie_secure, httponly=True, samesite="lax")
     try:
         await run_in_threadpool(state.mailer.send, magic_link_mail(settings, body.email, token, body.locale))
     except Exception:  # noqa: BLE001
@@ -103,10 +127,16 @@ async def request_magic_link(body: MagicLinkRequest, request: Request,
 @public_router.post(
     "/auth/magic-link/verify", response_model=SessionOut, summary="Exchange a sign-in link for a session",
     description="Consumes the token (single use) and starts a session: sets `daas_session` (HttpOnly) and "
-                "`daas_csrf`. The first sign-in creates the user. Pending invitations for the address are accepted.",
-    responses={401: {"description": "Token unknown, expired or already used"}},
+                "`daas_csrf`. The first sign-in creates the user. Pending invitations for the address are accepted.\n\n"
+                "Login-CSRF protection: `POST /auth/magic-link` sets an HttpOnly cookie (`__Host-daas_ml`) in the "
+                "browser that asked for the link. If the cookie does not match the link (another browser, a cleared "
+                "cookie, a link someone else planted), the answer is `409 confirm_required` with a masked "
+                "`email_hint` and the token is NOT consumed; repeat the request with `confirm: true` after the user "
+                "explicitly agrees to sign in as that address in this browser.",
+    responses={401: {"description": "Token unknown, expired or already used"},
+               409: {"description": "`confirm_required`: link was requested from another browser"}},
 )
-async def verify_magic_link(body: MagicLinkVerify, request: Request, response: Response,
+async def verify_magic_link(body: MagicLinkConfirm, request: Request, response: Response,
                             db: AsyncSession = Depends(get_db)) -> SessionOut:
     state = request.app.state
     settings: Settings = state.settings
@@ -114,6 +144,18 @@ async def verify_magic_link(body: MagicLinkVerify, request: Request, response: R
         raise ProblemError(503, "sessions_unavailable", "sign-in by e-mail is not configured on this server")
     now = utcnow()
     digest = sha256_hex(body.token)
+    pending = (await db.execute(select(MagicLink).where(
+        MagicLink.token_hash == digest, MagicLink.used_at.is_(None), MagicLink.expires_at > now))).scalar_one_or_none()
+    if pending is None:
+        throttle_auth_failure(request)
+        raise ProblemError(401, "invalid_token", "the sign-in link is invalid, expired or already used")
+    presented = request.cookies.get(ml_cookie_name(settings), "")
+    same_browser = bool(pending.nonce_hash and presented and safe_equal(sha256_hex(presented), pending.nonce_hash))
+    if not same_browser and not body.confirm:
+        # token zostaje nieskonsumowany: prawowity wlasciciel (inna przegladarka) moze go jeszcze uzyc
+        raise ProblemError(409, "confirm_required",
+                           "this sign-in link was requested from another browser; confirm to sign in here",
+                           extra={"email_hint": mask_email(pending.email)})
     # jednorazowosc: konsumpcja jest pojedynczym UPDATE-em warunkowym (dwa rownolegle zadania: wygra jedno)
     consumed = await db.execute(update(MagicLink).where(
         MagicLink.token_hash == digest, MagicLink.used_at.is_(None), MagicLink.expires_at > now,
@@ -134,6 +176,8 @@ async def verify_magic_link(body: MagicLinkVerify, request: Request, response: R
                        action="auth.login")
     await db.commit()
     set_session_cookies(response, settings, session)
+    response.delete_cookie(ml_cookie_name(settings), path="/", secure=settings.daas_cookie_secure, httponly=True,
+                           samesite="lax")
     return SessionOut(
         user=UserOut.model_validate(user),
         orgs=[MembershipOut(org_id=o.id, org_name=o.name, org_slug=o.slug, role=m.role) for m, o in memberships],

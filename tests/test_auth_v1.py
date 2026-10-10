@@ -335,8 +335,8 @@ def test_verify_is_atomic_under_concurrency(cloud_client: TestClient, cloud_sett
     token = token_from_outbox(cloud_settings, "race@example.test")
     clients = [TestClient(cloud_client.app, base_url="https://testserver") for _ in range(6)]
     with ThreadPoolExecutor(6) as pool:
-        codes = list(pool.map(lambda c: c.post(f"{API}/auth/magic-link/verify", json={"token": token}).status_code,
-                              clients))
+        codes = list(pool.map(lambda c: c.post(f"{API}/auth/magic-link/verify",
+                                               json={"token": token, "confirm": True}).status_code, clients))
     assert sorted(codes) == [200] + [401] * 5
 
 
