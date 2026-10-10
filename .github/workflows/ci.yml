@@ -103,6 +103,9 @@ jobs:
           echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
       - name: Install (npm ci)
         run: npm ci --no-audit --no-fund
+      # tylko zaleznosci produkcyjne i tylko high/critical; podatnosci narzedzi deweloperskich nie zatrzymuja przebiegu
+      - name: Audit (npm audit, production dependencies)
+        run: npm audit --omit=dev --audit-level=high
       # typy API generowane z ../docs/openapi.json: rozjazd schematu z backendem zatrzymuje przebieg
       - name: API schema drift (gen:api)
         run: npm run gen:api && git diff --exit-code -- src/lib/api/schema.d.ts
@@ -196,9 +199,15 @@ jobs:
           curl -sf -X POST localhost:8000/run -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d '{"pipeline":"cs2_demo"}' | grep -q '"SUCCESS"'
           curl -sf -H "X-API-Key: $KEY" -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
           docker stop daas
-      - name: Smoke trybu cloud (migracje control plane w kontenerze)
+      - name: Smoke trybu cloud (migracje control plane w kontenerze, utwardzenie jak w deploy/compose.yml)
         run: |
-          docker run -d --rm --name daas-cloud -e DAAS_MODE=cloud -e DAAS_SECRET_KEY="$(openssl rand -hex 32)" \
+          # read-only + tmpfs /tmp + cap_drop ALL: zapisywalne tylko wolumeny /data/*, tak jak w compose
+          docker run -d --rm --name daas-cloud --read-only --tmpfs /tmp --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            -e DAAS_MODE=cloud -e DAAS_SECRET_KEY="$(openssl rand -hex 32)" -e DAAS_ALLOW_CONSOLE_MAIL=true \
+            -e DAAS_CONTROL_DB_URL=sqlite+aiosqlite:////data/control/control.db \
+            -e DUCKDB_PATH=/data/runtime/daas.duckdb -e REPORTS_DIR=/data/runtime/reports \
+            -v daas-ci-control:/data/control -v daas-ci-runtime:/data/runtime \
             -p 127.0.0.1:8001:8000 daas-engine:ci
           for i in $(seq 1 30); do curl -sf localhost:8001/ready && break || sleep 1; done
           curl -sf localhost:8001/ready
@@ -208,9 +217,18 @@ jobs:
         run: docker build -t daas-engine-web:ci web
       - name: Run web container & smoke
         run: |
-          docker run -d --rm --name daas-web -p 127.0.0.1:3000:3000 daas-engine-web:ci
+          docker run -d --rm --name daas-web --read-only --tmpfs /tmp --tmpfs /app/.next/cache --cap-drop ALL \
+            --security-opt no-new-privileges:true -p 127.0.0.1:3000:3000 daas-engine-web:ci
           for i in $(seq 1 30); do curl -sf localhost:3000/login -o /dev/null && break || sleep 1; done
           curl -sf localhost:3000/login -o /dev/null
           docker stop daas-web
       - name: Validate deploy/compose.yml
         run: DAAS_SECRET_KEY="$(openssl rand -hex 32)" docker compose -f deploy/compose.yml --profile edge --profile tools config -q
+      - name: Validate deploy/compose.yml with the LLM overlay
+        run: |
+          DAAS_SECRET_KEY="$(openssl rand -hex 32)" ANTHROPIC_API_KEY=ci-placeholder \
+            docker compose -f deploy/compose.yml -f deploy/compose.llm.yml config -q
+      - name: Validate deploy/Caddyfile
+        run: |
+          docker run --rm -e DAAS_DOMAIN=ci.example.com -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

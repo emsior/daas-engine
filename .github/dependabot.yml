@@ -3,18 +3,42 @@ updates:
   - package-ecosystem: "pip"
     directory: "/"
     schedule: { interval: "weekly", day: "monday" }
+    # nowe wydania czekaja 7 dni (ochrona przed zlosliwymi, szybko wycofanymi wersjami)
+    cooldown: { default-days: 7 }
     open-pull-requests-limit: 5
     groups:
       python-deps: { patterns: ["*"] }
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule: { interval: "weekly", day: "monday" }
+    # nowe wydania czekaja 7 dni (ochrona przed zlosliwymi, szybko wycofanymi wersjami)
+    cooldown: { default-days: 7 }
     groups:
       actions: { patterns: ["*"] }
   - package-ecosystem: "docker"
     directory: "/"
     schedule: { interval: "weekly", day: "monday" }
+    # nowe wydania czekaja 7 dni (ochrona przed zlosliwymi, szybko wycofanymi wersjami)
+    cooldown: { default-days: 7 }
     ignore:
       # obraz trzymamy na wersji testowanej w CI (matrix 3.11/3.12) i lokalnie (3.12.10)
       - dependency-name: "python"
         versions: [">=3.13"]
+  # Kokpit (web/): zaleznosci npm i obrazy bazowe web/Dockerfile (node:22-alpine)
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule: { interval: "weekly", day: "monday" }
+    # nowe wydania czekaja 7 dni (ochrona przed zlosliwymi, szybko wycofanymi wersjami)
+    cooldown: { default-days: 7 }
+    open-pull-requests-limit: 5
+    groups:
+      web-deps: { patterns: ["*"] }
+  - package-ecosystem: "docker"
+    directory: "/web"
+    schedule: { interval: "weekly", day: "monday" }
+    # nowe wydania czekaja 7 dni (ochrona przed zlosliwymi, szybko wycofanymi wersjami)
+    cooldown: { default-days: 7 }
+    ignore:
+      # Node trzymamy na LTS 22 (to samo co w CI); wyzsze wersje glowne wymagaja swiadomej decyzji
+      - dependency-name: "node"
+        versions: [">=23"]
