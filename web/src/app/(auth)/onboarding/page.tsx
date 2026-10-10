@@ -17,7 +17,7 @@ import { toSummary, validateOrgName } from "@/lib/validation";
 const NAME_ID = "org-name";
 const LOCALE_ID = "org-locale";
 const DPA_ID = "org-dpa";
-const DPA_VERSION = "v1";
+const DPA_VERSION = "v1" as const;
 
 export default function OnboardingPage() {
   const t = useT();
@@ -48,7 +48,7 @@ export default function OnboardingPage() {
       return;
     }
     createOrg.mutate(
-      { name: name.trim(), locale, accept_dpa: true, dpa_version: DPA_VERSION },
+      { name: name.trim(), locale, dpa_accepted: true, dpa_version: DPA_VERSION },
       {
         onSuccess: () => router.replace("/"),
         onError: () => {

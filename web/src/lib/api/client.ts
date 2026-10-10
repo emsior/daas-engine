@@ -17,6 +17,7 @@ import type {
   Invitation,
   InviteRequest,
   Job,
+  Locale,
   Member,
   Me,
   Org,
@@ -30,6 +31,28 @@ import type {
   Webhook,
   WebhookPingResult,
 } from "./types";
+import {
+  itemsOf,
+  toEvidence,
+  toInvitation,
+  toMe,
+  toRun,
+  toUploadPreview,
+  toUsage,
+  toWebhook,
+  toWebhookPing,
+  type WireEvidence,
+  type WireInvitation,
+  type WireMe,
+  type WirePage,
+  type WireRun,
+  type WireRunDetail,
+  type WireSession,
+  type WireUpload,
+  type WireUsage,
+  type WireWebhook,
+  type WireWebhookPing,
+} from "./wire";
 
 /* ------------------------------------------------------------------ */
 /* Błędy                                                               */
@@ -150,7 +173,10 @@ async function toApiError(response: Response): Promise<ApiError> {
     detail: problem?.detail ?? null,
     requestId: problem?.request_id ?? headerId,
     code: problem?.code ?? null,
-    fieldErrors: problem?.errors ?? [],
+    fieldErrors: (problem?.errors ?? []).map((entry) => ({
+      field: entry.field ?? entry.loc?.filter((part) => part !== "body").join("."),
+      message: entry.message ?? entry.msg ?? "",
+    })),
   });
 }
 
@@ -210,11 +236,23 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
 /* ------------------------------------------------------------------ */
 
 export const api = {
-  me: (signal?: AbortSignal) => request<Me>(paths.me(), { signal }),
-  requestMagicLink: (email: string) =>
-    request<void>(paths.magicLink(), { method: "POST", json: { email } }),
-  verifyMagicLink: (token: string) =>
-    request<Me>(paths.magicLinkVerify(), { method: "POST", json: { token } }),
+  /** `GET /me` (sesje i organizacje) + `GET /orgs/{id}` (pełna organizacja aktywna = pierwsza z listy). */
+  me: async (signal?: AbortSignal): Promise<Me> => {
+    const wire = await request<WireMe>(paths.me(), { signal });
+    const first = wire.orgs[0];
+    const org = first ? await request<Org>(paths.org(first.org_id), { signal }) : null;
+    return toMe(wire, org);
+  },
+  requestMagicLink: (email: string, locale?: Locale) =>
+    request<void>(paths.magicLink(), {
+      method: "POST",
+      json: { email, ...(locale ? { locale } : {}) },
+    }),
+  /** Wymiana tokenu na sesję (cookie); odpowiedź backendu to sesja, więc profil pobieramy przez `me`. */
+  verifyMagicLink: async (token: string): Promise<Me> => {
+    await request<WireSession>(paths.magicLinkVerify(), { method: "POST", json: { token } });
+    return api.me();
+  },
   logout: () => request<void>(paths.logout(), { method: "POST" }),
 
   createOrg: (body: CreateOrgRequest) => request<Org>(paths.orgs(), { method: "POST", json: body }),
@@ -223,8 +261,10 @@ export const api = {
     request<Org>(paths.org(org), { method: "PATCH", json: body }),
 
   listMembers: (org: string) => request<Member[]>(paths.members(org)),
-  invite: (org: string, body: InviteRequest) =>
-    request<Invitation>(paths.invitations(org), { method: "POST", json: body }),
+  invite: async (org: string, body: InviteRequest): Promise<Invitation> =>
+    toInvitation(
+      await request<WireInvitation>(paths.invitations(org), { method: "POST", json: body }),
+    ),
 
   listApiKeys: (org: string) => request<ApiKey[]>(paths.apiKeys(org)),
   createApiKey: (org: string, body: CreateApiKeyRequest) =>
@@ -232,10 +272,11 @@ export const api = {
   revokeApiKey: (org: string, id: string) =>
     request<void>(paths.apiKey(org, id), { method: "DELETE" }),
 
-  upload: (org: string, file: File, signal?: AbortSignal) => {
+  upload: async (org: string, file: File, signal?: AbortSignal): Promise<UploadPreview> => {
     const form = new FormData();
     form.append("file", file);
-    return request<UploadPreview>(paths.uploads(org), { method: "POST", form, signal });
+    const wire = await request<WireUpload>(paths.uploads(org), { method: "POST", form, signal });
+    return toUploadPreview(wire);
   },
   createJob: (org: string, body: CreateJobRequest) =>
     request<Job>(paths.jobs(org), { method: "POST", json: body }),
@@ -244,21 +285,46 @@ export const api = {
   cancelJob: (org: string, id: string) =>
     request<Job>(paths.jobCancel(org, id), { method: "POST" }),
 
-  listRuns: (org: string, limit = 50) => request<Run[]>(paths.runs(org), { query: { limit } }),
-  getRun: (org: string, id: string) => request<Run>(paths.run(org, id)),
+  listRuns: async (org: string, limit = 50): Promise<Run[]> => {
+    const page = await request<WirePage<WireRun> | WireRun[]>(paths.runs(org), {
+      query: { limit },
+    });
+    return itemsOf(page).map(toRun);
+  },
+  getRun: async (org: string, id: string): Promise<Run> =>
+    toRun(await request<WireRunDetail>(paths.run(org, id))),
 
-  evidence: (org: string) => request<EvidenceReport>(paths.evidence(org)),
-  usage: (org: string) => request<Usage>(paths.usage(org)),
+  /** Brak uruchomienia kolektora = 404 -> pusty raport (widok pokazuje stan pusty z CTA). */
+  evidence: async (org: string): Promise<EvidenceReport> => {
+    try {
+      return toEvidence(await request<WireEvidence>(paths.evidence(org)));
+    } catch (error) {
+      if (isApiError(error) && error.status === 404) {
+        return {
+          run_id: null,
+          collected_at: null,
+          host: null,
+          collector_command: null,
+          controls: [],
+        };
+      }
+      throw error;
+    }
+  },
+  usage: async (org: string): Promise<Usage> => toUsage(await request<WireUsage>(paths.usage(org))),
   verifyHash: (org: string, sha256: string) =>
     request<VerifyResult>(paths.verify(org), { method: "POST", json: { sha256 } }),
 
-  listWebhooks: (org: string) => request<Webhook[]>(paths.webhooks(org)),
-  createWebhook: (org: string, body: CreateWebhookRequest) =>
-    request<Webhook>(paths.webhooks(org), { method: "POST", json: body }),
+  listWebhooks: async (org: string): Promise<Webhook[]> =>
+    itemsOf(await request<WirePage<WireWebhook> | WireWebhook[]>(paths.webhooks(org))).map(
+      toWebhook,
+    ),
+  createWebhook: async (org: string, body: CreateWebhookRequest): Promise<Webhook> =>
+    toWebhook(await request<WireWebhook>(paths.webhooks(org), { method: "POST", json: body })),
   deleteWebhook: (org: string, id: string) =>
     request<void>(paths.webhook(org, id), { method: "DELETE" }),
-  pingWebhook: (org: string, id: string) =>
-    request<WebhookPingResult>(paths.webhookPing(org, id), { method: "POST" }),
+  pingWebhook: async (org: string, id: string): Promise<WebhookPingResult> =>
+    toWebhookPing(await request<WireWebhookPing>(paths.webhookPing(org, id), { method: "POST" })),
 };
 
 /* ------------------------------------------------------------------ */

@@ -56,7 +56,7 @@ export function OrgGate({ children }: { children: ReactNode }) {
   if (query.error || !query.data || !query.data.org) {
     const { message, requestId } = describeError(query.error, t);
     return (
-      <Alert variant="danger" title={t("error.title")}>
+      <Alert variant="danger" role="alert" title={t("error.title")}>
         <div className="stack-3">
           <p>{message}</p>
           {requestId ? <p className="text-muted">{t("app.requestId", { id: requestId })}</p> : null}

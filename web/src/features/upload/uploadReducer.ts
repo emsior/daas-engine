@@ -7,6 +7,12 @@ export type UploadError =
   | { code: "none" }
   | { code: "server"; requestId?: string | null }
   | { code: "columns"; columns: string[] }
+  | { code: "columnsServer" }
+  | { code: "package" }
+  | { code: "decode" }
+  | { code: "records" }
+  | { code: "xlsx" }
+  | { code: "quota" }
   | { code: "notReady" };
 
 export type UploadPhase =

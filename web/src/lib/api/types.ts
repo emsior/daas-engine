@@ -50,8 +50,9 @@ export interface MagicLinkVerifyRequest {
 export interface CreateOrgRequest {
   name: string;
   locale: Locale;
-  accept_dpa: boolean;
-  dpa_version: string;
+  /** Akceptacja umowy powierzenia (DPA); backend wymaga `true`. */
+  dpa_accepted: boolean;
+  dpa_version: "v1";
 }
 
 export interface UpdateOrgRequest {
@@ -59,7 +60,9 @@ export interface UpdateOrgRequest {
   llm_narrative?: boolean;
 }
 
-export type PipelineName = "ecommerce_demo" | "uksc_evidence" | "cs2_demo" | (string & {});
+/** Pipeline'y, które kokpit umie uruchomić (`JobCreate.pipeline`). */
+export type KnownPipeline = "ecommerce_demo" | "uksc_evidence" | "cs2_demo";
+export type PipelineName = KnownPipeline | (string & {});
 
 /** Odpowiedź `POST /orgs/{id}/uploads`: wykryty mapping kolumn (kanoniczna -> nagłówek z pliku). */
 export interface UploadPreview {
@@ -77,11 +80,11 @@ export interface UploadPreview {
   ready: boolean;
   /** Pola brakujące wymaganego mappingu (jeśli backend je zwraca). */
   missing_columns?: string[];
-  suggested_pipeline?: PipelineName;
+  suggested_pipeline?: KnownPipeline;
 }
 
 export interface CreateJobRequest {
-  pipeline: PipelineName;
+  pipeline: KnownPipeline;
   upload_id: string;
 }
 
@@ -104,6 +107,8 @@ export interface Job {
 /** Zdarzenia SSE z `GET /orgs/{id}/jobs/{job_id}/events`. */
 export interface JobStatusEvent {
   status: JobStatus;
+  /** Migawka zadania zawiera też aktualny postęp (0-100). */
+  progress?: number;
 }
 export interface JobProgressEvent {
   progress: number;
@@ -189,7 +194,15 @@ export interface CreateApiKeyRequest {
   expires_in_days: number | null;
 }
 
-export const API_KEY_SCOPES = ["runs:write", "reports:read", "keys:manage"] as const;
+/** Zakresy nadawane kluczom (podzbiór `KEY_SCOPES` backendu, bez uprawnień administracyjnych poza kluczami). */
+export const API_KEY_SCOPES = [
+  "uploads:write",
+  "runs:write",
+  "runs:read",
+  "reports:read",
+  "usage:read",
+  "keys:manage",
+] as const;
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
 
 export interface Member {
@@ -197,7 +210,7 @@ export interface Member {
   email: string;
   name: string | null;
   role: Role;
-  joined_at?: string | null;
+  created_at?: string | null;
 }
 
 export interface InviteRequest {
@@ -222,9 +235,11 @@ export interface Webhook {
   secret?: string;
 }
 
+export type WebhookEvent = "run.finished";
+
 export interface CreateWebhookRequest {
   url: string;
-  events: string[];
+  events: WebhookEvent[];
 }
 
 export interface WebhookPingResult {
@@ -242,9 +257,11 @@ export interface Usage {
 
 export interface VerifyResult {
   known: boolean;
-  run_id?: string;
-  created_at?: string;
-  pipeline?: PipelineName;
+  run_id?: string | null;
+  created_at?: string | null;
+  pipeline?: PipelineName | null;
+  /** Format pliku raportu, do którego pasuje skrót. */
+  format?: ReportFormat | null;
 }
 
 /** Ciało błędu `application/problem+json` (RFC 9457) z rozszerzeniem `request_id`. */
@@ -256,5 +273,6 @@ export interface ProblemDetails {
   instance?: string;
   request_id?: string;
   code?: string;
-  errors?: { field?: string; message: string }[];
+  /** Błędy pól: `{loc, msg}` (walidacja FastAPI) albo `{field, message}`. */
+  errors?: { loc?: string[]; msg?: string; field?: string; message?: string }[];
 }

@@ -30,7 +30,9 @@ PORT=3000 HOSTNAME=0.0.0.0 node .next/standalone/server.js
 | `NEXT_PUBLIC_API_ORIGIN` | **build** (wstawiana do paczki) i proxy | `http://127.0.0.1:8000`                             | Origin API. Pusty (`NEXT_PUBLIC_API_ORIGIN=`) = ten sam origin co kokpit (Caddy: `/api/*` do API, reszta do kokpitu). Trafia do `connect-src` i `frame-src` w CSP. |
 | `API_INTERNAL_ORIGIN`    | runtime (serwer)                        | `NEXT_PUBLIC_API_ORIGIN`, a gdy pusty adres kokpitu | Adres, pod którym serwer kokpitu pyta `GET /api/v1/me` (przekierowanie na `/login`). W compose np. `http://api:8000`.                                              |
 
-Cookies: sesja `HttpOnly` i `daas_csrf` ustawia API. Kokpit i API muszą być w tej samej witrynie (ta sama domena, porty bez znaczenia), a po stronie API `DAAS_COCKPIT_ORIGIN` musi wskazywać origin kokpitu (CORS z `credentials`).
+Ramka z raportem: API wysyła raport z `frame-ancestors 'self'`, więc osadzenie działa tylko przy jednym originie kokpitu i API (produkcja za Caddy, albo lokalnie przez `e2e/proxy.mjs`). Przy `npm run dev` na osobnych portach przeglądarka zablokuje ramkę; „Otwórz raport” i pobieranie działają zawsze.
+
+Cookies: sesja `HttpOnly` i `daas_csrf` ustawia API. Kokpit i API muszą być w tej samej witrynie (ta sama domena, porty bez znaczenia; lokalnie otwieraj kokpit pod `http://127.0.0.1:3000`, nie `localhost`, bo domyślny adres API to `127.0.0.1:8000`), a po stronie API `DAAS_COCKPIT_ORIGIN` musi wskazywać origin kokpitu (CORS z `credentials`).
 
 ## Skrypty
 
@@ -44,14 +46,14 @@ Cookies: sesja `HttpOnly` i `daas_csrf` ustawia API. Kokpit i API muszą być w 
 | `npm run gen:api`                 | typy z `../docs/openapi.json` do `src/lib/api/schema.d.ts`                         |
 | `npm run format`                  | Prettier                                                                           |
 
-## Typy API: ręczne teraz, z `openapi.json` później
+## Typy API: z `docs/openapi.json`
 
-`src/lib/api/types.ts` zawiera typy napisane ręcznie według SPEC_v2 sekcja 2.4. Gdy w repo pojawi się `docs/openapi.json`:
+`docs/openapi.json` jest eksportem z aplikacji (test świeżości w pytest). `npm run gen:api` generuje z niego `src/lib/api/schema.d.ts` (plik jest w repo, w `.prettierignore` i poza ESLintem; po zmianie API odśwież go tym skryptem i zacommituj razem z `openapi.json`).
 
-1. `npm run gen:api` (tworzy `src/lib/api/schema.d.ts`; plik jest w `.prettierignore` i ignorowany przez ESLint).
-2. W `types.ts` zastąp definicje aliasami, np. `export type Org = components["schemas"]["OrgOut"];` i popraw różnice (kształt `Me`, `Run`, `UploadPreview`, `EvidenceReport`, zdarzenia SSE).
-3. Ścieżki zmienia się w jednym miejscu: obiekt `paths` w `src/lib/api/client.ts`.
-4. `npm run typecheck` pokaże każde miejsce, w którym kontrakt się rozjechał.
+- `src/lib/api/wire.ts`: aliasy `Wire*` do `components["schemas"][...]` i funkcje mapujące odpowiedzi backendu na typy widoków. Rozjazdy kontraktu (kształt `/me`, strony `{items}` zamiast tablic, `UploadOut`, `EvidenceOut.checks`, `UsageReport`, `WebhookPingResult`) są zamknięte w tym jednym pliku.
+- `src/lib/api/types.ts`: typy widoków i żądań. Typy żądań są sprawdzane względem schematów backendu w `src/lib/api/contract.test.ts` (błąd kompilacji przy zmianie nazwy lub typu pola); ten sam test sprawdza, że każda ścieżka z `client.ts` istnieje w OpenAPI.
+- Ścieżki zmienia się w jednym miejscu: obiekt `paths` w `src/lib/api/client.ts`.
+- Kody odmowy uploadu (`problem+json`, pole `code`) mapuje `src/features/upload/uploadErrors.ts` na wzorce komunikatów (typ, rozmiar, pusty plik, brak kolumn, kodowanie/separator).
 
 ## Struktura
 
@@ -63,7 +65,7 @@ src/lib/           api/ (client, hooks, types), sse, format, hash, validation, s
 src/i18n/          pl.json, en.json, useT()
 src/styles/        tokens/base/components/tailwind (Designer, bez zmian), app.css (uzupełnienia), globals.css (jedyny import)
 src/proxy.ts       CSP z nonce, nagłówki bezpieczeństwa, ?lang=, przekierowanie na /login
-e2e/               Playwright
+e2e/               Playwright (specy, helpers, proxy.mjs, stack.sh)
 ```
 
 ## Bezpieczeństwo i dostępność (skrót)
@@ -76,10 +78,18 @@ e2e/               Playwright
 
 ## Testy
 
-`npm test` uruchamia testy jednostkowe. E2E (`npm run e2e`) wymaga:
+`npm test` uruchamia testy jednostkowe (Vitest, jsdom). E2E (Playwright, Chromium z `PLAYWRIGHT_BROWSERS_PATH`; projekty `mobile-375` i `desktop-1280`) wymaga pełnego stosu w układzie produkcyjnym: jeden origin, `/api/*` do API, reszta do kokpitu. Raport jest osadzany w `<iframe>`, a API wysyła go z `frame-ancestors 'self'`, więc przy osobnych portach kokpitu i API ramka raportu jest blokowana; stąd proxy jednego originu.
 
-- działającego kokpitu (`E2E_BASE_URL`, domyślnie `http://127.0.0.1:3000`),
-- backendu w trybie `cloud` z adapterem e-mail `console`,
-- dostępu do katalogu outboxa z linkami logowania (`E2E_OUTBOX_DIR`, domyślnie `../runtime/outbox`). Helper `e2e/helpers.ts` szuka w plikach fragmentu `token=...`; jeśli backend zapisuje link w innym formacie, popraw `readLatestLoginToken`.
+```bash
+cd web
+export E2E_RUNTIME=/tmp/daas-e2e               # dane testowe (kasowane przy starcie)
+./e2e/stack.sh start                            # backend cloud + e-mail console + kokpit (standalone) + proxy :3100
+E2E_BASE_URL=http://127.0.0.1:3100 E2E_OUTBOX_DIR=$E2E_RUNTIME/outbox npm run e2e
+./e2e/stack.sh stop
+```
+
+`stack.sh` buduje kokpit z `NEXT_PUBLIC_API_ORIGIN=` (pusty = ten sam origin), jeśli nie ma `.next/standalone`; wymuś przebudowę usuwając `.next`. Wyłącza limity logowania (`DAAS_RATE_LIMIT_*=0`), bo seria testów loguje się z jednego adresu IP. Link logowania z adaptera `console` helper `e2e/helpers.ts` czyta z `E2E_OUTBOX_DIR` (pliki JSON z polem `link`).
+
+Specy: `login-onboarding-upload-report`, `api-keys`, `verify-local-hash` (zero żądań sieciowych), `upload-progress-sse`, `upload-errors`, `evidence` (fixture `data/fixtures/uksc`), `members`, `settings`, `states` (loading/error/empty/success), `preferences` (PL/EN, motyw), `responsive` (375 px), `security` (CSP, zero zewnętrznych originów), `a11y` (axe w obu motywach, klawiatura, fokus). Raport axe do pliku: `A11Y_LOG=/ścieżka/a11y.tsv`.
 
 Wersja `@playwright/test` jest przypięta do 1.56.1 (Chromium 1194 z `/opt/pw-browsers`). Nie uruchamiaj `playwright install`, jeśli przeglądarki są już w `PLAYWRIGHT_BROWSERS_PATH`.

@@ -13,13 +13,14 @@ import { Progress } from "@/components/Progress";
 import { Table, Tbody, Td, Th, Thead, Tr } from "@/components/Table";
 import { useSession } from "@/components/shell/OrgGate";
 import { useT, useTDynamic, type TDynamicFunction, type TFunction } from "@/i18n/provider";
-import { api, isApiError, jobEventsUrl } from "@/lib/api/client";
+import { api, jobEventsUrl } from "@/lib/api/client";
 import { useCreateJob, useJobPolling, useUpload } from "@/lib/api/hooks";
 import type { UploadPreview } from "@/lib/api/types";
 import { MAX_PACKAGE_UPLOAD_BYTES, MAX_TABLE_UPLOAD_BYTES } from "@/lib/env";
 import { formatBytes, formatNumber } from "@/lib/format";
 import { connectJobEvents } from "@/lib/sse";
 import { defaultPipelineFor, kindOfFile } from "@/lib/upload-validation";
+import { classifyUploadFailure } from "./uploadErrors";
 import {
   initialState,
   stepOf,
@@ -50,6 +51,18 @@ export function uploadErrorMessage(error: UploadError, t: TFunction): string {
       return t("upload.error.columns", { columns: error.columns.join(", ") });
     case "notReady":
       return t("upload.error.notReady");
+    case "columnsServer":
+      return t("upload.error.columnsServer");
+    case "package":
+      return t("upload.error.package");
+    case "decode":
+      return t("upload.error.decode");
+    case "records":
+      return t("upload.error.records");
+    case "xlsx":
+      return t("upload.error.xlsx");
+    case "quota":
+      return t("upload.error.quota");
     case "server":
       return error.requestId
         ? `${t("upload.error.server")} ${t("app.requestId", { id: error.requestId })}`
@@ -164,7 +177,10 @@ export function UploadWizard() {
     if (phase !== "running" || !jobId) return;
     return connectJobEvents(jobEventsUrl(orgId, jobId), {
       onOpen: () => dispatch({ type: "live", mode: "sse" }),
-      onStatus: (event) => dispatch({ type: "status", status: event.status }),
+      onStatus: (event) => {
+        dispatch({ type: "status", status: event.status });
+        if (event.progress !== undefined) dispatch({ type: "progress", percent: event.progress });
+      },
       onProgress: (event) =>
         dispatch({
           type: "progress",
@@ -224,17 +240,6 @@ export function UploadWizard() {
     }
   }, [phase, announce, t]);
 
-  const serverError = (error: unknown, limitFile: File | null): UploadError => {
-    if (isApiError(error) && error.status === 413) {
-      const kind = limitFile ? kindOfFile(limitFile.name) : null;
-      return {
-        code: "size",
-        limitBytes: kind === "package" ? MAX_PACKAGE_UPLOAD_BYTES : MAX_TABLE_UPLOAD_BYTES,
-      };
-    }
-    return { code: "server", requestId: isApiError(error) ? error.requestId : null };
-  };
-
   const onSubmit = (event: FormEvent) => {
     event.preventDefault();
     const file = state.file;
@@ -256,7 +261,11 @@ export function UploadWizard() {
           dispatch({ type: "upload_ok", preview });
         }
       },
-      onError: (error) => dispatch({ type: "upload_fail", error: serverError(error, file) }),
+      onError: (error) =>
+        dispatch({
+          type: "upload_fail",
+          error: classifyUploadFailure(error, kindOfFile(file.name)),
+        }),
     });
   };
 

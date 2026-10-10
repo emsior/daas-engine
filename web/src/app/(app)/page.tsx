@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { Table, Tbody, Td, Th, Thead, Tr } from "@/components/Table";
 import { useSession } from "@/components/shell/OrgGate";
 import { useT, useTDynamic } from "@/i18n/provider";
-import { useRuns } from "@/lib/api/hooks";
+import { useRun, useRuns } from "@/lib/api/hooks";
 import type { Run } from "@/lib/api/types";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { runKpis } from "@/lib/run-kpis";
@@ -52,10 +52,12 @@ function EmptyDashboard() {
   );
 }
 
-function LatestRun({ run }: { run: Run }) {
+function LatestRun({ run, orgId }: { run: Run; orgId: string }) {
   const t = useT();
   const labels = useRunLabels();
-  const kpis = runKpis(run);
+  // lista uruchomień nie niesie metryk: liczby do karty pochodzą ze szczegółów ostatniego runu
+  const detail = useRun(orgId, run.run_id);
+  const kpis = runKpis(detail.data ?? run);
   return (
     <Card title={t("dashboard.latest.title")}>
       <div className="stack-4">
@@ -200,7 +202,7 @@ export default function DashboardPage() {
                 </div>
                 {latest ? (
                   <div className="lg:order-1">
-                    <LatestRun run={latest} />
+                    <LatestRun run={latest} orgId={orgId} />
                   </div>
                 ) : null}
               </div>

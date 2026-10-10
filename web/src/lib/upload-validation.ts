@@ -1,3 +1,4 @@
+import type { KnownPipeline } from "./api/types";
 import { MAX_PACKAGE_UPLOAD_BYTES, MAX_TABLE_UPLOAD_BYTES } from "./env";
 
 export type UploadKind = "csv" | "xlsx" | "package";
@@ -39,6 +40,6 @@ export function validateUploadFile(file: { name: string; size: number }): Upload
 }
 
 /** Domyślny pipeline dla rodzaju pliku (backend może zasugerować inny). */
-export function defaultPipelineFor(kind: UploadKind): string {
+export function defaultPipelineFor(kind: UploadKind): KnownPipeline {
   return kind === "package" ? "uksc_evidence" : "ecommerce_demo";
 }

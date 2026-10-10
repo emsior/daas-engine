@@ -9,7 +9,7 @@ import type { JobDoneEvent, JobLogEvent, JobProgressEvent, JobStatusEvent } from
 
 const jobStatus = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);
 
-const statusSchema = z.object({ status: jobStatus });
+const statusSchema = z.object({ status: jobStatus, progress: z.number().optional() });
 const progressSchema = z.object({
   progress: z.number(),
   rows_done: z.number().optional(),
