@@ -208,3 +208,149 @@ def test_plan_guard_does_not_mask_auth_errors(cloud_client, cloud_settings, org)
     assert cloud_client.post(url, json=JOB, headers=key_headers(org.api_key)).status_code == 404
     _, narrow = seed_key(cloud_settings, other.org_id, scopes=[sc.RUNS_READ])
     assert cloud_client.post(url, json=JOB, headers=key_headers(narrow)).status_code == 403
+
+
+# ================================================================ GET /audit
+def seed_events(settings: Settings, org_id: str, count: int, *, same_ts: bool = False, action: str = "job.created",
+                meta: dict | None = None) -> list[str]:
+    """Wstawia zdarzenia wprost do bazy (rosnace ts albo wspolny ts); zwraca id w kolejnosci wstawiania."""
+    from datetime import timedelta
+
+    from app.control.ids import new_ulid
+    from app.control.types import utcnow
+
+    base = utcnow() - timedelta(days=1)
+    ids: list[str] = []
+
+    async def go(db):
+        for n in range(count):
+            event = models.AuditEvent(
+                id=new_ulid(), org_id=org_id, actor_type="system", action=action, target=f"job:{n}",
+                ts=base if same_ts else base + timedelta(seconds=n), meta=meta or {})
+            db.add(event)
+            ids.append(event.id)
+
+    with_db(settings, go)
+    return ids
+
+
+def fetch_all(client: TestClient, url: str, headers: dict, limit: int) -> list[dict]:
+    items: list[dict] = []
+    cursor = None
+    for _ in range(100):
+        params = {"limit": limit, **({"cursor": cursor} if cursor else {})}
+        r = client.get(url, params=params, headers=headers)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        items += body["items"]
+        cursor = body["next_cursor"]
+        if cursor is None:
+            return items
+    raise AssertionError("pagination does not terminate")
+
+
+def audit_url(org_id: str) -> str:
+    return f"{API}/orgs/{org_id}/audit"
+
+
+def test_audit_lists_newest_first_with_default_limit_50(cloud_client, cloud_settings, org):
+    seed_events(cloud_settings, org.org_id, 60)
+    r = cloud_client.get(audit_url(org.org_id), headers=key_headers(org.api_key))
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["items"]) == 50 and body["next_cursor"]
+    stamps = [i["ts"] for i in body["items"]]
+    assert stamps == sorted(stamps, reverse=True)
+
+
+def test_audit_cursor_pages_cover_every_event_exactly_once(cloud_client, cloud_settings, org):
+    expected = set(seed_events(cloud_settings, org.org_id, 120))
+    items = fetch_all(cloud_client, audit_url(org.org_id), key_headers(org.api_key), limit=50)
+    # dochodza zdarzenia zapisane przez sama organizacje (np. wywolania auth): porownujemy wylacznie zasiane
+    ids = [i["id"] for i in items]
+    assert len(ids) == len(set(ids))
+    assert expected <= set(ids)
+
+
+def test_audit_pages_are_ordered_by_ts_then_id_descending_even_with_equal_ts(cloud_client, cloud_settings, org):
+    seed_events(cloud_settings, org.org_id, 25, same_ts=True)
+    items = fetch_all(cloud_client, audit_url(org.org_id), key_headers(org.api_key), limit=4)
+    keys = [(i["ts"], i["id"]) for i in items]
+    assert keys == sorted(keys, reverse=True)
+    assert len({i["id"] for i in items}) == len(items) >= 25
+
+
+def test_audit_last_page_has_no_cursor(cloud_client, cloud_settings, org):
+    body = cloud_client.get(audit_url(org.org_id), params={"limit": 200}, headers=key_headers(org.api_key)).json()
+    assert body["next_cursor"] is None
+
+
+@pytest.mark.parametrize("limit", [0, -1, 201, "abc"])
+def test_audit_limit_is_bounded(cloud_client, cloud_settings, org, limit):
+    r = cloud_client.get(audit_url(org.org_id), params={"limit": limit}, headers=key_headers(org.api_key))
+    assert r.status_code == 422 and r.json()["code"] == "validation_error"
+
+
+@pytest.mark.parametrize("limit", [1, 200])
+def test_audit_limit_boundaries_are_accepted(cloud_client, cloud_settings, org, limit):
+    assert cloud_client.get(audit_url(org.org_id), params={"limit": limit},
+                            headers=key_headers(org.api_key)).status_code == 200
+
+
+@pytest.mark.parametrize("cursor", ["!!!", "abc", "e30", "WyJ4Il0", "x" * 300])
+def test_audit_rejects_a_malformed_cursor(cloud_client, cloud_settings, org, cursor):
+    r = cloud_client.get(audit_url(org.org_id), params={"cursor": cursor}, headers=key_headers(org.api_key))
+    assert r.status_code == 422, r.text
+
+
+def test_audit_org_a_does_not_see_events_of_org_b(cloud_client, cloud_settings, org):
+    other = seed_org(cloud_settings, name="Other", owner_email="other@example.test")
+    mine = set(seed_events(cloud_settings, org.org_id, 5))
+    theirs = set(seed_events(cloud_settings, other.org_id, 5))
+    seen_a = {i["id"] for i in fetch_all(cloud_client, audit_url(org.org_id), key_headers(org.api_key), 3)}
+    seen_b = {i["id"] for i in fetch_all(cloud_client, audit_url(other.org_id), key_headers(other.api_key), 3)}
+    assert mine <= seen_a and not (theirs & seen_a)
+    assert theirs <= seen_b and not (mine & seen_b)
+
+
+def test_audit_of_a_foreign_org_is_404_and_a_foreign_cursor_leaks_nothing(cloud_client, cloud_settings, org):
+    other = seed_org(cloud_settings, name="Other", owner_email="other@example.test")
+    ids = seed_events(cloud_settings, other.org_id, 3)
+    assert cloud_client.get(audit_url(other.org_id), headers=key_headers(org.api_key)).status_code == 404
+    page = cloud_client.get(audit_url(other.org_id), params={"limit": 1}, headers=key_headers(other.api_key)).json()
+    r = cloud_client.get(audit_url(org.org_id), params={"cursor": page["next_cursor"]},
+                         headers=key_headers(org.api_key))
+    assert r.status_code == 200 and not ({i["id"] for i in r.json()["items"]} & set(ids))
+
+
+def test_audit_requires_the_audit_read_scope(cloud_client, cloud_settings, org):
+    _, narrow = seed_key(cloud_settings, org.org_id, scopes=[sc.RUNS_READ, sc.USAGE_READ])
+    r = cloud_client.get(audit_url(org.org_id), headers=key_headers(narrow))
+    assert r.status_code == 403 and r.json()["required_scope"] == sc.AUDIT_READ
+
+
+def test_audit_roles_member_forbidden_admin_allowed(cloud_client, cloud_settings, org):
+    member = user_headers(cloud_settings, seed_member(cloud_settings, org.org_id, "m@example.test", "member"))
+    admin = user_headers(cloud_settings, seed_member(cloud_settings, org.org_id, "a@example.test", "admin"))
+    assert cloud_client.get(audit_url(org.org_id), headers=member).status_code == 403
+    assert cloud_client.get(audit_url(org.org_id), headers=admin).status_code == 200
+
+
+def test_audit_returns_the_stored_meta_unchanged(cloud_client, cloud_settings, org):
+    meta = {"pipeline": "ecommerce_demo", "bytes": 12, "ok": True, "scopes": ["runs:read"]}
+    (event_id,) = seed_events(cloud_settings, org.org_id, 1, action="upload.created", meta=meta)
+    items = fetch_all(cloud_client, audit_url(org.org_id), key_headers(org.api_key), 200)
+    (item,) = [i for i in items if i["id"] == event_id]
+    assert item["meta"] == meta and item["action"] == "upload.created"
+    assert set(item) == {"id", "ts", "actor_type", "actor_id", "action", "target", "ip", "meta"}
+
+
+def test_audit_records_real_actions_of_the_api(cloud_client, cloud_settings, org):
+    hdr = key_headers(org.api_key)
+    cloud_client.post(f"{API}/orgs/{org.org_id}/api-keys", json={"name": "x", "scopes": ["runs:read"]}, headers=hdr)
+    items = fetch_all(cloud_client, audit_url(org.org_id), hdr, 50)
+    assert "key.created" in {i["action"] for i in items}
+
+
+def test_audit_requires_authentication(cloud_client, org):
+    assert cloud_client.get(audit_url(org.org_id)).status_code == 401
