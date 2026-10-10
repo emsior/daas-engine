@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,7 +27,6 @@ from app.api.v1.schemas import (
 )
 from app.control import scopes as sc
 from app.control.db import get_db
-from app.control.executor import sha256_file
 from app.control.models import RunRecord
 from app.core.models import RunResult
 from app.core.redact import scrub_paths
@@ -108,38 +108,70 @@ async def get_run(run_id: str, request: Request, ctx: OrgContext = Depends(_READ
     return RunDetail(**run_out(record).model_dump(), **extra)
 
 
-def _read_report(path: Path) -> bytes:
-    return path.read_bytes()
+def _read_report(path: Path) -> tuple[bytes, str]:
+    """Jeden odczyt pliku: zwraca (bajty, sha256 tych samych bajtow) — hash i odpowiedz nie moga sie rozjechac."""
+    body = path.read_bytes()
+    return body, hashlib.sha256(body).hexdigest()
+
+
+def _purged(record: RunRecord) -> bool:
+    """True, gdy retencja usunela pliki raportow (rekord i hashe zostaja). Odczyt tolerancyjny dla starszych schematow."""
+    return getattr(record, "report_purged_at", None) is not None
+
+
+def _resolve_report(reports_dir: Path, raw_path: str | None) -> Path | None:
+    """Plik raportu w katalogu raportow najemcy albo None (sciezka z bazy najemcy, nie od klienta)."""
+    if not raw_path:
+        return None
+    path = Path(raw_path)
+    if not path.resolve().is_relative_to(reports_dir.resolve()) or not path.is_file():
+        return None
+    return path
+
+
+def _etag_matches(header: str, digest: str) -> bool:
+    """`If-None-Match`: lista wartosci, slabe `W/"..."`, `*`; porownanie slabe (RFC 9110 13.1.2)."""
+    for part in header.split(","):
+        tag = part.strip()
+        if tag == "*":
+            return True
+        if tag[:2] in ("W/", "w/"):
+            tag = tag[2:]
+        if tag.strip('" ') == digest:
+            return True
+    return False
 
 
 @router.get(
     "/orgs/{org_id}/runs/{run_id}/report", summary="Download a report",
     description="`fmt=html|md|json`. Sent with a restrictive `Content-Security-Policy`, `nosniff`, `ETag` = SHA-256 "
-                "of the file and `Cache-Control: private, no-store`. Embed the HTML only in a sandboxed iframe.",
+                "of the file and `Cache-Control: private, no-store`. Embed the HTML only in a sandboxed iframe. "
+                "`410 report_expired` once the retention job removed the files (the run record and hashes stay).",
     response_class=Response,
     responses={200: {"content": {"text/html": {}, "text/markdown": {}, "application/json": {}}},
-               304: {"description": "ETag matches"}},
+               304: {"description": "ETag matches"},
+               410: {"description": "report_expired: files removed by retention"}},
 )
 async def get_report(run_id: str, request: Request, fmt: Literal["html", "md", "json"] = Query(default="html"),
                      ctx: OrgContext = Depends(_REPORTS), db: AsyncSession = Depends(get_db)) -> Response:
     record = await _load_record(db, ctx.org_id, run_id)
+    if _purged(record):
+        raise ProblemError(410, "report_expired", "the report files were removed by the retention policy")
     expected = record.report_sha256.get(fmt)
     if not expected:
         raise not_found("report")
     row = await asyncio.to_thread(_tenant_run, request.app.state, ctx.org_id, run_id)
-    raw_path = (row or {}).get(PATH_KEYS[fmt])
     paths = request.app.state.tenants.paths(ctx.org_id)
-    path = Path(raw_path) if raw_path else None
-    # plik musi lezec w katalogu raportow tej organizacji (sciezka pochodzi z bazy najemcy, nie od klienta)
-    if path is None or not path.resolve().is_relative_to(paths.reports.resolve()) or not path.is_file():
+    # sciezka pochodzi z bazy najemcy (nie od klienta); plik musi lezec w katalogu raportow tej organizacji
+    path = _resolve_report(paths.reports, (row or {}).get(PATH_KEYS[fmt]))
+    if path is None:
         raise not_found("report file")
-    body = await asyncio.to_thread(_read_report, path)
-    actual = await asyncio.to_thread(sha256_file, path)
+    body, actual = await asyncio.to_thread(_read_report, path)
     if actual != expected:
         log.error("report integrity mismatch run_id=%s fmt=%s", run_id, fmt)
         raise ProblemError(500, "report_integrity_error", "the stored report does not match its recorded hash")
     headers = {**REPORT_HEADERS, "ETag": f'"{expected}"', "Cache-Control": "private, no-store"}
-    if request.headers.get("if-none-match", "").strip('" ') == expected:
+    if _etag_matches(request.headers.get("if-none-match", ""), expected):
         return Response(status_code=304, headers=headers)
     safe_name = f"{record.pipeline}-{record.run_id}.{fmt}"
     if fmt == "html":
