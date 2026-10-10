@@ -180,6 +180,64 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
+  # Brama G3: Lighthouse (mobile) dla tras publicznych /login i /dpa na stosie z web/e2e/stack.sh.
+  # Progi w web/lighthouserc.json: wydajnosc >= 0.9, dostepnosc >= 0.95, dobre praktyki >= 0.9.
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: e2e
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Node.js 22
+        env:
+          NODE_VERSION: v22.22.0
+          NODE_SHA256: 9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/node.tar.xz" "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"
+          echo "${NODE_SHA256}  ${RUNNER_TEMP}/node.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP/node" --strip-components=1
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+      - name: Install backend (runtime lock)
+        run: pip install --require-hashes -r requirements.lock && pip install --no-deps -e .
+      - name: Install web and Chromium (Playwright; @lhci/cli is a devDependency from the lockfile)
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Start stack (API cloud + console mail, web, one-origin proxy)
+        env:
+          PYTHON: python
+        run: |
+          echo "E2E_RUNTIME=$RUNNER_TEMP/daas-lh" >> "$GITHUB_ENV"
+          E2E_RUNTIME="$RUNNER_TEMP/daas-lh" bash web/e2e/stack.sh start
+      - name: Lighthouse (lhci autorun)
+        working-directory: web
+        run: |
+          CHROME_PATH="$(node -e "console.log(require('@playwright/test').chromium.executablePath())")"
+          export CHROME_PATH
+          npx lhci autorun
+      - name: Server logs (on failure)
+        if: failure()
+        run: |
+          for f in api web proxy; do echo "--- $f.log"; tail -n 200 "$E2E_RUNTIME/$f.log" || true; done
+      - name: Lighthouse report (artifact)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lighthouse-report
+          path: web/.lighthouseci
+          if-no-files-found: ignore
+          retention-days: 7
+
   docker:
     runs-on: ubuntu-latest
     timeout-minutes: 15
