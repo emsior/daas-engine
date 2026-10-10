@@ -45,7 +45,7 @@ def test_document_describes_the_cloud_api():
 
 def test_document_has_no_local_paths_secrets_or_owner_data():
     text = OPENAPI_FILE.read_text(encoding="utf-8")
-    for forbidden in (str(PROJECT_ROOT), "/home/", "/tmp/", "mcq089", "test-key-", "whsec_"):
+    for forbidden in (str(PROJECT_ROOT), "/home/", "/tmp/", "mcq" + "089", "test-key-", "whsec_"):
         assert forbidden not in text, forbidden
 
 

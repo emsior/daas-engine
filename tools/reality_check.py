@@ -112,9 +112,9 @@ for nazwa, url in [
                      "znaczenie": "kanal sprzedazy widoczny publicznie"}
 
 # 4. Dowody CS2 - folder, ktory mial sie zapelnic
-dow = pathlib.Path(os.path.expanduser("~")) / "Desktop" / "CS2Ops" / "dowody"
-alt = pathlib.Path(os.environ.get("CS2_DOWODY_PATH", ""))
-target = dow if dow.exists() else (alt if alt and alt.exists() else dow)
+# sciezka z parametru srodowiska CS2_DOWODY_PATH; domyslnie runtime/dowody w repozytorium (bez sciezek uzytkownika)
+override = os.environ.get("CS2_DOWODY_PATH", "").strip()
+target = pathlib.Path(override) if override else ROOT / "runtime" / "dowody"
 checks["zrzuty_cs2"] = {
     "wartosc": len(list(target.glob("*"))) if target.exists() else -1,
     "dowod": str(target),
