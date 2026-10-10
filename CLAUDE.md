@@ -49,7 +49,7 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 ```bash
 # backend (z korzenia repo)
 . .venv/bin/activate                      # Windows: .\.venv\Scripts\Activate.ps1
-pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
+pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .   # działa też na Windows (uvloop za markerem sys_platform)
 python -m pytest -p no:cacheprovider      # addopts=-q już jest: nie dodawaj drugiego -q (znika podsumowanie)
 ruff check app tests                      # ta sama wersja co w CI (0.16.8)
 python -m app.main                        # API na 127.0.0.1:8000; selfhost wymaga DAAS_API_KEY, cloud wymaga DAAS_SECRET_KEY
