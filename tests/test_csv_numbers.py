@@ -65,3 +65,38 @@ def test_nieczytelny_koszt_nie_jest_cicho_zerem():
 def test_znak_i_rzad_wielkosci_zachowane_end_to_end():
     out, _ = map_dataframe(_frame(kwota=["(100)", "−200", "1.2E+06", "1e5"]))
     assert out["revenue"].tolist() == [-100.0, -200.0, 1200000.0, 100000.0]
+
+
+# ---------------------------------------------------------------- C15: format niejednoznaczny
+AMBIGUOUS = "niejednoznaczn"
+
+
+@pytest.mark.parametrize("values", [
+    ["1.234.567", "100"],          # kropka jako separator tysiecy
+    ["1.299", "100"],              # tysiac czy ulamek?
+    ["1,299", "100"],
+])
+def test_niejednoznaczny_format_ostrzega(values):
+    out, rep = map_dataframe(_frame(kwota=values))
+    assert len(out) == 2                                  # wiersze zostaja
+    assert any(AMBIGUOUS in w and "kwota" in w for w in rep.warnings), rep.warnings
+
+
+def test_ostrzezenie_podaje_liczbe_wartosci_i_przyklad():
+    _, rep = map_dataframe(_frame(kwota=["1.234.567", "2.345.678", "5"]))
+    (warning,) = [w for w in rep.warnings if AMBIGUOUS in w]
+    assert warning.startswith("2 wartości") and "1.234.567" in warning
+
+
+@pytest.mark.parametrize("values", [
+    ["1.299,00", "1 299,00"], ["1,299.00", "7 255,95"], ["12,5", "0.5"], ["1234.567", "100"], ["10", "20"],
+    ["0.500", "0,500"],
+])
+def test_jednoznaczne_formaty_nie_ostrzegaja(values):
+    _, rep = map_dataframe(_frame(kwota=values))
+    assert not any(AMBIGUOUS in w for w in rep.warnings), rep.warnings
+
+
+def test_wartosci_niejednoznaczne_sa_czytane_wg_konwencji_pl_lub_tysiecy():
+    out, _ = map_dataframe(_frame(kwota=["1.234.567", "1,299", "1.299"]))
+    assert out["revenue"].tolist() == [1234567.0, 1.299, 1.299]

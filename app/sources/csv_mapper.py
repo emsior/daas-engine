@@ -194,8 +194,8 @@ def _to_number(v: Any) -> float | None:
     return parse_number(v)[0]
 
 
-def to_number_series_ex(col: pd.Series) -> tuple[pd.Series, dict[str, int]]:
-    """Jak `to_number_series`, ale zwraca tez liczniki flag (`FLAG_*` -> liczba wierszy).
+def to_number_series_ex(col: pd.Series) -> tuple[pd.Series, dict[str, int], dict[str, str]]:
+    """Jak `to_number_series`, ale zwraca tez liczniki flag (`FLAG_*` -> liczba wierszy) i po jednym przykladzie.
 
     Napis parsowany jest raz na unikalna wartosc (eksporty maja mnostwo powtorzen kwot), a wynik
     rozprowadzany przez `Series.map(dict)` w C.
@@ -205,16 +205,19 @@ def to_number_series_ex(col: pd.Series) -> tuple[pd.Series, dict[str, int]]:
         bad = ~np.isfinite(num) & num.notna()
         if bad.any():
             num = num.mask(bad)
-        return num, ({FLAG_INVALID: int(bad.sum())} if bad.any() else {})
+        return num, ({FLAG_INVALID: int(bad.sum())} if bad.any() else {}), {}
     uniq = pd.unique(col.dropna())
     parsed = {u: parse_number(u) for u in uniq}
     values = col.map({u: r[0] for u, r in parsed.items()}).astype("float64")
     flags: dict[str, int] = {}
+    examples: dict[str, str] = {}
     flagged = {u: r[1] for u, r in parsed.items() if r[1]}
     if flagged:
         counts = col.map(flagged).value_counts()
         flags = {str(k): int(n) for k, n in counts.items()}
-    return values, flags
+        for value, flag in flagged.items():
+            examples.setdefault(str(flag), str(value).strip()[:24])
+    return values, flags, examples
 
 
 def to_number_series(col: pd.Series) -> pd.Series:
@@ -339,11 +342,22 @@ def map_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, MappingReport]:
     # --- liczby ---
     for col in ("revenue", "cost", "profit", "discount", "quantity"):
         if col in out.columns:
-            out[col], flags = to_number_series_ex(out[col])
+            out[col], flags, examples = to_number_series_ex(out[col])
+            where = f"w kolumnie „{mapping[col]}” ({col})"
             if flags.get(FLAG_INVALID):
                 report.warnings.append(
-                    f"{flags[FLAG_INVALID]} wartości w kolumnie „{mapping[col]}” ({col}) nie da się jednoznacznie "
+                    f"{flags[FLAG_INVALID]} wartości {where} nie da się jednoznacznie "
                     "odczytać jako liczby — potraktowano jako brak wartości.")
+            if flags.get(FLAG_AMBIGUOUS):
+                report.warnings.append(
+                    f"{flags[FLAG_AMBIGUOUS]} wartości {where} ma format niejednoznaczny "
+                    f"(np. „{examples[FLAG_AMBIGUOUS]}”: separator tysięcy czy ułamka?) — odczytano jako ułamek "
+                    "dziesiętny; jeśli to tysiące, wyeksportuj plik z kwotami bez separatora tysięcy.")
+            if flags.get(FLAG_DOT_THOUSANDS):
+                report.warnings.append(
+                    f"{flags[FLAG_DOT_THOUSANDS]} wartości {where} ma kropkę jako separator tysięcy "
+                    f"(np. „{examples[FLAG_DOT_THOUSANDS]}”) — format niejednoznaczny w eksportach angielskich; "
+                    "odczytano jako liczbę całkowitą z grupami tysięcy.")
 
     # --- dopełnienia ---
     if "order_id" not in out.columns:
