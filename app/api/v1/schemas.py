@@ -376,3 +376,8 @@ class WebhookPingResult(BaseModel):
 # ----------------------------------------------------------------------------- czlonkowie: zmiana roli (A1, 10.10)
 class MemberRolePatch(BaseModel):
     role: RoleName
+
+
+# ----------------------------------------------------------------------------- zaproszenia: stala odpowiedz (A1, 10.10)
+class InvitationAccepted(BaseModel):
+    status: Literal["accepted"] = "accepted"

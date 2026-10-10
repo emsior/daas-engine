@@ -292,48 +292,35 @@ def test_non_member_gets_403_not_404_on_members(cloud_client: TestClient, cloud_
     assert cloud_client.get(f"{API}/orgs/NOSUCH/members", headers=key_headers(other.api_key)).status_code == 403
 
 
-def test_add_existing_user(cloud_client: TestClient, cloud_settings: Settings, org):
+def test_direct_member_add_no_longer_exists(cloud_client: TestClient, cloud_settings: Settings, org):
+    """Dodanie istniejacego uzytkownika bez jego zgody (M-2) usuniete: zostaje zaproszenie."""
     seed_member(cloud_settings, seed_org(cloud_settings, name="B", owner_email="b@example.test").org_id,
                 "ola@example.test", "member")
-    r = cloud_client.post(f"{API}/orgs/{org.org_id}/members", json={"email": "Ola@Example.test", "role": "admin"},
+    r = cloud_client.post(f"{API}/orgs/{org.org_id}/members", json={"email": "ola@example.test", "role": "admin"},
                           headers=key_headers(org.api_key))
-    assert r.status_code == 201 and r.json()["email"] == "ola@example.test" and r.json()["role"] == "admin"
-    (event,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "member.added")
-    assert event.meta == {"role": "admin"}
+    assert r.status_code == 405
+    assert not get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "member.added")
+    assert "ola@example.test" not in [m["email"] for m in cloud_client.get(
+        f"{API}/orgs/{org.org_id}/members", headers=key_headers(org.api_key)).json()]
 
 
-def test_add_unknown_user_is_404_with_hint(cloud_client: TestClient, org):
-    r = cloud_client.post(f"{API}/orgs/{org.org_id}/members", json={"email": "ghost@example.test"},
-                          headers=key_headers(org.api_key))
-    assert r.status_code == 404 and r.json()["code"] == "user_not_found" and "invitation" in r.json()["detail"]
-
-
-def test_add_duplicate_member_is_409(cloud_client: TestClient, org):
-    r = cloud_client.post(f"{API}/orgs/{org.org_id}/members", json={"email": org.email},
-                          headers=key_headers(org.api_key))
-    assert r.status_code == 409 and r.json()["code"] == "already_member"
-
-
-@pytest.mark.parametrize("role", ["member"])
-def test_plain_member_cannot_manage_members(cloud_client: TestClient, cloud_settings: Settings, org, role):
-    hdr = as_role(cloud_settings, org.org_id, role)
-    assert cloud_client.post(f"{API}/orgs/{org.org_id}/members", json={"email": org.email}, headers=hdr
-                             ).status_code == 403
+def test_plain_member_cannot_invite(cloud_client: TestClient, cloud_settings: Settings, org):
+    hdr = as_role(cloud_settings, org.org_id, "member")
     assert cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": "n@example.test"}, headers=hdr
                              ).status_code == 403
 
 
 def test_admin_cannot_grant_owner_but_owner_can(cloud_client: TestClient, cloud_settings: Settings, org):
-    seed_member(cloud_settings, seed_org(cloud_settings, name="B", owner_email="b@example.test").org_id,
-                "new@example.test", "member")
     admin = as_role(cloud_settings, org.org_id, "admin")
-    r = cloud_client.post(f"{API}/orgs/{org.org_id}/members", json={"email": "new@example.test", "role": "owner"},
+    r = cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": "new@example.test", "role": "owner"},
                           headers=admin)
     assert r.status_code == 403
     owner = user_headers(cloud_settings, org.user_id)
-    r = cloud_client.post(f"{API}/orgs/{org.org_id}/members", json={"email": "new@example.test", "role": "owner"},
+    r = cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": "new@example.test", "role": "owner"},
                           headers=owner)
-    assert r.status_code == 201 and r.json()["role"] == "owner"
+    assert r.status_code == 202
+    body = login_via_magic_link(cloud_client, cloud_settings, "new@example.test")
+    assert [(o["org_id"], o["role"]) for o in body["orgs"]] == [(org.org_id, "owner")]
 
 
 def test_api_key_cannot_grant_owner(cloud_client: TestClient, org):
@@ -343,8 +330,9 @@ def test_api_key_cannot_grant_owner(cloud_client: TestClient, org):
 
 
 @pytest.mark.parametrize("email", ["", "no-at", "a@b", None])
-def test_member_email_validation(cloud_client: TestClient, org, email):
-    r = cloud_client.post(f"{API}/orgs/{org.org_id}/members", json={"email": email}, headers=key_headers(org.api_key))
+def test_invitation_email_validation(cloud_client: TestClient, org, email):
+    r = cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": email},
+                          headers=key_headers(org.api_key))
     assert r.status_code == 422
 
 
@@ -357,10 +345,10 @@ def test_invalid_role_is_422(cloud_client: TestClient, org):
 def test_invitation_is_stored_hashed_mailed_and_audited(cloud_client: TestClient, cloud_settings: Settings, org):
     r = cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": "New@Example.test", "role": "member"},
                           headers=key_headers(org.api_key))
-    assert r.status_code == 201 and r.json()["email"] == "new@example.test" and r.json()["role"] == "member"
+    assert r.status_code == 202 and r.json() == {"status": "accepted"}
     assert timedelta(days=6) < cloud_settings_expiry(cloud_settings) <= timedelta(days=7)
     (mail,) = outbox(cloud_settings, "new@example.test")
-    assert "Acme" in mail["subject"] and mail["link"].endswith("/login")
+    assert "Acme" not in mail["subject"] and "Acme" in mail["body"] and mail["link"].endswith("/login")
     (event,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "member.invited")
     assert event.meta["role"] == "member" and "new@example.test" not in json.dumps(event.meta)
 
@@ -371,17 +359,22 @@ def cloud_settings_expiry(settings: Settings) -> timedelta:
 
 
 def test_repeating_an_invitation_refreshes_it(cloud_client: TestClient, cloud_settings: Settings, org):
-    ids = [cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": "n@example.test", "role": role},
-                             headers=key_headers(org.api_key)).json()["id"] for role in ("member", "admin")]
-    assert ids[0] == ids[1]
+    for role in ("member", "admin"):
+        assert cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": "n@example.test", "role": role},
+                                 headers=key_headers(org.api_key)).status_code == 202
     (inv,) = get_rows(cloud_settings, models.Invitation)
     assert inv.role == "admin"
 
 
-def test_inviting_an_existing_member_is_409(cloud_client: TestClient, org):
-    r = cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": org.email},
-                          headers=key_headers(org.api_key))
-    assert r.status_code == 409
+def test_inviting_an_existing_member_is_indistinguishable_and_sends_nothing(cloud_client: TestClient,
+                                                                            cloud_settings: Settings, org):
+    fresh = cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": "n@example.test"},
+                              headers=key_headers(org.api_key))
+    existing = cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": org.email},
+                                 headers=key_headers(org.api_key))
+    assert (existing.status_code, existing.json()) == (fresh.status_code, fresh.json()) == (202, {"status": "accepted"})
+    assert not outbox(cloud_settings, org.email)
+    assert [i.email for i in get_rows(cloud_settings, models.Invitation)] == ["n@example.test"]
 
 
 def test_invited_person_joins_on_first_login(cloud_client: TestClient, cloud_settings: Settings, org):
@@ -399,7 +392,7 @@ def test_invitation_mail_failure_does_not_fail_the_request(cloud_client: TestCli
     monkeypatch.setattr(cloud_client.app.state.mailer, "send", boom)
     r = cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": "n@example.test"},
                           headers=key_headers(org.api_key))
-    assert r.status_code == 201
+    assert r.status_code == 202
 
 
 # ================================================================ klucze API

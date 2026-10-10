@@ -10,9 +10,11 @@ import hashlib
 import json
 import logging
 import os
+import re
 import smtplib
 import ssl
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from email.message import EmailMessage
@@ -102,15 +104,34 @@ def magic_link_mail(settings: Settings, to: str, token: str, locale: str) -> Out
     return OutgoingMail(to=to, subject=subject, body=body, link=link)
 
 
+_URL_RE = re.compile(r"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)\S*")
+_DOMAIN_RE = re.compile(r"(?i)\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:/\S*)?")
+ORG_NAME_MAX = 80
+
+
+def sanitize_org_name(name: str) -> str:
+    """Nazwa organizacji do tresci maila: bez adresow URL i domen (nie da sie wstrzyknac wlasnego linku do maila
+    wysylanego z naszej domeny), bez znakow sterujacych i formatujacych (nowa linia, bidi), bez `<` i `>`,
+    przycieta do 80 znakow. Pusty wynik -> `organization`."""
+    text = _URL_RE.sub(" ", name)
+    text = _DOMAIN_RE.sub(" ", text)
+    text = "".join(" " if unicodedata.category(ch).startswith("C") or ch in "<>" else ch for ch in text)
+    text = " ".join(text.split())[:ORG_NAME_MAX].strip()
+    return text or "organization"
+
+
 def invitation_mail(settings: Settings, to: str, org_name: str, role: str, locale: str) -> OutgoingMail:
+    """Zaproszenie. Temat jest staly (bez nazwy organizacji, ktora jest danymi od uzytkownika); nazwa trafia
+    do tresci wylacznie po `sanitize_org_name`."""
     origin = (settings.daas_cockpit_origin or "http://localhost:3000").rstrip("/")
     link = f"{origin}/login"
+    name = sanitize_org_name(org_name)
     if locale == "en":
-        subject = f"You were invited to {org_name} on DaaS Engine"
-        body = (f"You were invited to \"{org_name}\" as {role}.\n"
+        subject = "You were invited to DaaS Engine"
+        body = (f"You were invited to the organization \"{name}\" as {role}.\n"
                 f"Sign in with this e-mail address to join: {link}\n")
     else:
-        subject = f"Zaproszenie do organizacji {org_name} w DaaS Engine"
-        body = (f"Zaproszono Cię do organizacji „{org_name}” jako {role}.\n"
+        subject = "Zaproszenie do DaaS Engine"
+        body = (f"Zaproszono Cię do organizacji „{name}” jako {role}.\n"
                 f"Zaloguj się tym adresem e-mail, aby dołączyć: {link}\n")
     return OutgoingMail(to=to, subject=subject, body=body, link=link)

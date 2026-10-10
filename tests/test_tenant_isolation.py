@@ -146,7 +146,7 @@ def _expected(template: str) -> int:
 
 def test_inventory_covers_the_whole_org_scoped_surface():
     templates = {path for _, path in ORG_ROUTES}
-    assert len(ORG_ROUTES) >= 30
+    assert len(ORG_ROUTES) >= 29
     for needed in ("/api/v1/orgs/{org_id}", "/api/v1/orgs/{org_id}/jobs/{job_id}/events",
                    "/api/v1/orgs/{org_id}/runs/{run_id}/report", "/api/v1/orgs/{org_id}/webhooks/{webhook_id}/ping",
                    "/api/v1/orgs/{org_id}/api-keys/{key_id}", "/api/v1/orgs/{org_id}/audit",

@@ -240,7 +240,7 @@ def invitations(settings: Settings, org_id: str) -> list[models.Invitation]:
 
 def test_pending_invitations_can_be_listed_and_revoked(cloud_client, cloud_settings, org):
     hdr = key_headers(org.api_key)
-    assert invite(cloud_client, org.org_id, "n@example.test", hdr).status_code in (201, 202)
+    assert invite(cloud_client, org.org_id, "n@example.test", hdr).status_code == 202
     listed = cloud_client.get(f"{API}/orgs/{org.org_id}/invitations", headers=hdr)
     assert listed.status_code == 200
     (item,) = listed.json()
