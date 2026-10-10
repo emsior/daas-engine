@@ -1,0 +1,251 @@
+# API v1
+
+The cloud API lives under `/api/v1`. The machine-readable contract is [`openapi.json`](openapi.json) (generated from the application; regenerate with `python tools/export_openapi.py`). The interactive `/docs` and `/openapi.json` endpoints of a running server exist only with `APP_ENV=dev`.
+
+Examples below use these shell variables:
+
+```bash
+export DAAS=https://reports.example.com        # origin of the deployment (local: http://127.0.0.1:8000)
+export KEY="daas_1a2b3c4d_..."                  # API key of one organization (shown once at creation)
+export ORG="01J..."                             # organization id (GET /api/v1/me)
+```
+
+## Conventions
+
+- JSON requests and responses (`Content-Type: application/json`), except file upload (`multipart/form-data`), report download and the SSE stream.
+- Identifiers are ULIDs (organizations, keys, jobs, webhooks); uploads are 32 hex characters; runs are UUIDs.
+- Timestamps are ISO 8601 in UTC.
+- Every response carries `X-Request-ID`. Quote it when you report a problem; the same id is in the server log.
+- Lists are cursor-paginated: `limit` and `cursor` query parameters, response `{ "items": [...], "next_cursor": "..." | null }`.
+
+## Authentication
+
+Two ways in; if both are sent, the key wins.
+
+| Method | How | For |
+|---|---|---|
+| API key | header `X-API-Key: daas_<8 hex>_<secret>` | machines (n8n, scripts, CI) |
+| Session cookie | `daas_session` (HttpOnly, Secure, SameSite=Lax) after the magic-link sign-in | the web cockpit |
+
+Mutating requests made with a session cookie must repeat the value of the `daas_csrf` cookie in the `X-CSRF-Token` header (double submit). API-key requests do not use cookies and need no CSRF header.
+
+There are no passwords. Sign-in is a single-use link sent by e-mail (`POST /auth/magic-link`, then `POST /auth/magic-link/verify` with the token from the link). A key belongs to exactly one organization and carries scopes; a resource of another organization answers `404` (the members routes answer `403`).
+
+### Scopes and roles
+
+| Scope | Allows | member | admin | owner | assignable to a key |
+|---|---|:-:|:-:|:-:|:-:|
+| `org:read` | read organization, members | x | x | x | yes |
+| `org:manage` | change name, retention, LLM opt-in | | x | x | yes |
+| `members:manage` | add members, invite | | x | x | yes |
+| `keys:manage` | list, create, revoke keys | | x | x | yes |
+| `uploads:write` | upload files | x | x | x | yes |
+| `runs:read` | list and read jobs and runs, SSE | x | x | x | yes |
+| `runs:write` | start and cancel jobs | x | x | x | yes |
+| `reports:read` | download reports, verify hashes, artifact status | x | x | x | yes |
+| `usage:read` | usage and plan limits | x | x | x | yes |
+| `audit:read` | audit log | | x | x | yes |
+| `webhooks:manage` | manage webhooks | | x | x | yes |
+| `org:delete` | delete the organization | | | x | no (owner session only) |
+
+A key can grant only scopes it holds itself (`403 scope_escalation` otherwise).
+
+## Errors
+
+Errors are `application/problem+json` (RFC 9457) with a stable machine code:
+
+```json
+{
+  "type": "urn:daas:problem:insufficient-scope",
+  "title": "Forbidden",
+  "status": 403,
+  "detail": "insufficient permissions",
+  "instance": "/api/v1/orgs/01J.../api-keys",
+  "request_id": "b6f1c0f2a9d04e0f",
+  "code": "insufficient_scope",
+  "required_scope": "keys:manage"
+}
+```
+
+Validation errors (`422`, `code: validation_error`) list `errors[]` with `loc`, `msg` and `type` only; the submitted value is never echoed.
+
+| Status | `code` (examples) | Meaning |
+|---|---|---|
+| 400 | `bad_request` | malformed request |
+| 401 | `unauthorized`, `invalid_token` | missing, wrong, expired or revoked key or session; sign-in link invalid, expired or used |
+| 403 | `forbidden`, `insufficient_scope`, `scope_escalation`, `csrf_failed`, `user_session_required`, `org_protected`, `orgs_disabled_in_selfhost` | not allowed |
+| 404 | `not_found`, `user_not_found` | no such resource in your organization |
+| 409 | `conflict`, `already_member`, `queue_full`, `not_cancellable`, `org_busy`, `key_limit_reached` | state conflict |
+| 413 | `file_too_large`, `quota_exceeded` | file or upload quota too large |
+| 415 | `extension_not_allowed` | file type not accepted |
+| 422 | `validation_error`, `dpa_required`, `upload_kind_mismatch`, `upload_not_applicable`, `webhook_url_invalid`, `invalid_cursor`, upload checks (`schema_mismatch`, `decode_failed`, `header_missing`, `too_many_records`, `xlsx_invalid`) | invalid content |
+| 429 | `rate_limited`, `plan_limit` | too many requests (header `Retry-After`), or a monthly plan limit is used up |
+| 503 | `sessions_unavailable`, `webhooks_unavailable`, `unavailable` | the server lacks a required setting, or is not ready |
+
+Rate limits are per client address and per key and are kept in process memory; respect `Retry-After`.
+
+## Routes
+
+`P` = public, `S` = needs a signed-in user session, `K` = scope for key or role (see above).
+
+| Method | Path | Auth | Success | Errors | Purpose |
+|---|---|---|---|---|---|
+| GET | `/health` | P | 200 | | liveness (status, version, mode) |
+| GET | `/ready` | P | 200 | 503 | readiness (control database, runtime directory) |
+| GET | `/api/v1/health`, `/api/v1/ready` | P | 200 | 503 | same, under the version prefix |
+| GET | `/metrics` | `Authorization: Bearer <DAAS_METRICS_TOKEN>` | 200 | 401, 404 | Prometheus text; 404 when no token is configured |
+| POST | `/api/v1/auth/magic-link` | P | 202 | 422, 429, 503 | send a sign-in link (same answer for unknown addresses) |
+| POST | `/api/v1/auth/magic-link/verify` | P | 200 | 401, 422, 429 | exchange the token for a session (sets cookies) |
+| POST | `/api/v1/auth/logout` | S | 204 | 401, 403 | end the session |
+| GET | `/api/v1/me` | key or session | 200 | 401 | caller, organizations, roles or key scopes |
+| POST | `/api/v1/orgs` | S | 201 | 403, 422, 429 | create an organization; body must carry `dpa_accepted: true` |
+| GET | `/api/v1/orgs/{org_id}` | `org:read` | 200 | 401, 404 | read |
+| PATCH | `/api/v1/orgs/{org_id}` | `org:manage` | 200 | 403, 404, 422 | name, locale, `retention_days`, `llm_narrative` |
+| DELETE | `/api/v1/orgs/{org_id}` | `org:delete` | 204 | 403, 409 | delete the organization and its data |
+| GET | `/api/v1/orgs/{org_id}/members` | `org:read` | 200 | 403 | list members |
+| POST | `/api/v1/orgs/{org_id}/members` | `members:manage` | 201 | 403, 404, 409 | add an existing user |
+| POST | `/api/v1/orgs/{org_id}/invitations` | `members:manage` | 201 | 403, 409 | invite by e-mail (valid 7 days) |
+| GET | `/api/v1/orgs/{org_id}/api-keys` | `keys:manage` | 200 | 403, 404 | list keys (metadata only) |
+| POST | `/api/v1/orgs/{org_id}/api-keys` | `keys:manage` | 201 | 403, 409, 422 | create a key; the full key appears once |
+| DELETE | `/api/v1/orgs/{org_id}/api-keys/{key_id}` | `keys:manage` | 204 | 403, 404 | revoke a key (immediate) |
+| POST | `/api/v1/orgs/{org_id}/uploads` | `uploads:write` | 201 | 413, 415, 422, 429 | upload CSV, XLSX or a collector package (`.json`) |
+| POST | `/api/v1/orgs/{org_id}/jobs` | `runs:write` | 202 | 404, 409, 422, 429 | start a pipeline run (`Location` header) |
+| GET | `/api/v1/orgs/{org_id}/jobs` | `runs:read` | 200 | 404 | list jobs; filter `status` |
+| GET | `/api/v1/orgs/{org_id}/jobs/{job_id}` | `runs:read` | 200 | 404 | job state and progress |
+| POST | `/api/v1/orgs/{org_id}/jobs/{job_id}/cancel` | `runs:write` | 200 | 404, 409 | cancel a queued job |
+| GET | `/api/v1/orgs/{org_id}/jobs/{job_id}/events` | `runs:read` | 200 (SSE) | 404 | live stream of one job |
+| GET | `/api/v1/orgs/{org_id}/runs` | `runs:read` | 200 | 404 | list runs |
+| GET | `/api/v1/orgs/{org_id}/runs/{run_id}` | `runs:read` | 200 | 404 | run details and metrics |
+| GET | `/api/v1/orgs/{org_id}/runs/{run_id}/report?fmt=html\|md\|json` | `reports:read` | 200, 304 | 404 | download a report |
+| POST | `/api/v1/orgs/{org_id}/verify` | `reports:read` | 200 | 422 | does this SHA-256 belong to one of your reports |
+| GET | `/api/v1/orgs/{org_id}/evidence` | `reports:read` | 200 | 404 | artifact status of the latest collector run |
+| GET | `/api/v1/orgs/{org_id}/usage` | `usage:read` | 200 | 404 | monthly usage and plan limits |
+| GET | `/api/v1/orgs/{org_id}/audit` | `audit:read` | 200 | 422 | audit log, newest first |
+| GET | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 200 | 403 | list webhooks |
+| POST | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 201 | 409, 422, 503 | register an HTTPS endpoint; the signing secret appears once |
+| DELETE | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}` | `webhooks:manage` | 204 | 404 | delete |
+| POST | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}/ping` | `webhooks:manage` | 200 | 404 | send a test event |
+
+Legacy routes (`/upload`, `/run`, `/pipelines`, `/runs`, `/reports/...`, `/stats`) exist only in `DAAS_MODE=selfhost` (organization `default`, key from `DAAS_API_KEY`, `Deprecation` response header). In `cloud` mode they answer `404`.
+
+## Pipelines
+
+| `pipeline` | Input | Upload kind |
+|---|---|---|
+| `ecommerce_demo` | order export: revenue, cost, margin, week-over-week | `csv` or `xlsx` |
+| `uksc_evidence` | JSON package from the local collector (`tools/uksc-collector.ps1`): control, requirement, status, artifact hash | `package` |
+| `cs2_demo` | esports statistics (public API or sample data) | none |
+
+## From file to report
+
+```bash
+# 1. Upload a CSV (XLSX: same call with a .xlsx file; a workbook with several sheets needs -F sheet=Name)
+curl -sS -H "X-API-Key: $KEY" -F "file=@data/fixtures/client_export_pl.csv" \
+  "$DAAS/api/v1/orgs/$ORG/uploads"
+# {"id":"3f2a...","kind":"csv","rows":15,"mapping":{"revenue":"Wartość brutto",...},"ready":true,
+#  "suggested_pipeline":"ecommerce_demo",...}
+
+# 2. Start the job: 202 Accepted + Location header
+curl -sS -i -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"pipeline":"ecommerce_demo","upload_id":"3f2a...","client_name":"Demo Shop"}' \
+  "$DAAS/api/v1/orgs/$ORG/jobs"
+# {"id":"01J...","status":"queued","progress":0,...}
+
+# 3. Follow it (poll, or use the SSE stream below)
+curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/jobs/01J..."
+# {"status":"succeeded","progress":100,"run_id":"c0a8...",...}
+
+# 4. Download the report: html | md | json (ETag = SHA-256 of the file)
+curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/c0a8.../report?fmt=html" -o report.html
+```
+
+Limits: CSV and XLSX up to 10 MiB (CSV at most 100 000 rows; XLSX without macros, at most 200 000 rows, 20 sheets and 256 columns); a collector package up to 5 MiB. A job is accepted for at most 20 queued or running jobs per organization; one run per organization executes at a time.
+
+### Report integrity (verify)
+
+The report is served with `ETag: "<sha256>"`. To check a copy you hold, compute its SHA-256 locally and ask whether the organization produced it. The answer never contains report content:
+
+```bash
+sha256sum report.html
+curl -sS -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"sha256":"<64 hex characters>"}' "$DAAS/api/v1/orgs/$ORG/verify"
+# {"known":true,"run_id":"c0a8...","pipeline":"ecommerce_demo","created_at":"...","format":"html"}
+```
+
+### Status of collector artifacts
+
+```bash
+# Upload the package from the local collector, run uksc_evidence, then:
+curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/evidence"
+# {"run_id":"...","host":"...","package_sha256":"...","checks":[
+#   {"control_id":"...","requirement":"...","status":"...","artifact":{"source":"...","sha256":"..."}}]}
+```
+
+The response lists control, requirement, status and artifact hash. Artifact contents are not returned.
+
+## Live progress (SSE)
+
+`GET /api/v1/orgs/{org_id}/jobs/{job_id}/events` answers `text/event-stream`:
+
+| Event | Data |
+|---|---|
+| `status` | job snapshot, sent on every status change |
+| `progress` | `{"id": "...", "progress": 0-100}` |
+| `log` | `{"id": "...", "message": "...", "ts": "..."}` |
+| `done` | final job snapshot; the stream then closes |
+
+A comment line `: heartbeat` is sent after 15 seconds of silence (`DAAS_SSE_HEARTBEAT_SEC`) and the stream starts with `retry: 3000`.
+
+```bash
+curl -sN -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/jobs/01J.../events"
+```
+
+A reverse proxy must not buffer this response (the bundled Caddyfile sets `flush_interval -1`).
+
+## Webhooks
+
+```bash
+curl -sS -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"url":"https://hooks.example.com/daas","events":["run.finished"]}' \
+  "$DAAS/api/v1/orgs/$ORG/webhooks"
+# {"id":"01J...","url":"https://hooks.example.com/daas","events":["run.finished"],"active":true,"secret":"..."}
+```
+
+The `secret` is shown once. Each delivery is `POST <url>` with a JSON body (sorted keys, no spaces) and these headers:
+
+| Header | Value |
+|---|---|
+| `X-DaaS-Event` | `run.finished` (`ping` for the test call) |
+| `X-DaaS-Delivery` | delivery id; identical across retries |
+| `X-DaaS-Timestamp` | Unix seconds of this attempt |
+| `X-DaaS-Signature` | `sha256=<hex HMAC-SHA256(secret, raw body)>` |
+
+Body of `run.finished`: `event`, `org_id`, `job_id`, `run_id`, `pipeline`, `status` (`succeeded` or `failed`), `run_status` (`SUCCESS`, `PARTIAL`, `FAILED`), `finished_at`. It never contains report content or customer data. Fetch the report with the API key.
+
+Verify the signature over the **raw** body before parsing:
+
+```python
+import hashlib, hmac
+
+def valid(secret: str, raw_body: bytes, header: str) -> bool:
+    expected = "sha256=" + hmac.new(secret.encode(), raw_body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header)
+```
+
+Delivery rules: success is any `2xx` within 5 seconds; redirects are not followed; up to 3 attempts with the pauses from `DAAS_WEBHOOK_BACKOFF_SEC` (default `1,5,25`); pending retries are kept in memory and do not survive a restart. Outside `APP_ENV=dev` the URL must be `https` and resolve only to public addresses (SSRF protection); at most 10 webhooks per organization. Use `X-DaaS-Delivery` to deduplicate.
+
+## Usage and plan limits
+
+`GET /api/v1/orgs/{org_id}/usage` returns runs and uploaded bytes for the current and the previous calendar month (UTC) and the limits of the plan:
+
+| Plan | Runs per month | Uploaded bytes per month |
+|---|---|---|
+| `free` | 20 | 200 MiB |
+| `pro` | 500 | 5 GiB |
+| `selfhost` | unlimited | unlimited |
+
+When a limit is used up, `POST .../jobs` and `POST .../uploads` answer `429` with `code: plan_limit`. There is no online payment in 2.0.
+
+## Audit log
+
+`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (`limit` 1-200). Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `auth.login`, `auth.logout`, `auth_denied`. `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.

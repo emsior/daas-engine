@@ -1,0 +1,149 @@
+# Wdrożenie i konfiguracja
+
+Skrót instrukcji z [`deploy/README.md`](../deploy/README.md) oraz pełna lista zmiennych środowiskowych. Dwa tryby uruchomienia:
+
+| Tryb | Co to jest | Jak uruchomić |
+|---|---|---|
+| `selfhost` | jedna organizacja (`default`), klucz z `DAAS_API_KEY`, trasy API w katalogu głównym (`/upload`, `/run`), n8n | `docker-compose.yml` w katalogu głównym albo `pip install -e .` |
+| `cloud` | wiele organizacji, kokpit www, klucze API per organizacja, zadania asynchroniczne, limity planów | `deploy/compose.yml` na VPS (poniżej) |
+
+## Cloud na VPS: kroki
+
+Wymagania: Docker Engine 25+ z Compose v2.24+, VPS 2 vCPU / 4 GB RAM, domena z rekordem A/AAAA na serwer, otwarte porty 80 i 443.
+
+```bash
+git clone https://github.com/emsior/daas-engine.git /opt/daas-engine && cd /opt/daas-engine/deploy
+./gen-env.sh --domain raporty.example.com          # tworzy .env (0600) z losowymi sekretami; nie nadpisuje istniejącego
+$EDITOR .env                                       # DAAS_EMAIL_BACKEND=smtp + dane SMTP
+docker compose build
+docker compose --profile edge up -d                # z Caddy (TLS); bez profilu: tylko api i web
+docker compose exec api python -m app.cli create-org --name "Nazwa firmy" --owner-email wlasciciel@example.com
+./smoke.sh --public https://raporty.example.com --wait 90 --expect-version 2.0.0
+```
+
+Aktualizacja: `./backup.sh`, nowy tag w `DAAS_VERSION`, `docker compose build`, `docker compose --profile edge up -d`, `./smoke.sh`.
+Rollback: poprzedni `DAAS_VERSION` i `docker compose up -d` (obraz jest lokalnie); gdy nowa wersja zmigrowała bazę, dodatkowo `./restore.sh backups/<kopia>.tar.gz`.
+Szczegóły, wspólne proxy z drugą aplikacją i kopie zapasowe: [`deploy/README.md`](../deploy/README.md).
+
+## Układ danych
+
+| Wolumen (w kontenerze) | Zawartość |
+|---|---|
+| `control` (`/data/control`) | `control.db`: organizacje, użytkownicy, klucze (tylko skróty SHA-256), zadania, ślad runów, audyt, webhooki |
+| `runtime` (`/data/runtime`) | `tenants/<org_id>/`: `daas.duckdb`, `uploads/`, `reports/`, `audit.jsonl`; `outbox/` (linki logowania trybu `console`) |
+
+Kopia zapasowa obejmuje oba wolumeny. Sekretów z `.env` nie obejmuje.
+
+## Zmienne środowiskowe aplikacji
+
+Źródłem prawdy jest `app/core/config.py` (`Settings`). Nazwy są niewrażliwe na wielkość liter. Szablon: [`.env.example`](../.env.example).
+Kolumna „Tryb": `c` = istotne w `cloud`, `s` = w `selfhost`, `cs` = w obu.
+
+### Aplikacja
+
+| Zmienna | Domyślnie | Tryb | Znaczenie |
+|---|---|---|---|
+| `APP_ENV` | `prod` | cs | `dev` włącza `/docs`, `/redoc`, `/openapi.json`, auto-reload i dopuszcza webhooki na adresy niepubliczne; każda inna wartość je wyłącza |
+| `APP_NAME` | `DaaS Engine` | cs | nazwa w OpenAPI i `/health` |
+| `APP_VERSION` | `2.0.0` | cs | wersja awaryjna; `/health` podaje wersję zainstalowanego pakietu |
+| `APP_HOST` | `127.0.0.1` | cs | adres nasłuchu; obraz Docker ustawia `0.0.0.0`. W `selfhost` adres inny niż loopback wymaga `DAAS_API_KEY` |
+| `APP_PORT` | `8000` | cs | port nasłuchu |
+| `LOG_LEVEL` | `INFO` | cs | poziom dziennika JSON |
+| `DAAS_HOME` | katalog projektu | cs | katalog bazowy ścieżek względnych (`alembic/`, `data/fixtures`); obraz ustawia `/srv/app` |
+| `DAAS_POLICY_ENFORCE` | `true` | cs | warstwa policy: granica katalogu roboczego i audyt, odmowa kończy się błędem |
+| `DAAS_LLM_NARRATIVE` | `false` | s | zgoda na streszczenie przez zewnętrznego dostawcę LLM; sam `ANTHROPIC_API_KEY` niczego nie włącza. W `cloud` decyduje opcja organizacji `llm_narrative` (`PATCH /api/v1/orgs/{id}`), domyślnie wyłączona |
+
+### Tryb, control plane, sesje
+
+| Zmienna | Domyślnie | Tryb | Znaczenie |
+|---|---|---|---|
+| `DAAS_MODE` | `selfhost` | cs | `selfhost` albo `cloud`; `deploy/compose.yml` ustawia `cloud` |
+| `DAAS_API_KEY` | brak | s | klucz instancji w nagłówku `X-API-Key` (min. 16 znaków). W `cloud` nie jest używany |
+| `DAAS_SECRET_KEY` | brak | c | **wymagany w `cloud`**, min. 32 znaki. Podpis cookie sesji i sekretów webhooków. `openssl rand -hex 32` |
+| `DAAS_CONTROL_DB_URL` | `sqlite+aiosqlite:///runtime/control.db` | cs | baza control plane (SQLAlchemy async). Postgres: `postgresql+asyncpg://...` i pakiet `asyncpg` (dodatek `postgres`) |
+| `DAAS_AUTO_MIGRATE` | `true` | cs | `alembic upgrade head` przy starcie (idempotentne); `false`, gdy migracje wykonuje operator (`python -m app.cli migrate`) |
+| `DAAS_COCKPIT_ORIGIN` | brak | c | jedyny origin kokpitu dopuszczony przez CORS z cookie, np. `https://raporty.example.com`. Brak = CORS wyłączony |
+| `DAAS_COOKIE_SECURE` | `true` | c | atrybut `Secure` cookie sesji; `false` tylko do lokalnych prób po http |
+| `DAAS_SESSION_TTL_HOURS` | `336` | c | ważność sesji (14 dni) |
+| `DAAS_MAGIC_LINK_TTL_MINUTES` | `15` | c | ważność linku logowania (1-120) |
+| `CORS_ORIGINS` | `[]` | cs | lista JSON originów dla CORS bez cookie, np. `["https://example.com"]` |
+
+### Poczta (link logowania, zaproszenia)
+
+| Zmienna | Domyślnie | Znaczenie |
+|---|---|---|
+| `DAAS_EMAIL_BACKEND` | `console` | `console`: link w dzienniku i w `runtime/outbox/` (tylko próby i testy e2e); `smtp`: wysyłka stdlib `smtplib` |
+| `DAAS_EMAIL_FROM` | `DaaS Engine <no-reply@localhost>` | nadawca |
+| `DAAS_SMTP_HOST` | brak | serwer SMTP |
+| `DAAS_SMTP_PORT` | `587` | port |
+| `DAAS_SMTP_USER` | brak | login (pusty = bez logowania) |
+| `DAAS_SMTP_PASSWORD` | brak | hasło; nie trafia do dziennika |
+| `DAAS_SMTP_STARTTLS` | `true` | STARTTLS po połączeniu |
+
+### Limity i zadania
+
+| Zmienna | Domyślnie | Znaczenie |
+|---|---|---|
+| `DAAS_RATE_LIMIT_RUN_PER_MIN` | `30` | uruchomienia (`/run`, `POST .../jobs`) na minutę, per klucz; `0` = wyłączone |
+| `DAAS_RATE_LIMIT_UPLOAD_PER_MIN` | `30` | uploady na minutę, per klucz |
+| `DAAS_RATE_LIMIT_IP_PER_MIN` | `300` | wszystkie trasy chronione, per adres IP |
+| `DAAS_RATE_LIMIT_AUTH_FAIL_PER_MIN` | `10` | nieudane uwierzytelnienia, per adres IP |
+| `DAAS_RATE_LIMIT_MAGIC_EMAIL_PER_MIN` | `3` | `POST /auth/magic-link`, per adres e-mail |
+| `DAAS_RATE_LIMIT_MAGIC_IP_PER_MIN` | `10` | `POST /auth/magic-link`, per IP |
+| `DAAS_UPLOAD_QUOTA_BYTES` | `1073741824` | łączna kwota plików w `uploads/` organizacji (1 GiB); `0` = bez limitu. Przekroczenie: `413` |
+| `DAAS_MAX_CONCURRENT_RUNS` | `2` | równoległe runy w całym procesie (w obrębie organizacji zawsze 1); 1-64 |
+| `DAAS_MAX_ACTIVE_TENANTS` | `16` | ile organizacji ma jednocześnie otwarty runner DuckDB (LRU); 1-1024 |
+| `DAAS_RETENTION_DAYS` | `90` | domyślna retencja uploadów nowej organizacji (dni) |
+| `DAAS_WEBHOOK_BACKOFF_SEC` | `1,5,25` | pauzy między ponowieniami dostawy webhooka (sekundy, po jednej próbie początkowej) |
+| `DAAS_SSE_HEARTBEAT_SEC` | `15` | odstęp komentarza `: heartbeat` w strumieniu SSE |
+
+Liczniki limitów są w pamięci procesu; aplikacja działa w jednym procesie roboczym (`WEB_CONCURRENCY` lub `UVICORN_WORKERS` powyżej 1 blokuje start).
+
+### Obserwowalność
+
+| Zmienna | Domyślnie | Znaczenie |
+|---|---|---|
+| `DAAS_METRICS_TOKEN` | brak | token `Authorization: Bearer` dla `GET /metrics`; bez niego trasa odpowiada `404` |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1,::1` | (uvicorn) adresy proxy, którym wolno ustawiać `X-Forwarded-For`; `deploy/compose.yml` ustawia `*`, bo API jest osiągalne tylko z sieci compose i z loopbacku |
+
+### Magazyn danych
+
+| Zmienna | Domyślnie | Znaczenie |
+|---|---|---|
+| `DUCKDB_PATH` | `runtime/daas.duckdb` | plik DuckDB trybu `selfhost`; katalog nadrzędny to katalog runtime (`tenants/`, `outbox/`). W `compose`: `/data/runtime/daas.duckdb` |
+| `REPORTS_DIR` | `runtime/reports` | raporty trybu `selfhost` |
+| `FIXTURES_DIR` | `data/fixtures` | dane przykładowe (zapasowe źródła pipeline'ów) |
+| `SOURCE_TIMEOUT_SEC` | `10` | limit czasu zapytań do źródeł zewnętrznych |
+
+### Źródła zewnętrzne (opcjonalne)
+
+Brak klucza nie jest błędem: pipeline używa danych przykładowych i oznacza wynik `MOCK_DATA`.
+
+| Zmienna | Znaczenie |
+|---|---|
+| `FACEIT_API_KEY`, `FACEIT_PLAYER_NICKNAME` | pipeline `cs2_demo` (esports statistics) |
+| `LIQUIPEDIA_USER_AGENT` | zarezerwowane |
+| `APIFY_TOKEN` | źródło danych `ecommerce_demo` |
+| `DISCORD_WEBHOOK_URL` | powiadomienia po runie (`notify=true`, tryb `selfhost`) |
+| `ANTHROPIC_API_KEY` | streszczenie LLM; działa tylko razem ze zgodą: `DAAS_LLM_NARRATIVE=true` (`selfhost`) albo opcją organizacji `llm_narrative` (`cloud`) |
+
+### Zmienne wdrożenia (`deploy/.env`, nie `Settings`)
+
+| Zmienna | Domyślnie | Znaczenie |
+|---|---|---|
+| `DAAS_VERSION` | z `pyproject.toml` | tag obrazów `api` i `web`; podbijaj przed `build`, wracaj do poprzedniego przy rollbacku |
+| `DAAS_DOMAIN` | `localhost` | domena Caddy i domyślny `DAAS_COCKPIT_ORIGIN` |
+| `NEXT_PUBLIC_API_ORIGIN` | pusty | origin API zapisany w paczce kokpitu **w czasie budowania**; pusty = ten sam origin (Caddy). Zmiana wymaga `docker compose build web` |
+| `DAAS_API_IMAGE`, `DAAS_WEB_IMAGE` | `daas-engine-api`, `daas-engine-web` | nazwy obrazów (np. własny rejestr) |
+| `DAAS_API_PORT`, `DAAS_WEB_PORT` | `8000`, `3000` | porty na `127.0.0.1` hosta |
+| `BACKUP_DIR`, `KEEP`, `BACKUP_PREFIX` | `deploy/backups`, `14`, `daas` | parametry `backup.sh` |
+
+Kokpit czyta w czasie działania jeszcze `API_INTERNAL_ORIGIN` (adres API w sieci compose, `http://api:8000`), którym pyta o sesję przy każdej nawigacji.
+
+## Bezpieczeństwo wdrożenia w skrócie
+
+- Porty aplikacji tylko na `127.0.0.1`; TLS i nagłówki daje Caddy albo wspólne proxy hosta.
+- Sekrety wyłącznie w `.env` (0600, poza gitem), klucze API i tokeny w bazie jako skróty SHA-256.
+- `DAAS_EMAIL_BACKEND=smtp` na produkcji; `console` zapisuje linki logowania w dzienniku.
+- Metryki tylko na loopbacku z tokenem; Caddy zwraca `404` dla `/metrics`.
+- Model zagrożeń i zgłaszanie podatności: [`SECURITY.md`](SECURITY.md).
