@@ -103,6 +103,9 @@ jobs:
           echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
       - name: Install (npm ci)
         run: npm ci --no-audit --no-fund
+      # typy API generowane z ../docs/openapi.json: rozjazd schematu z backendem zatrzymuje przebieg
+      - name: API schema drift (gen:api)
+        run: npm run gen:api && git diff --exit-code -- src/lib/api/schema.d.ts
       - name: Lint (eslint)
         run: npm run lint
       - name: Typecheck (tsc)
