@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from app.api import routes as system_routes
-from app.api.v1 import auth
+from app.api.v1 import api_keys, auth, jobs, members, orgs, runs, uploads
 from app.core.models import HealthResponse, ReadyResponse
 from app.core.ratelimit import limit_ip
 
@@ -21,4 +21,6 @@ def build_router() -> APIRouter:
                          tags=["system"], summary="Readiness (public)", responses={503: {"model": ReadyResponse}})
     router.include_router(auth.public_router)
     router.include_router(auth.router)
+    for module in (orgs, members, api_keys, uploads, jobs, runs):
+        router.include_router(module.router)
     return router

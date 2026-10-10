@@ -28,6 +28,13 @@ def scrub_paths(text: str | None) -> str | None:
     return _ABS_PATH.sub("<path>", text)
 
 
+def error_code_of(raw: str | None) -> str | None:
+    """Kod publiczny z surowego `error` runnera (`TypWyjatku: tresc`); None gdy nie bylo bledu."""
+    if not raw:
+        return None
+    return ERROR_CODES.get(raw.split(":", 1)[0].strip(), "RUN_FAILED")
+
+
 def public_error(raw: str | None, run_id: str) -> str | None:
     """`TypWyjatku: tresc` -> `KOD: komunikat ogolny (run_id=...)`. Szczegoly sa w logu serwera."""
     if not raw:

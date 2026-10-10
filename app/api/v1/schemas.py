@@ -221,6 +221,11 @@ class JobOut(BaseModel):
     finished_at: datetime | None = None
 
 
+class JobPage(BaseModel):
+    items: list[JobOut]
+    next_cursor: str | None = Field(default=None, description="przekaz jako `cursor`, aby pobrac kolejna strone")
+
+
 class RunOut(BaseModel):
     run_id: str
     pipeline: str
@@ -229,6 +234,11 @@ class RunOut(BaseModel):
     job_id: str | None = None
     report_sha256: dict[str, str | None]
     links: dict[str, str] = Field(default_factory=dict)
+
+
+class RunPage(BaseModel):
+    items: list[RunOut]
+    next_cursor: str | None = None
 
 
 class RunDetail(RunOut):
