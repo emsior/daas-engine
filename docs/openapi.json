@@ -1301,6 +1301,32 @@
             ],
             "title": "Narrative Source"
           },
+          "period_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "pierwszy dzien danych runu (ISO); `null` dla cs2_demo",
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ostatni dzien danych runu (ISO); `null` dla cs2_demo",
+            "title": "Period To"
+          },
           "pipeline": {
             "title": "Pipeline",
             "type": "string"
@@ -1389,6 +1415,32 @@
             },
             "title": "Links",
             "type": "object"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "pierwszy dzien danych runu (ISO); `null` dla cs2_demo",
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ostatni dzien danych runu (ISO); `null` dla cs2_demo",
+            "title": "Period To"
           },
           "pipeline": {
             "title": "Pipeline",
