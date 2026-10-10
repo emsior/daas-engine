@@ -525,3 +525,63 @@ def test_ping_without_a_response_is_class_error(cloud_client, cloud_settings, or
     sink.raises = None
     sink.addresses = ["10.0.0.1"]
     assert ping(cloud_client, org, wid).json() == {"delivered": False, "status": None, "status_class": "error"}
+
+
+# ================================================================ LOW-4: NAT64 / 6to4 / adresy zarezerwowane (bez sieci)
+@pytest.mark.parametrize("address", [
+    "64:ff9b::7f00:1",          # NAT64 -> 127.0.0.1
+    "64:ff9b::a00:1",           # -> 10.0.0.1
+    "64:ff9b::a9fe:a9fe",       # -> 169.254.169.254
+    "64:ff9b::c0a8:101",        # -> 192.168.1.1
+    "64:ff9b::0:0",             # -> 0.0.0.0
+    "64:ff9b:1::7f00:1",        # NAT64 local-use /48
+    "64:ff9b:1:ffff::1",
+    "2002:7f00:1::1",           # 6to4 -> 127.0.0.1
+    "2002:808:808::1",          # 6to4 nawet z publicznym IPv4 jest odrzucane
+    "::ffff:127.0.0.1", "::ffff:10.0.0.1", "::ffff:a9fe:a9fe",
+    "::", "::1", "::7f00:1",    # unspecified, loopback, IPv4-compatible
+    "fe80::1", "fc00::1", "fd12:3456::1", "ff02::1", "ff0e::1",
+    "100::1", "5f00::1", "2001:db8::1", "2001:0:4136:e378:8000:63bf:3fff:fdd2",
+    "0." + "0.0.0", "127.0.0.1", "10.0.0.1", "172.16.0.1", "192.168.0.1", "169.254.169.254", "100.64.0.1",
+    "224.0.0.1", "240.0.0.1", "255.255.255.255",
+    "fe80::1%eth0", "not-an-ip", "",
+])
+def test_non_public_addresses_are_rejected(address):
+    from app.control.webhooks import _is_public_ip
+
+    assert _is_public_ip(address) is False
+
+
+@pytest.mark.parametrize("address", ["64:ff9b::808:808", "64:ff9b::101:101", "8.8.8.8", "1.1.1.1",
+                                      "2606:4700:4700::1111", "2001:4860:4860::8888", "::ffff:8.8.8.8"])
+def test_public_addresses_stay_allowed(address):
+    from app.control.webhooks import _is_public_ip
+
+    assert _is_public_ip(address) is True  # NAT64 z publicznym IPv4 jest publiczny; sprawdzamy osadzony adres
+
+
+@pytest.mark.parametrize("url", ["https://[64:ff9b::7f00:1]/hook", "https://[64:ff9b:1::a00:1]/hook",
+                                 "https://[2002:7f00:1::1]/hook", "https://[::]/hook", "https://[ff02::1]/hook"])
+def test_ipv6_literal_urls_with_embedded_internal_addresses_are_refused(url):
+    from app.control.webhooks import UnsafeDestination, validate_url
+
+    with pytest.raises(UnsafeDestination) as exc:
+        validate_url(url, dev=False)
+    assert exc.value.reason == "private_address"
+
+
+def test_dev_mode_still_allows_loopback_literals():
+    from app.control.webhooks import validate_url
+
+    assert validate_url("http://[::1]:9000/hook", dev=True)[0] == "::1"
+
+
+@pytest.mark.asyncio
+async def test_hostname_resolving_to_nat64_internal_address_is_refused():
+    from app.control.webhooks import UnsafeDestination, resolve_public
+
+    async def resolver(host, port):
+        return ["8.8.8.8", "64:ff9b::7f00:1"]  # jeden prywatny osadzony adres wystarcza do odmowy
+
+    with pytest.raises(UnsafeDestination):
+        await resolve_public("example.test", 443, resolver)

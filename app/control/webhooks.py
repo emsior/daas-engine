@@ -64,14 +64,30 @@ def is_dev(settings: Settings) -> bool:
     return settings.app_env.strip().lower() == "dev"
 
 
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")          # RFC 6052: IPv4 w ostatnich 32 bitach
+_NAT64_LOCAL = ipaddress.ip_network("64:ff9b:1::/48")   # RFC 8215: prefiks lokalny, nigdy globalny
+_6TO4 = ipaddress.ip_network("2002::/16")               # RFC 3056: IPv4 osadzony w bitach 16-47 (przestarzale)
+
+
 def _is_public_ip(value: str) -> bool:
+    """Czy adres jest publicznie routowalny. IPv6 z osadzonym IPv4 (`::ffff:`, NAT64) oceniamy po tym IPv4;
+    6to4, NAT64 local-use, `::`, multicast i zakresy zarezerwowane odrzucamy (Python 3.13 uznaje np.
+    `64:ff9b::7f00:1` i `::7f00:1` za `is_global`)."""
     try:
         ip = ipaddress.ip_address(value.split("%", 1)[0])
     except ValueError:
         return False
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        ip = ip.ipv4_mapped
-    return ip.is_global and not ip.is_multicast
+    if isinstance(ip, ipaddress.IPv6Address):
+        if ip.ipv4_mapped is not None:
+            return _is_public_ip(str(ip.ipv4_mapped))
+        if ip in _NAT64:
+            return _is_public_ip(str(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)))
+        if ip in _NAT64_LOCAL or ip in _6TO4:
+            return False
+    if (ip.is_unspecified or ip.is_loopback or ip.is_link_local or ip.is_multicast or ip.is_reserved
+            or ip.is_private):
+        return False
+    return ip.is_global
 
 
 def validate_url(url: str, *, dev: bool) -> tuple[str, int]:
