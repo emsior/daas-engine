@@ -104,11 +104,15 @@ class TenantRegistry:
         return TenantPaths.for_org(self.settings, org_id)
 
     def get(self, org_id: str, *, llm_narrative: bool | None = None) -> PipelineRunner:
-        """Runner najemcy (tworzy katalog i baze przy pierwszym uzyciu). Blokujace — z kodu async uzyj `aget`."""
+        """Runner najemcy (tworzy katalog i baze przy pierwszym uzyciu). Blokujace — z kodu async uzyj `aget`.
+
+        `llm_narrative=None` znaczy "dowolny": istniejacy runner jest zwracany bez przebudowy (odczyty API nie
+        moga wyrzucac runnera ustawionego przez executor). Jawne True/False przebudowuje runner, gdy sie rozni.
+        """
         paths = self.paths(org_id).ensure()
         with self._guard:
             entry = self._entries.get(org_id)
-            if entry is not None and entry.llm_narrative == llm_narrative:
+            if entry is not None and (llm_narrative is None or entry.llm_narrative == llm_narrative):
                 self._entries.move_to_end(org_id)
                 return entry.runner
             runner = PipelineRunner(settings=tenant_settings(self.settings, paths, llm_narrative=llm_narrative))

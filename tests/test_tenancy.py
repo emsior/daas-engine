@@ -145,6 +145,26 @@ def test_registry_rebuilds_runner_when_llm_flag_changes(base: Settings):
     assert second is not first and second.settings.daas_llm_narrative is True
 
 
+def test_registry_none_means_any_flag_and_keeps_the_runner(base: Settings):
+    """C8: odczyt API (`get(org)`) nie przebudowuje runnera ustawionego przez executor (`llm_narrative=False`)."""
+    reg = TenantRegistry(base)
+    built = reg.get("a", llm_narrative=False)
+    assert reg.get("a") is built
+    assert reg.get("a", llm_narrative=None) is built
+    assert reg.get("a", llm_narrative=False) is built
+    # jawna zmiana flagi nadal przebudowuje, a kolejny odczyt "dowolny" dostaje juz nowy runner
+    rebuilt = reg.get("a", llm_narrative=True)
+    assert rebuilt is not built and reg.get("a") is rebuilt
+
+
+def test_registry_none_first_then_explicit_flag_rebuilds(base: Settings):
+    reg = TenantRegistry(base)
+    anonymous = reg.get("a")
+    assert reg.get("a") is anonymous
+    explicit = reg.get("a", llm_narrative=False)
+    assert explicit is not anonymous and reg.get("a") is explicit
+
+
 def test_registry_rejects_invalid_ids(base: Settings):
     with pytest.raises(InvalidOrgId):
         TenantRegistry(base).get("../x")
