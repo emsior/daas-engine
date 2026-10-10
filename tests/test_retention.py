@@ -257,6 +257,69 @@ def test_purge_never_touches_files_outside_the_tenant_directory(cloud_client, cl
     assert outside.read_text() == "keep"
 
 
+# ================================================================ C11/N2: przeniesiony runtime i wspolny resolver sciezek
+def rewrite_report_paths(client: TestClient, org, run_id: str, prefix: str) -> None:
+    db = client.app.state.tenants.get(org.org_id).db
+    with db.connect() as con:
+        con.execute(
+            "UPDATE runs SET report_path = ? || regexp_extract(report_path, '[^/]+$'), "
+            "report_json_path = ? || regexp_extract(report_json_path, '[^/]+$'), "
+            "report_html_path = ? || regexp_extract(report_html_path, '[^/]+$') WHERE run_id = ?",
+            [prefix, prefix, prefix, run_id])
+
+
+@pytest.mark.parametrize("prefix", ["/srv/old-host/runtime/tenants/xyz/reports/", "C:\\\\daas\\\\runtime\\\\"])
+def test_purge_removes_reports_by_basename_after_the_runtime_directory_moved(cloud_client, cloud_settings, org, prefix):
+    job = finished_run(cloud_client, org)
+    fresh = finished_run(cloud_client, org)
+    rewrite_report_paths(cloud_client, org, job["run_id"], prefix)
+    if "\\" in prefix:
+        db = cloud_client.app.state.tenants.get(org.org_id).db
+        with db.connect() as con:
+            con.execute("UPDATE runs SET report_path = replace(report_path, '/', '\\') WHERE run_id = ?", [job["run_id"]])
+    age_run(cloud_settings, job["run_id"])
+    report = mine(do_purge(cloud_settings), org.org_id)
+    assert report.reports == 1 and report.files == 3
+    left = report_files(cloud_settings, org.org_id)
+    assert left and all(job["run_id"][:8] not in p.name for p in left)
+    assert any(fresh["run_id"][:8] in p.name for p in left)           # swiezy run nietkniety
+
+
+def test_purge_never_follows_a_stored_path_outside_the_reports_directory(cloud_client, cloud_settings, org, tmp_path):
+    job = finished_run(cloud_client, org)
+    outside = tmp_path / "precious.md"
+    outside.write_text("keep")
+    sibling = TenantPaths.for_org(cloud_settings, org.org_id).uploads / "dane.csv"     # inny katalog tego najemcy
+    sibling.write_text("keep too")
+    db = cloud_client.app.state.tenants.get(org.org_id).db
+    with db.connect() as con:
+        con.execute("UPDATE runs SET report_path = ?, report_json_path = ?, report_html_path = ? WHERE run_id = ?",
+                    [str(outside), "../../../../precious.md", str(sibling), job["run_id"]])
+    age_run(cloud_settings, job["run_id"])
+    mine(do_purge(cloud_settings), org.org_id)
+    assert outside.read_text() == "keep" and sibling.read_text() == "keep too"
+
+
+def test_purge_does_not_follow_a_symlink_out_of_the_reports_directory(cloud_client, cloud_settings, org, tmp_path):
+    job = finished_run(cloud_client, org)
+    target = tmp_path / "secret.md"
+    target.write_text("keep")
+    md = next(p for p in report_files(cloud_settings, org.org_id) if p.suffix == ".md" and job["run_id"][:8] in p.name)
+    md.unlink()
+    md.symlink_to(target)
+    age_run(cloud_settings, job["run_id"])
+    mine(do_purge(cloud_settings), org.org_id)
+    assert target.read_text() == "keep"
+
+
+def test_runs_and_retention_share_one_resolver():
+    from app.api.v1 import runs
+    from app.control import report_paths, retention
+
+    assert runs._resolve_report is report_paths.resolve_report
+    assert retention.resolve_report is report_paths.resolve_report
+
+
 # ================================================================ CLI i petla
 def test_cli_purge_dry_run_and_real(cloud_client, cloud_settings, org, capsys):
     from app.cli import main

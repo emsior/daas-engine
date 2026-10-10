@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.control.audit import record_event
 from app.control.executor import effective_llm
 from app.control.models import Job, Org, RunRecord, Upload
+from app.control.report_paths import resolve_report
 from app.control.tenancy import InvalidOrgId, TenantPaths, TenantRegistry
 from app.control.types import utcnow
 from app.core.config import Settings
@@ -81,7 +82,10 @@ def _purge_tenant(db, reports_root: Path, run_ids: list[str], cutoff: datetime, 
             row = con.execute(f"SELECT {', '.join(REPORT_PATH_COLUMNS)} FROM runs WHERE run_id = ?",  # noqa: S608
                               [run_id]).fetchone()
             for raw in (row or ()):
-                if raw and _unlink_inside(reports_root, Path(raw), dry_run=dry_run):
+                # ten sam resolver co w API: po przeniesieniu runtime sciezka bezwzgledna nie istnieje, a plik lezy
+                # w biezacym katalogu raportow pod ta sama nazwa
+                found = resolve_report(reports_root, raw)
+                if found is not None and _unlink_inside(reports_root, found, dry_run=dry_run):
                     files += 1
         if targets:
             rows = con.execute(f"SELECT count(*) FROM runs WHERE run_id IN ({', '.join('?' * len(targets))})",  # noqa: S608
