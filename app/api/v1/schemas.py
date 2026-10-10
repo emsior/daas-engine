@@ -283,6 +283,8 @@ class EvidenceCheck(BaseModel):
 
 class EvidenceOut(BaseModel):
     run_id: str
+    run_status: Literal["SUCCESS", "PARTIAL", "FAILED"] = Field(
+        ..., description="status runu kolektora; `PARTIAL` = niepelna paczka (czesc kontroli bez artefaktu)")
     host: str | None = None
     collected_at: datetime | None = None
     package_sha256: str | None = None

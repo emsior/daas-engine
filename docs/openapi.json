@@ -438,10 +438,21 @@
           "run_id": {
             "title": "Run Id",
             "type": "string"
+          },
+          "run_status": {
+            "description": "status runu kolektora; `PARTIAL` = niepelna paczka (czesc kontroli bez artefaktu)",
+            "enum": [
+              "SUCCESS",
+              "PARTIAL",
+              "FAILED"
+            ],
+            "title": "Run Status",
+            "type": "string"
           }
         },
         "required": [
           "run_id",
+          "run_status",
           "checks"
         ],
         "title": "EvidenceOut",
@@ -2621,7 +2632,7 @@
     },
     "/api/v1/orgs/{org_id}/evidence": {
       "get": {
-        "description": "Control -> requirement -> status -> artifact (source and SHA-256) from the latest successful `uksc_evidence` run. Artifact contents are not returned.",
+        "description": "Control -> requirement -> status -> artifact (source and SHA-256) from the latest successful `uksc_evidence` run. `run_status` is `SUCCESS` or `PARTIAL` (an incomplete package). Artifact contents are not returned.",
         "operationId": "evidence_api_v1_orgs__org_id__evidence_get",
         "parameters": [
           {

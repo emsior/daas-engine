@@ -184,11 +184,11 @@ curl -sS -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
 ```bash
 # Upload the package from the local collector, run uksc_evidence, then:
 curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/evidence"
-# {"run_id":"...","host":"...","package_sha256":"...","checks":[
+# {"run_id":"...","run_status":"SUCCESS","host":"...","package_sha256":"...","checks":[
 #   {"control_id":"...","requirement":"...","status":"...","artifact":{"source":"...","sha256":"..."}}]}
 ```
 
-The response lists control, requirement, status and artifact hash. Artifact contents are not returned.
+The response lists control, requirement, status and artifact hash. Artifact contents are not returned. `run_status` is `SUCCESS` or `PARTIAL`; a `PARTIAL` run (incomplete package) is returned as the latest run, so check it before reading the checks as complete.
 
 ## Live progress (SSE)
 

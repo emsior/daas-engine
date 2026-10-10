@@ -217,7 +217,8 @@ def _aware(value) -> datetime | None:
 @router.get(
     "/orgs/{org_id}/evidence", response_model=EvidenceOut, summary="Artifact status of the latest collector run",
     description="Control -> requirement -> status -> artifact (source and SHA-256) from the latest successful "
-                "`uksc_evidence` run. Artifact contents are not returned.",
+                "`uksc_evidence` run. `run_status` is `SUCCESS` or `PARTIAL` (an incomplete package). Artifact contents are "
+                "not returned.",
     responses={404: {"description": "No collector run yet"}},
 )
 async def evidence(request: Request, ctx: OrgContext = Depends(_REPORTS),
@@ -230,7 +231,7 @@ async def evidence(request: Request, ctx: OrgContext = Depends(_REPORTS),
     head, rows = await asyncio.to_thread(_evidence_rows, request.app.state, ctx.org_id, record.run_id)
     head = head or {}
     return EvidenceOut(
-        run_id=record.run_id, host=head.get("host"), collected_at=_aware(head.get("collected_at")),
+        run_id=record.run_id, run_status=record.status, host=head.get("host"), collected_at=_aware(head.get("collected_at")),
         package_sha256=head.get("package_sha256"), integrity=head.get("integrity"),
         checks=[EvidenceCheck(**{**r, "artifact": {**r["artifact"],
                                                    "collected_at": _aware(r["artifact"]["collected_at"])}})

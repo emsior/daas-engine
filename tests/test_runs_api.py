@@ -73,6 +73,14 @@ def test_evidence_after_collector_run(cloud_client, org):
     assert len(first["artifact"]["sha256"]) == 64
 
 
+def test_evidence_reports_the_run_status(cloud_client, cloud_settings, org):
+    job = run_pipeline(cloud_client, org, "uksc_evidence", filename="paczka.json", data=PACKAGE_PATH.read_bytes())
+    assert cloud_client.get(url(org, "/evidence"), headers=hdr(org)).json()["run_status"] == "SUCCESS"
+    update_rows(cloud_settings, models.RunRecord, {"status": "PARTIAL"}, models.RunRecord.run_id == job["run_id"])
+    body = cloud_client.get(url(org, "/evidence"), headers=hdr(org)).json()
+    assert body["run_id"] == job["run_id"] and body["run_status"] == "PARTIAL"   # niepelny run jest widoczny jako taki
+
+
 def test_evidence_is_scoped_to_the_organization(cloud_client, cloud_settings, org):
     run_pipeline(cloud_client, org, "uksc_evidence", filename="paczka.json", data=PACKAGE_PATH.read_bytes())
     other = seed_org(cloud_settings, name="Other", owner_email="other@example.test")
