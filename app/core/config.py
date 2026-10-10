@@ -100,6 +100,8 @@ class Settings(BaseSettings):
     daas_metrics_token: str | None = Field(default=None, repr=False)
     #: Domyslna retencja uploadow nowej organizacji, w dniach.
     daas_retention_days: int = Field(default=90, ge=1, le=3650)
+    #: Co ile minut tryb cloud uruchamia retencje (kasowanie uploadow, raportow i danych po terminie); 0 = wylaczone.
+    daas_retention_interval_min: int = Field(default=60, ge=0, le=10080)
     daas_rate_limit_magic_email_per_min: int = Field(default=3, ge=0, description="POST /auth/magic-link, per e-mail")
     daas_rate_limit_magic_ip_per_min: int = Field(default=10, ge=0, description="POST /auth/magic-link, per IP")
     #: Odstepy miedzy ponowieniami dostawy webhooka, w sekundach (po jednej probie poczatkowej).

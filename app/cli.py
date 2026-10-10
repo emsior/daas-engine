@@ -1,8 +1,9 @@
-"""Polecenia operatora: `python -m app.cli <migrate|migrate-runtime|create-org>`.
+"""Polecenia operatora: `python -m app.cli <migrate|migrate-runtime|create-org|purge>`.
 
     migrate           alembic upgrade head dla bazy control plane (idempotentne)
     migrate-runtime   przeniesienie runtime/ sprzed 2.0 do runtime/tenants/default/ (idempotentne)
     create-org        nowa organizacja z kontem wlasciciela i jednorazowym kluczem API
+    purge             retencja: kasowanie uploadow, raportow i danych najemcow po terminie (--dry-run, --org)
 """
 from __future__ import annotations
 
@@ -72,6 +73,34 @@ def cmd_migrate_runtime(settings: Settings, args: argparse.Namespace) -> int:
     return 1 if report.conflicts else 0
 
 
+async def _purge(settings: Settings, org_id: str | None, dry_run: bool):
+    from app.control.db import create_engine, make_sessionmaker
+    from app.control.retention import purge_all
+    from app.control.tenancy import TenantRegistry
+
+    engine = create_engine(settings)
+    registry = TenantRegistry(settings)
+    try:
+        return await purge_all(make_sessionmaker(engine), registry, settings, org_id=org_id, dry_run=dry_run)
+    finally:
+        registry.close_all()
+        await engine.dispose()
+
+
+def cmd_purge(settings: Settings, args: argparse.Namespace) -> int:
+    from app.control.db import upgrade_sync
+
+    upgrade_sync(settings)
+    reports = asyncio.run(_purge(settings, args.org, args.dry_run))
+    if args.org and not reports:
+        print(f"error: organization {args.org} not found", file=sys.stderr)
+        return 1
+    for report in reports:
+        print(report.line())
+    print(f"{'dry-run: nothing was deleted; ' if args.dry_run else ''}organizations processed: {len(reports)}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -79,6 +108,10 @@ def build_parser() -> argparse.ArgumentParser:
     mr = sub.add_parser("migrate-runtime", help="move pre-2.0 runtime files to runtime/tenants/default/")
     mr.add_argument("--dry-run", action="store_true", help="print what would be moved, change nothing")
     mr.set_defaults(func=cmd_migrate_runtime)
+    pu = sub.add_parser("purge", help="apply data retention (delete expired uploads, reports and tenant rows)")
+    pu.add_argument("--dry-run", action="store_true", help="count what would be deleted, delete nothing")
+    pu.add_argument("--org", help="limit to one organization id")
+    pu.set_defaults(func=cmd_purge)
     co = sub.add_parser("create-org", help="create an organization and print a one-time API key")
     co.add_argument("--name", required=True)
     co.add_argument("--owner-email", required=True)

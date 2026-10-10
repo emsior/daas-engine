@@ -4,6 +4,7 @@ Lifespan: silnik control plane (+ migracje), organizacja `default` (selfhost), r
 Tryb `selfhost` montuje takze trasy legacy (`/upload`, `/run`, ...); tryb `cloud` — wylacznie `/api/v1`."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -22,6 +23,7 @@ from app.control import db as control_db
 from app.control import service as control_service
 from app.control.executor import JobExecutor
 from app.control.mailer import build_mailer
+from app.control.retention import retention_loop
 from app.control.tenancy import TenantRegistry
 from app.control.webhooks import WebhookDispatcher
 from app.core.auth import API_KEY_HEADER
@@ -88,6 +90,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.webhooks = dispatcher
         executor.listeners.append(dispatcher.on_run_finished)
         await executor.start()
+        # retencja (kasowanie po terminie): tylko cloud, cykliczne zadanie w tle
+        app.state.retention_task = None
+        if settings.cloud and settings.daas_retention_interval_min > 0:
+            app.state.retention_task = asyncio.create_task(
+                retention_loop(app.state.db_sessionmaker, registry, settings,
+                               interval_sec=settings.daas_retention_interval_min * 60), name="retention")
         log.info(
             "DaaS Engine up · mode=%s · env=%s · api_key=%s", settings.daas_mode, settings.app_env,
             "set" if auth.configured else ("n/a" if settings.cloud else "MISSING"),
@@ -95,6 +103,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            if app.state.retention_task is not None:
+                app.state.retention_task.cancel()
+                await asyncio.gather(app.state.retention_task, return_exceptions=True)
             await executor.stop()
             await dispatcher.close()
             registry.close_all()
@@ -116,6 +127,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.metrics = Metrics()
     app.state.mailer = build_mailer(settings)
     app.state.runner = None  # ustawiane w lifespan (selfhost); w cloud zostaje None
+    app.state.retention_task = None
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
