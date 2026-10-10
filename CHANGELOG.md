@@ -57,6 +57,16 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - **Deploy hardening.** `compose.yml` passes the `api` container an explicit list of variables instead of `env_file` (selfhost source keys and `ANTHROPIC_API_KEY` do not reach it; the LLM summary is switched on only by the `compose.llm.yml` overlay); `read_only` file systems with `tmpfs` for `api` and `web`; Caddy with `cap_drop: ALL` + `NET_BIND_SERVICE`; the Caddy log (access and error) drops `Referer` and masks the `?token=` of sign-in links; `DAAS_FORWARDED_ALLOW_IPS` for shared proxies; `gen-env.sh` sets `DAAS_ALLOW_CONSOLE_MAIL=true` next to the console adapter.
 - **Documentation.** `docs/API.md`, `docs/DEPLOY.md`, `docs/SECURITY.md`, `docs/DPA_v1_PL.md` (draft awaiting legal review), rewritten `docs/ARCHITECTURE.md`, pilot materials aligned with 2.0, READMEs for both modes.
 
+### Fixes after the security re-audit
+
+- **XLSX.** Cells with formulas that have no stored value are no longer silently empty: the upload answer (`v1` and legacy `selfhost`) carries a warning in `warnings[]` asking to re-save the file in Excel or LibreOffice.
+- **CSV numbers (ReDoS).** Number parsing is linear-time and a numeric cell longer than 64 characters is not parsed (unreadable value plus the usual warning).
+- **Webhooks (SSRF).** The address check also covers NAT64 (`64:ff9b::/96`, judged by the embedded IPv4; `64:ff9b:1::/48` and 6to4 `2002::/16` refused) and reserved IPv6 ranges.
+- **Members.** Removing or demoting the last owner is decided atomically in one statement (`409 last_owner`), also for concurrent requests.
+- **Client address.** `deploy/Caddyfile` overwrites `X-Forwarded-For` explicitly (`header_up X-Forwarded-For {remote_host}`); verified on Caddy 2.10.2 that a forged header does not reach the API. `docs/SECURITY.md` explains when `FORWARDED_ALLOW_IPS=*` is safe.
+- **API schema.** Unused `UsageOut`, `UsageRow`, `WebhookPing` and `WebhookPingResult` removed from the OpenAPI document (the ping answer is `WebhookPingOut`).
+- **OPSEC.** Remaining owner name and statute references removed from the repository; the CI guard rejects more patterns (round 3 and `d0b1bb2`).
+
 ### Known limitations
 
 - Rate limits, the quota counter and pending webhook retries live in process memory (one worker, reset on restart).

@@ -164,7 +164,7 @@ curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/jobs/01J..."
 curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/c0a8.../report?fmt=html" -o report.html
 ```
 
-The upload answer carries `warnings[]` (Polish text, not error codes) about what the mapper did with the data: numbers it could not read or read from an ambiguous thousand/decimal separator, rows with a negative revenue kept as corrections, rows skipped for an unreadable date or missing revenue, duplicate order ids (first one kept), a missing cost column. The same file always gives the same warnings; the upload is still `ready` when they appear.
+The upload answer carries `warnings[]` (Polish text, not error codes) about what the mapper did with the data: numbers it could not read or read from an ambiguous thousand/decimal separator, rows with a negative revenue kept as corrections, rows skipped for an unreadable date or missing revenue, duplicate order ids (first one kept), a missing cost column, a numeric cell longer than 64 characters (not parsed; counted among the unreadable numbers), and for XLSX the cells with formulas that have no stored value ("N komórek z formułami bez zapisanych wartości — zapisz plik ponownie w Excelu/LibreOffice"; such cells are read as empty because formulas are never evaluated). The XLSX warning appears in the v1 upload answer and in the legacy `POST /upload` of `selfhost`. The same file always gives the same warnings; the upload is still `ready` when they appear.
 
 Limits: CSV and XLSX up to 10 MiB (CSV at most 100 000 rows; XLSX without macros, at most 200 000 rows, 20 sheets and 256 columns); a collector package up to 5 MiB. A job is accepted for at most 20 queued or running jobs per organization; one run per organization executes at a time.
 
