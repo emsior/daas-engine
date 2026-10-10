@@ -239,7 +239,7 @@ Błąd sieci przy LIVE (timeout, 401, zmiana schematu API) również kończy si�
 Każdy raport Markdown kończy się sekcją **PRAKTYCZNE WNIOSKI** — konkretne akcje wynikające z liczb.
 
 ### Streszczenie (narrative)
-Raport zaczyna się od 3-5 zdań streszczenia. Domyślnie pisze je deterministyczny szablon z policzonych metryk (`narrative_source: TEMPLATE`). Streszczenie przez model (`NARRATIVE_MODEL`, domyślnie `claude-sonnet-4-5`) jest **opt-in**: wymaga zgody (`DAAS_LLM_NARRATIVE=true` w trybie `selfhost`, ustawienie organizacji `llm_narrative` w trybie `cloud`) oraz `ANTHROPIC_API_KEY`; sam klucz niczego nie włącza. Zasada: **LLM nie liczy** — dostaje wyłącznie policzone metryki (bez identyfikatorów zamówień, nazw produktów i nazwy klienta) i tylko je opisuje. Raport oznacza takie streszczenie jako wygenerowane przez model (`narrative_source: LLM`).
+Raport zaczyna się od 3-5 zdań streszczenia. Domyślnie pisze je deterministyczny szablon z policzonych metryk (`narrative_source: TEMPLATE`). Streszczenie przez model (`NARRATIVE_MODEL`, domyślnie `claude-sonnet-4-5`) jest **opt-in**: wymaga zgody (`DAAS_LLM_NARRATIVE=true` w trybie `selfhost`, ustawienie organizacji `llm_narrative` w trybie `cloud`) oraz `ANTHROPIC_API_KEY`; sam klucz niczego nie włącza. Zasada: **LLM nie liczy** — dostaje policzone metryki oraz nazwy kilku największych kategorii i map z pliku (bez identyfikatorów zamówień, nazw produktów i nazwy klienta) i ma je tylko opisać; treść nie jest weryfikowana z danymi, więc czytaj ją jak szkic. Raport oznacza takie streszczenie jako wygenerowane przez model (`narrative_source: LLM`).
 
 ### Raport HTML
 Samodzielny plik (inline CSS, bez zależności zewnętrznych), otwiera się z dysku, z maila, drukuje do PDF (Ctrl+P). Dla każdego runu: `runtime/reports/<pipeline>_<ts>_<id>.html` + `<pipeline>_latest.html`.
@@ -265,7 +265,7 @@ pytest                                  # backend, offline
 cd web && npm test && npm run e2e       # kokpit: testy jednostkowe; e2e wymaga API w trybie cloud (web/README.md)
 ```
 
-CI (`.github/workflows/ci.yml`): pytest na Python 3.11/3.12/3.13, smoke API przez curl, skanery (gitleaks, semgrep, zizmor, pip-audit), kokpit (eslint, tsc, vitest, build), testy end-to-end Playwright, build obrazów Docker (API i kokpit) wraz ze smoke w kontenerze.
+CI (`.github/workflows/ci.yml`): pytest na Python 3.11/3.12/3.13, smoke API przez curl, skanery (gitleaks, semgrep, zizmor, pip-audit), kokpit (eslint, tsc, vitest, build), testy end-to-end Playwright, Lighthouse (mobile), build obrazów Docker (API i kokpit) wraz ze smoke w kontenerze.
 
 Szczegółowa lista kontrolna: [VALIDATION.md](VALIDATION.md). Historia zmian: [CHANGELOG.md](CHANGELOG.md).
 

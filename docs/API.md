@@ -29,7 +29,7 @@ Two ways in; if both are sent, the key wins.
 
 Mutating requests made with a session cookie must repeat the value of the `daas_csrf` cookie in the `X-CSRF-Token` header (double submit). API-key requests do not use cookies and need no CSRF header.
 
-There are no passwords. Sign-in is a single-use link sent by e-mail (`POST /auth/magic-link`, then `POST /auth/magic-link/verify` with the token from the link). A key belongs to exactly one organization and carries scopes; a resource of another organization answers `404` (the members routes answer `403`).
+There are no passwords. Sign-in is a single-use link sent by e-mail (`POST /auth/magic-link`, then `POST /auth/magic-link/verify` with the token from the link). The link is bound to the browser that asked for it (an HttpOnly nonce cookie set by `POST /auth/magic-link`). When it is opened in another browser, `verify` answers `409 confirm_required` with a masked `email_hint` and does **not** consume the token; repeat the call with `{"token": "...", "confirm": true}` after the user agrees to sign in as that address in this browser. Pending invitations for the address are accepted at sign-in. A key belongs to exactly one organization and carries scopes; a resource of another organization answers `404` (the members routes answer `403`).
 
 ### Scopes and roles
 
@@ -74,13 +74,15 @@ Validation errors (`422`, `code: validation_error`) list `errors[]` with `loc`, 
 | 400 | `bad_request` | malformed request |
 | 401 | `unauthorized`, `invalid_token` | missing, wrong, expired or revoked key or session; sign-in link invalid, expired or used |
 | 403 | `forbidden`, `insufficient_scope`, `scope_escalation`, `csrf_failed`, `user_session_required`, `org_protected`, `orgs_disabled_in_selfhost` | not allowed |
-| 404 | `not_found`, `user_not_found` | no such resource in your organization |
-| 409 | `conflict`, `already_member`, `queue_full`, `not_cancellable`, `org_busy`, `key_limit_reached` | state conflict |
+| 404 | `not_found` | no such resource in your organization |
+| 409 | `conflict`, `confirm_required`, `last_owner`, `queue_full`, `not_cancellable`, `org_busy`, `key_limit_reached`, `webhook_exists`, `webhook_limit_reached` | state conflict (`confirm_required`: sign-in link opened in another browser; `last_owner`: the organization must keep one owner) |
+| 410 | `report_expired` | the report files were removed by the retention job; the run record and its SHA-256 stay (`POST .../verify` still works) |
 | 413 | `file_too_large`, `quota_exceeded` | file or upload quota too large |
 | 415 | `extension_not_allowed` | file type not accepted |
-| 422 | `validation_error`, `dpa_required`, `upload_kind_mismatch`, `upload_not_applicable`, `webhook_url_invalid`, `invalid_cursor`, upload checks (`schema_mismatch`, `decode_failed`, `header_missing`, `too_many_records`, `xlsx_invalid`) | invalid content |
-| 429 | `rate_limited`, `plan_limit` | too many requests (header `Retry-After`), or a monthly plan limit is used up |
-| 503 | `sessions_unavailable`, `webhooks_unavailable`, `unavailable` | the server lacks a required setting, or is not ready |
+| 422 | `validation_error`, `dpa_required`, `upload_required` (cloud: a pipeline that reads files needs `upload_id`, or `force_mock` for synthetic data), `mock_required`, `upload_kind_mismatch`, `upload_not_applicable`, `events_required` (webhook without events), `webhook_url_invalid`, `invalid_cursor`, upload checks (`schema_mismatch`, `decode_failed`, `header_missing`, `too_many_records`, `xlsx_invalid`) | invalid content |
+| 429 | `rate_limited`, `plan_limit`, `invitation_limit`, `sse_limit` | too many requests (header `Retry-After`), a monthly plan limit is used up, the invitation limit (20 per organization per 24 h, 5 per minute per caller) or the open event-stream limit is reached |
+| 500 | `report_integrity_error` | the stored report no longer matches its recorded SHA-256; it is not served |
+| 503 | `sessions_unavailable`, `webhooks_unavailable`, `shutting_down`, `unavailable` | the server lacks a required setting, is not ready, or is shutting down (`shutting_down` on a new event stream: retry after `Retry-After`) |
 
 Rate limits are per client address and per key and are kept in process memory; respect `Retry-After`.
 
@@ -95,7 +97,7 @@ Rate limits are per client address and per key and are kept in process memory; r
 | GET | `/api/v1/health`, `/api/v1/ready` | P | 200 | 503 | same, under the version prefix |
 | GET | `/metrics` | `Authorization: Bearer <DAAS_METRICS_TOKEN>` | 200 | 401, 404 | Prometheus text; 404 when no token is configured |
 | POST | `/api/v1/auth/magic-link` | P | 202 | 422, 429, 503 | send a sign-in link (same answer for unknown addresses) |
-| POST | `/api/v1/auth/magic-link/verify` | P | 200 | 401, 422, 429 | exchange the token for a session (sets cookies) |
+| POST | `/api/v1/auth/magic-link/verify` | P | 200 | 401, 409, 422, 429 | exchange the token for a session (sets cookies); `409 confirm_required` when the link was requested in another browser |
 | POST | `/api/v1/auth/logout` | S | 204 | 401, 403 | end the session |
 | GET | `/api/v1/me` | key or session | 200 | 401 | caller, organizations, roles or key scopes |
 | POST | `/api/v1/orgs` | S | 201 | 403, 422, 429 | create an organization; body must carry `dpa_accepted: true` |
@@ -103,8 +105,11 @@ Rate limits are per client address and per key and are kept in process memory; r
 | PATCH | `/api/v1/orgs/{org_id}` | `org:manage` | 200 | 403, 404, 422 | name, locale, `retention_days`, `llm_narrative` |
 | DELETE | `/api/v1/orgs/{org_id}` | `org:delete` | 204 | 403, 409 | delete the organization and its data |
 | GET | `/api/v1/orgs/{org_id}/members` | `org:read` | 200 | 403 | list members |
-| POST | `/api/v1/orgs/{org_id}/members` | `members:manage` | 201 | 403, 404, 409 | add an existing user |
-| POST | `/api/v1/orgs/{org_id}/invitations` | `members:manage` | 201 | 403, 409 | invite by e-mail (valid 7 days) |
+| PATCH | `/api/v1/orgs/{org_id}/members/{user_id}` | `members:manage`, owner session | 200 | 403, 404, 409 | change a role; the last owner cannot be demoted (`last_owner`) |
+| DELETE | `/api/v1/orgs/{org_id}/members/{user_id}` | `members:manage` | 204 | 403, 404, 409 | remove a member (ends their sessions here and revokes the keys they created here); only an owner removes an owner; the last owner stays (`last_owner`) |
+| POST | `/api/v1/orgs/{org_id}/invitations` | `members:manage` | 202 | 403, 429 | invite by e-mail (valid 7 days); always `{"status": "accepted"}`, no hint whether the address already has an account |
+| GET | `/api/v1/orgs/{org_id}/invitations` | `members:manage` | 200 | 403 | pending invitations |
+| DELETE | `/api/v1/orgs/{org_id}/invitations/{invitation_id}` | `members:manage` | 204 | 403, 404 | revoke a pending invitation |
 | GET | `/api/v1/orgs/{org_id}/api-keys` | `keys:manage` | 200 | 403, 404 | list keys (metadata only) |
 | POST | `/api/v1/orgs/{org_id}/api-keys` | `keys:manage` | 201 | 403, 409, 422 | create a key; the full key appears once |
 | DELETE | `/api/v1/orgs/{org_id}/api-keys/{key_id}` | `keys:manage` | 204 | 403, 404 | revoke a key (immediate) |
@@ -113,10 +118,10 @@ Rate limits are per client address and per key and are kept in process memory; r
 | GET | `/api/v1/orgs/{org_id}/jobs` | `runs:read` | 200 | 404 | list jobs; filter `status` |
 | GET | `/api/v1/orgs/{org_id}/jobs/{job_id}` | `runs:read` | 200 | 404 | job state and progress |
 | POST | `/api/v1/orgs/{org_id}/jobs/{job_id}/cancel` | `runs:write` | 200 | 404, 409 | cancel a queued job |
-| GET | `/api/v1/orgs/{org_id}/jobs/{job_id}/events` | `runs:read` | 200 (SSE) | 404 | live stream of one job |
+| GET | `/api/v1/orgs/{org_id}/jobs/{job_id}/events` | `runs:read` | 200 (SSE) | 404, 429, 503 | live stream of one job (limits below) |
 | GET | `/api/v1/orgs/{org_id}/runs` | `runs:read` | 200 | 404 | list runs |
 | GET | `/api/v1/orgs/{org_id}/runs/{run_id}` | `runs:read` | 200 | 404 | run details and metrics |
-| GET | `/api/v1/orgs/{org_id}/runs/{run_id}/report?fmt=html\|md\|json` | `reports:read` | 200, 304 | 404 | download a report |
+| GET | `/api/v1/orgs/{org_id}/runs/{run_id}/report?fmt=html\|md\|json` | `reports:read` | 200, 304 | 404, 410, 500 | download a report; `410 report_expired` after retention |
 | POST | `/api/v1/orgs/{org_id}/verify` | `reports:read` | 200 | 422 | does this SHA-256 belong to one of your reports |
 | GET | `/api/v1/orgs/{org_id}/evidence` | `reports:read` | 200 | 404 | artifact status of the latest collector run |
 | GET | `/api/v1/orgs/{org_id}/usage` | `usage:read` | 200 | 404 | monthly usage and plan limits |
@@ -124,7 +129,7 @@ Rate limits are per client address and per key and are kept in process memory; r
 | GET | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 200 | 403 | list webhooks |
 | POST | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 201 | 409, 422, 503 | register an HTTPS endpoint; the signing secret appears once |
 | DELETE | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}` | `webhooks:manage` | 204 | 404 | delete |
-| POST | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}/ping` | `webhooks:manage` | 200 | 404 | send a test event |
+| POST | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}/ping` | `webhooks:manage` | 200 | 404 | send a test event; answers `{delivered, status_class}` |
 
 Legacy routes (`/upload`, `/run`, `/pipelines`, `/runs`, `/reports/...`, `/stats`) exist only in `DAAS_MODE=selfhost` (organization `default`, key from `DAAS_API_KEY`, `Deprecation` response header). In `cloud` mode they answer `404`.
 
@@ -155,7 +160,7 @@ curl -sS -i -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
 curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/jobs/01J..."
 # {"status":"succeeded","progress":100,"run_id":"c0a8...",...}
 
-# 4. Download the report: html | md | json (ETag = SHA-256 of the file)
+# 4. Download the report: html | md | json (ETag = SHA-256 of the file; If-None-Match accepts a list and weak W/"..." values)
 curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/c0a8.../report?fmt=html" -o report.html
 ```
 
@@ -200,7 +205,7 @@ A comment line `: heartbeat` is sent after 15 seconds of silence (`DAAS_SSE_HEAR
 curl -sN -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/jobs/01J.../events"
 ```
 
-A reverse proxy must not buffer this response (the bundled Caddyfile sets `flush_interval -1`).
+Limits (`429 sse_limit` with `Retry-After`, per caller and in total; defaults in brackets): `DAAS_SSE_MAX_PER_PRINCIPAL` open streams per key or session (5), `DAAS_SSE_MAX_TOTAL` in the process (100), `DAAS_SSE_MAX_SECONDS` lifetime of one stream (1800). After the lifetime the server closes the stream: reconnect, and the first event is again a full `status` snapshot. On shutdown open streams end and a new one is refused with `503 shutting_down`. A reverse proxy must not buffer this response (the bundled Caddyfile sets `flush_interval -1`).
 
 ## Webhooks
 
@@ -240,7 +245,7 @@ Registration rules:
 - At most 10 webhooks per organization (`409 webhook_limit_reached`); the same URL twice answers `409 webhook_exists`.
 - The signing secret is derived from `DAAS_SECRET_KEY`; without that setting creation answers `503 webhooks_unavailable`.
 
-Test call: `POST .../webhooks/{webhook_id}/ping` sends one signed `ping` event (single attempt, body `{"event":"ping","org_id":"..."}`) and answers `{"delivered": true, "status": 200}`; `status` is the receiver's HTTP status, or `null` when the address or network failed.
+Test call: `POST .../webhooks/{webhook_id}/ping` sends one signed `ping` event (single attempt, body `{"event":"ping","org_id":"..."}`) and answers `{"delivered": true, "status_class": "2xx"}`. `status_class` is `2xx`, `3xx`, `4xx`, `5xx` or `error` (no answer: network, DNS, address refused); the receiver's exact status code is not returned. The old `status` field is still present but always `null` (deprecated). Creating a webhook with an empty `events` list answers `422 events_required`.
 
 ## Usage and plan limits
 

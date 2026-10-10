@@ -47,17 +47,23 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - **Webhooks.** `run.finished` with HMAC-SHA256 signature `X-DaaS-Signature`, three attempts with `DAAS_WEBHOOK_BACKOFF_SEC`, SSRF protection (public HTTPS addresses only).
 - **Usage and plans.** `GET .../usage`; monthly limits of the `free` and `pro` plans answer `429 plan_limit`. No online payments.
 - **Audit and metrics.** `GET .../audit` with cursor pagination; `GET /metrics` in Prometheus text format behind `DAAS_METRICS_TOKEN`.
-- **Operator tools.** `python -m app.cli migrate | migrate-runtime | create-org`; `migrate-runtime` moves a 1.x `runtime/` into `runtime/tenants/default/` (idempotent).
+- **Members and invitations.** `PATCH`/`DELETE .../members/{user_id}` (role change, removal; the last owner is protected with `409 last_owner`; removal ends the member's sessions and revokes the keys they created), `GET`/`DELETE .../invitations`; `POST .../invitations` always answers `202` and is limited to 20 per organization per 24 hours and 5 per minute per caller (`429 invitation_limit`).
+- **Sign-in link bound to the browser.** The link only works without confirmation in the browser that requested it; elsewhere `verify` answers `409 confirm_required` (token not consumed) until the user confirms.
+- **Retention.** `DAAS_RETENTION_INTERVAL_MIN` background task and `python -m app.cli purge [--dry-run]` delete uploads after `retention_until`, report files and DuckDB rows of runs older than `retention_days`; the run record and the report hash stay and the report endpoint answers `410 report_expired`. Migration `0003` adds the purge marker, the sign-in nonce and listing indexes (`0002` adds the data period of a run).
+- **Event streams.** SSE limits `DAAS_SSE_MAX_PER_PRINCIPAL`, `DAAS_SSE_MAX_TOTAL`, `DAAS_SSE_MAX_SECONDS` (`429 sse_limit`), `503 shutting_down` for new streams during shutdown.
+- **Operator tools.** `python -m app.cli migrate | migrate-runtime | purge | create-org`; `migrate-runtime` moves a 1.x `runtime/` into `runtime/tenants/default/` (idempotent).
 - **Deploy.** `deploy/compose.yml` (`api`, `web`, optional Caddy with TLS), `Caddyfile`, `gen-env.sh`, `backup.sh` and `restore.sh` (UTC-dated tar with SHA-256 and retention), `smoke.sh`; `web/Dockerfile` (standalone, non-root); the API image now contains `alembic/` and `/data` volumes. Ports are published on `127.0.0.1` only. Update, rollback and shared-proxy instructions: `deploy/README.md`.
-- **CI.** New jobs `web` (eslint, tsc, vitest, `next build`) and `e2e` (Playwright against the API in cloud mode with the console mail adapter); `pip-audit` in `security`; Python 3.13 in the test matrix; web image build and cloud-mode container smoke in `docker`.
+- **CI.** New jobs `web` (API schema drift, eslint, tsc, vitest, `next build`, `npm audit` of production dependencies), `e2e` (Playwright against the API in cloud mode with the console mail adapter) and `lighthouse` (mobile; `/login` and `/dpa`; performance >= 0.9, accessibility >= 0.95, best practices >= 0.9); `pip-audit` in `security`; Python 3.13 in the test matrix; web image build and cloud-mode container smoke (read-only file system, all capabilities dropped) in `docker`, plus validation of `compose.yml`, the LLM overlay and the Caddyfile; Dependabot for `npm` and `docker` in `web/`; the OPSEC grep also rejects the owner handle and the old brand string.
+- **Deploy hardening.** `compose.yml` passes the `api` container an explicit list of variables instead of `env_file` (selfhost source keys and `ANTHROPIC_API_KEY` do not reach it; the LLM summary is switched on only by the `compose.llm.yml` overlay); `read_only` file systems with `tmpfs` for `api` and `web`; Caddy with `cap_drop: ALL` + `NET_BIND_SERVICE`; the Caddy log (access and error) drops `Referer` and masks the `?token=` of sign-in links; `DAAS_FORWARDED_ALLOW_IPS` for shared proxies; `gen-env.sh` sets `DAAS_ALLOW_CONSOLE_MAIL=true` next to the console adapter.
 - **Documentation.** `docs/API.md`, `docs/DEPLOY.md`, `docs/SECURITY.md`, `docs/DPA_v1_PL.md` (draft awaiting legal review), rewritten `docs/ARCHITECTURE.md`, pilot materials aligned with 2.0, READMEs for both modes.
 
 ### Known limitations
 
 - Rate limits, the quota counter and pending webhook retries live in process memory (one worker, reset on restart).
-- Docker was not run during this change; image builds, the container smoke tests and the Caddy configuration are covered by CI and by `deploy/smoke.sh` after installation.
+- Docker was not run during this change; image builds and the container smoke tests (including the read-only file system) are covered by CI and by `deploy/smoke.sh` after installation. The Caddyfile was validated with `caddy validate` and its log filter exercised on a local Caddy.
+- Retention does not reach backups or the technical audit trail. The LLM summary is not checked against the data and receives category and map names from the customer's file (prompt injection); see `docs/SECURITY.md`.
 - `selfhost` mode uses a single instance key and has no roles; roles exist in `cloud` mode.
-- Cloud mode runs on one node with a SQLite control database; there is no failover. The `console` mail adapter is for trials only.
+- Cloud mode runs on one node with a SQLite control database; there is no failover. The `console` mail adapter is for trials only: in `cloud` with `APP_ENV=prod` the server refuses to start with it unless `DAAS_ALLOW_CONSOLE_MAIL=true`.
 - No passkeys, SSO, online payments or external timestamps.
 
 ## [1.0.0] — 2026-09-28
@@ -85,7 +91,7 @@ PR #7 (Python 3.14 base image) was closed without merging.
 
 - The Docker image is built and smoke-tested in CI on Linux; Docker has not been tested on Windows hosts.
 - The n8n workflows in `n8n/` are JSON definitions only; no n8n instance is shipped or hosted.
-- The runtime policy layer is off by default (`DAAS_POLICY_ENFORCE=false`).
+- The runtime policy layer was off by default in 1.0.0 (`DAAS_POLICY_ENFORCE=false`); since 2.0.0 it is **on** by default.
 - `POST /upload` accepts `.csv` only since #3 (smaller attack surface); `ecommerce_demo` still reads XLSX from a local path.
 - Git history contains outdated author metadata; the history is intentionally not rewritten.
 

@@ -30,7 +30,7 @@ SSO i kluczami dostępu (passkeys), umowa SLA.
 - Klient jest instruowany, by eksportować wyłącznie dane transakcyjne (identyfikator, kwota, kategoria, data).
 - W trybie `cloud` przetwarzane są dane kontaktowe użytkowników organizacji (adres e-mail, opcjonalnie imię i nazwisko). Podstawą jest umowa powierzenia
   (art. 28 RODO) akceptowana przy zakładaniu organizacji; wersja zaakceptowanej umowy i data są zapisane przy organizacji.
-- Uploady są usuwane po okresie retencji ustawionym w organizacji (domyślnie 90 dni). Usunięcie organizacji usuwa jej rekordy i katalog danych.
+- Uploady są usuwane po okresie retencji ustawionym w organizacji (domyślnie 90 dni, liczony od dnia wgrania). Pliki raportów i dane analityczne przebiegów starszych niż ta retencja usuwa zadanie w tle (domyślnie co godzinę, `DAAS_RETENTION_INTERVAL_MIN`); rekord przebiegu z sumą SHA-256 raportu zostaje, a pobranie wygasłego raportu kończy się odpowiedzią `410 report_expired`. Upload czytany przez zadanie w kolejce lub w toku jest usuwany dopiero po jego zakończeniu. Usunięcie organizacji usuwa jej rekordy i katalog danych.
 
 ### 3. Tajemnica Przedsiębiorstwa i Kontrola Dostępu
 - Raporty i dane analityczne nie są indeksowane ani udostępniane publicznie.
@@ -87,9 +87,9 @@ SSO i kluczami dostępu (passkeys), umowa SLA.
 ### 8. Dostawcy zewnętrzni
 - Streszczenie generowane przez model językowy jest **domyślnie wyłączone**. W trybie `selfhost` wymaga jawnego `DAAS_LLM_NARRATIVE=true`
   oraz klucza dostawcy, w trybie `cloud` zgody organizacji (ustawienie `llm_narrative`) oraz klucza dostawcy; sam klucz w środowisku niczego nie włącza.
-- Do dostawcy trafiają wyłącznie policzone metryki. Identyfikatory zamówień, nazwy produktów, nazwa klienta,
+- Do dostawcy trafiają policzone metryki oraz nazwy do trzech największych kategorii i map oraz do trzech zamówień stratnych z pliku klienta (tekst z pliku, np. nazwa kategorii, może więc trafić do zapytania). Identyfikatory zamówień, nazwy produktów, nazwa klienta,
   nazwa hosta i skróty paczki kolektora są usuwane z zapytania. Raport oznacza takie streszczenie
-  jako wygenerowane przez model.
+  jako wygenerowane przez model. Streszczenie nie jest weryfikowane z danymi (instrukcja „używaj tylko liczb z JSON” nie jest kontrolą), więc traktuj je jak szkic; tabele liczbowe raportu liczy silnik, nie model.
 - Pozostałe źródła zewnętrzne (FACEIT, Liquipedia, Apify, Discord) działają tylko po skonfigurowaniu ich kluczy;
   bez nich pipeline używa danych przykładowych.
 - Wiadomości e-mail (link logowania, zaproszenia) wysyła serwer SMTP wskazany przez operatora.
@@ -107,3 +107,4 @@ SSO i kluczami dostępu (passkeys), umowa SLA.
 ### 11. Kopie zapasowe i retencja
 - Operator wykonuje kopie `deploy/backup.sh` (archiwum z datą UTC i sumą SHA-256, retencja liczby kopii). Kopie zawierają dane klientów, mają prawa 0600
   i powinny być szyfrowane oraz przechowywane poza serwerem. Odtworzenie: `deploy/restore.sh` z weryfikacją sumy.
+- Retencja organizacji **nie obejmuje kopii zapasowych**: dane usunięte z serwera pozostają w starszych archiwach do czasu ich rotacji. Dobierz liczbę przechowywanych kopii do obietnicy złożonej klientowi.

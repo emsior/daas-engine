@@ -21,7 +21,7 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 - `main` = v1.0.0 (tryb utrzymania od 28.09.2026). Prace nad 2.0.0 idą na gałęzi `claude/saas-2026-10`.
 - Code freeze z v1.0.0 **uchylony poleceniem właściciela 09.10.2026** (`AGENTS.md`, zasada 8). Pozostałe zasady bez zmian.
 - Zakres 2.0 (kontrakt: SPEC_v2 poza repo): hardening (klucz API na trasach, bind, policy, escapowanie raportów, narracja LLM opt-in),
-  control plane + tenancy, API v1, kokpit `web/`, `deploy/`, CI (web, e2e, pip-audit), dokumentacja.
+  control plane + tenancy, API v1, kokpit `web/`, `deploy/`, CI (web, e2e, lighthouse, pip-audit), dokumentacja.
 - Poza zakresem 2.0: płatności online, passkeys, SSO, wspólna baza z `tenant_id`, hostowane n8n, SLA.
 - Push na `origin` to osobne polecenie właściciela. Odbiór bram (hardening, cloud, kokpit) robi reviewer; test „obcego" po instalacji na VPS.
 - Wersja `2.0.0` jest w `pyproject.toml`, `app/core/config.py` i `web/package.json`; `/health.version` czyta metadane zainstalowanego pakietu.
@@ -40,7 +40,7 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 | Wdrożenie | Docker Compose (`deploy/`), Caddy (TLS), obrazy `api` (korzeń repo) i `web` (`web/Dockerfile`) |
 | Zależności Pythona | `requirements.lock`, `requirements-dev.lock` (pip-tools, hashe SHA-256; `--require-hashes`) |
 | Testy | pytest — ok. 1070 przypadków (stan 10.10.2026, `pytest --collect-only`), pełny przebieg ~2 min; Vitest w `web/` |
-| CI | GitHub Actions: `test` (3.11, 3.12, 3.13), `security` (gitleaks, semgrep, zizmor, pip-audit), `web`, `e2e`, `docker`; Dependabot; akcje przypięte do SHA |
+| CI | GitHub Actions: `test` (3.11, 3.12, 3.13), `security` (gitleaks, semgrep, zizmor, pip-audit), `web`, `e2e`, `lighthouse`, `docker`; Dependabot (pip, actions, docker, npm); akcje przypięte do SHA |
 
 ⚠ **Od 2.0 w repo jest JavaScript**: `web/` ma własny `package.json` i `package-lock.json`. Reszta repo (poza `web/`) to Python.
 

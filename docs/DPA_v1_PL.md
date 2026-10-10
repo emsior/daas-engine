@@ -32,7 +32,7 @@ Lista podprocesorów zostanie podana przed uruchomieniem produkcyjnym. Procesor 
 
 ## 6. Usunięcie danych
 
-Wgrane pliki są usuwane po upływie okresu przechowywania ustawionego w organizacji. Po zakończeniu umowy dane są usuwane lub zwracane, według wyboru Administratora.
+Wgrane pliki są usuwane po upływie okresu przechowywania ustawionego w organizacji (liczonego od dnia wgrania). Pliki raportów oraz dane analityczne przebiegów starsze niż ten okres są usuwane automatycznie, cyklicznie (domyślnie co godzinę). Po usunięciu raportu zostaje rekord przebiegu z sumą kontrolną SHA-256 raportu, bez jego treści; znika on wraz z usunięciem organizacji. Kopie zapasowe wykonywane przez Procesora nie podlegają okresowi przechowywania organizacji i są usuwane zgodnie z rotacją kopii. Po zakończeniu umowy dane są usuwane lub zwracane, według wyboru Administratora.
 
 ## 7. Audyt
 

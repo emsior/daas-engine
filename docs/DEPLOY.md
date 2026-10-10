@@ -9,12 +9,12 @@ Skrót instrukcji z [`deploy/README.md`](../deploy/README.md) oraz pełna lista 
 
 ## Cloud na VPS: kroki
 
-Wymagania: Docker Engine 25+ z Compose v2.24+, VPS 2 vCPU / 4 GB RAM, domena z rekordem A/AAAA na serwer, otwarte porty 80 i 443.
+Wymagania: Docker Engine 25+ z Compose v2, VPS 2 vCPU / 4 GB RAM, domena z rekordem A/AAAA na serwer, otwarte porty 80 i 443.
 
 ```bash
 git clone https://github.com/emsior/daas-engine.git /opt/daas-engine && cd /opt/daas-engine/deploy
 ./gen-env.sh --domain raporty.example.com          # tworzy .env (0600) z losowymi sekretami; nie nadpisuje istniejącego
-$EDITOR .env                                       # DAAS_EMAIL_BACKEND=smtp + dane SMTP
+$EDITOR .env                                       # DAAS_EMAIL_BACKEND=smtp + dane SMTP; usuń DAAS_ALLOW_CONSOLE_MAIL
 docker compose build
 docker compose --profile edge up -d                # z Caddy (TLS); bez profilu: tylko api i web
 docker compose exec api python -m app.cli create-org --name "Nazwa firmy" --owner-email wlasciciel@example.com
@@ -30,7 +30,7 @@ Szczegóły, wspólne proxy z drugą aplikacją i kopie zapasowe: [`deploy/READM
 | Wolumen (w kontenerze) | Zawartość |
 |---|---|
 | `control` (`/data/control`) | `control.db`: organizacje, użytkownicy, klucze (tylko skróty SHA-256), zadania, ślad runów, audyt, webhooki |
-| `runtime` (`/data/runtime`) | `tenants/<org_id>/`: `daas.duckdb`, `uploads/`, `reports/`, `audit.jsonl`; `outbox/` (linki logowania trybu `console`) |
+| `runtime` (`/data/runtime`) | `tenants/<org_id>/`: `daas.duckdb`, `uploads/`, `reports/`, `audit.jsonl`; `outbox/` (linki logowania trybu `console`, tylko próby) |
 
 Kopia zapasowa obejmuje oba wolumeny. Sekretów z `.env` nie obejmuje.
 
@@ -72,7 +72,8 @@ Kolumna „Tryb": `c` = istotne w `cloud`, `s` = w `selfhost`, `cs` = w obu.
 
 | Zmienna | Domyślnie | Znaczenie |
 |---|---|---|
-| `DAAS_EMAIL_BACKEND` | `console` | `console`: link w dzienniku i w `runtime/outbox/` (tylko próby i testy e2e); `smtp`: wysyłka stdlib `smtplib` |
+| `DAAS_EMAIL_BACKEND` | `console` | `console`: link w `runtime/outbox/` (plik 0600), poza `APP_ENV=prod` także w dzienniku (tylko próby i testy e2e); `smtp`: wysyłka stdlib `smtplib`. W `cloud` z `APP_ENV=prod` samo `console` **blokuje start** (patrz niżej) |
+| `DAAS_ALLOW_CONSOLE_MAIL` | `false` | jawna zgoda na `console` w `cloud` z `APP_ENV=prod` (próby, pilotaż bez SMTP). `deploy/gen-env.sh` ustawia `true` razem z `console`; przy `smtp` usuń |
 | `DAAS_EMAIL_FROM` | `DaaS Engine <no-reply@localhost>` | nadawca |
 | `DAAS_SMTP_HOST` | brak | serwer SMTP |
 | `DAAS_SMTP_PORT` | `587` | port |
@@ -92,10 +93,14 @@ Kolumna „Tryb": `c` = istotne w `cloud`, `s` = w `selfhost`, `cs` = w obu.
 | `DAAS_RATE_LIMIT_MAGIC_IP_PER_MIN` | `10` | `POST /auth/magic-link`, per IP |
 | `DAAS_UPLOAD_QUOTA_BYTES` | `1073741824` | łączna kwota plików w `uploads/` organizacji (1 GiB); `0` = bez limitu. Przekroczenie: `413` |
 | `DAAS_MAX_CONCURRENT_RUNS` | `2` | równoległe runy w całym procesie (w obrębie organizacji zawsze 1); 1-64 |
-| `DAAS_MAX_ACTIVE_TENANTS` | `16` | ile organizacji ma jednocześnie otwarty runner DuckDB (LRU); 1-1024 |
-| `DAAS_RETENTION_DAYS` | `90` | domyślna retencja uploadów nowej organizacji (dni) |
+| `DAAS_MAX_ACTIVE_TENANTS` | `16` | ile organizacji ma jednocześnie otwarty runner DuckDB (LRU); 1-1024. To limit **liczby** otwartych tenantów, nie pamięci: RAM ogranicza `mem_limit` kontenera |
+| `DAAS_RETENTION_DAYS` | `90` | domyślna retencja nowej organizacji (dni; 1-3650), zmienna per organizacja (`PATCH /api/v1/orgs/{id}`). Uploady kasuje się po `retention_until` (wyliczonym przy wgraniu), pliki raportów i wiersze DuckDB runów starszych niż `retention_days` |
+| `DAAS_RETENTION_INTERVAL_MIN` | `60` | co ile minut zadanie w tle kasuje dane po terminie (tylko `cloud`); `0` = wyłączone, 0-10080. Ręcznie: `python -m app.cli purge [--dry-run] [--org ID]`. Kopii zapasowych nie dotyczy |
 | `DAAS_WEBHOOK_BACKOFF_SEC` | `1,5,25` | pauzy między ponowieniami dostawy webhooka (sekundy, po jednej próbie początkowej) |
 | `DAAS_SSE_HEARTBEAT_SEC` | `15` | odstęp komentarza `: heartbeat` w strumieniu SSE |
+| `DAAS_SSE_MAX_PER_PRINCIPAL` | `5` | otwarte strumienie SSE na klucz lub sesję (1-100); powyżej: `429 sse_limit` |
+| `DAAS_SSE_MAX_TOTAL` | `100` | otwarte strumienie SSE w całym procesie (1-10000) |
+| `DAAS_SSE_MAX_SECONDS` | `1800` | maksymalny czas życia jednego strumienia (1-86400 s); klient łączy się ponownie |
 
 Liczniki limitów są w pamięci procesu; aplikacja działa w jednym procesie roboczym (`WEB_CONCURRENCY` lub `UVICORN_WORKERS` powyżej 1 blokuje start).
 
@@ -104,7 +109,7 @@ Liczniki limitów są w pamięci procesu; aplikacja działa w jednym procesie ro
 | Zmienna | Domyślnie | Znaczenie |
 |---|---|---|
 | `DAAS_METRICS_TOKEN` | brak | token `Authorization: Bearer` dla `GET /metrics`; bez niego trasa odpowiada `404` |
-| `FORWARDED_ALLOW_IPS` | `127.0.0.1,::1` | (uvicorn) adresy proxy, którym wolno ustawiać `X-Forwarded-For`; `deploy/compose.yml` ustawia `*`, bo API jest osiągalne tylko z sieci compose i z loopbacku |
+| `FORWARDED_ALLOW_IPS` | `127.0.0.1,::1` | (uvicorn) adresy proxy, którym wolno ustawiać `X-Forwarded-For`; `deploy/compose.yml` ustawia `*` (zmienna wdrożenia `DAAS_FORWARDED_ALLOW_IPS`), bo API jest osiągalne tylko z sieci compose i z loopbacku, a Caddy nadpisuje nagłówek. Ze wspólnym proxy wpisz jego adres |
 
 ### Magazyn danych
 
@@ -134,9 +139,13 @@ Brak klucza nie jest błędem: pipeline używa danych przykładowych i oznacza w
 | `DAAS_VERSION` | z `pyproject.toml` | tag obrazów `api` i `web`; podbijaj przed `build`, wracaj do poprzedniego przy rollbacku |
 | `DAAS_DOMAIN` | `localhost` | domena Caddy i domyślny `DAAS_COCKPIT_ORIGIN` |
 | `NEXT_PUBLIC_API_ORIGIN` | pusty | origin API zapisany w paczce kokpitu **w czasie budowania**; pusty = ten sam origin (Caddy). Zmiana wymaga `docker compose build web` |
+| `DAAS_FORWARDED_ALLOW_IPS` | `*` | wartość `FORWARDED_ALLOW_IPS` dla `api` (adresy proxy, którym wolno ustawiać `X-Forwarded-For`); ze wspólnym proxy adres proxy, nie `*` |
+| `COMPOSE_FILE` | brak | `compose.yml:compose.llm.yml` włącza nakładkę ze streszczeniem LLM (przekazuje `ANTHROPIC_API_KEY`, ustawia `DAAS_LLM_NARRATIVE=true`) |
 | `DAAS_API_IMAGE`, `DAAS_WEB_IMAGE` | `daas-engine-api`, `daas-engine-web` | nazwy obrazów (np. własny rejestr) |
 | `DAAS_API_PORT`, `DAAS_WEB_PORT` | `8000`, `3000` | porty na `127.0.0.1` hosta |
 | `BACKUP_DIR`, `KEEP`, `BACKUP_PREFIX` | `deploy/backups`, `14`, `daas` | parametry `backup.sh` |
+
+`deploy/compose.yml` nie używa `env_file`: kontener `api` dostaje wyłącznie zmienne wymienione w jego sekcji `environment` (z `.env`, gdy ustawione). Zmienne źródeł i powiadomień trybu `selfhost` (`FACEIT_*`, `APIFY_*`, `ECOMMERCE_CSV_PATH`, `DISCORD_WEBHOOK_URL`, `DAAS_API_KEY`) i `ANTHROPIC_API_KEY` tam nie trafiają; nową zmienną aplikacji trzeba dopisać do `compose.yml`.
 
 Kokpit czyta w czasie działania jeszcze `API_INTERNAL_ORIGIN` (adres API w sieci compose, `http://api:8000`), którym pyta o sesję przy każdej nawigacji.
 
@@ -144,6 +153,7 @@ Kokpit czyta w czasie działania jeszcze `API_INTERNAL_ORIGIN` (adres API w siec
 
 - Porty aplikacji tylko na `127.0.0.1`; TLS i nagłówki daje Caddy albo wspólne proxy hosta.
 - Sekrety wyłącznie w `.env` (0600, poza gitem), klucze API i tokeny w bazie jako skróty SHA-256.
-- `DAAS_EMAIL_BACKEND=smtp` na produkcji; `console` zapisuje linki logowania w dzienniku.
+- `DAAS_EMAIL_BACKEND=smtp` na produkcji; `console` zapisuje linki logowania na dysku (`runtime/outbox/`), a API z `APP_ENV=prod` odmawia z nim startu bez `DAAS_ALLOW_CONSOLE_MAIL=true`.
+- Kontenery `api` i `web` mają system plików tylko do odczytu (zapis: wolumeny i `tmpfs`), `cap_drop: ALL` i `no-new-privileges`; dziennik Caddy nie zawiera `?token=`, `Cookie` ani kluczy.
 - Metryki tylko na loopbacku z tokenem; Caddy zwraca `404` dla `/metrics`.
 - Model zagrożeń i zgłaszanie podatności: [`SECURITY.md`](SECURITY.md).

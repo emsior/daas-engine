@@ -14,7 +14,7 @@ Krok po kroku dla operatora (PPC) i klienta przed rozpoczęciem pilota:
 - [ ] **Krok 3: Organizacja klienta i umowa**
   - Założenie organizacji: właściciel loguje się w kokpicie linkiem z e-maila i akceptuje umowę powierzenia (DPA v1), albo operator tworzy ją poleceniem `python -m app.cli create-org --name ... --owner-email ...`.
   - Organizacja ma własny katalog danych (`runtime/tenants/{org_id}/`) i własną bazę; identyfikator nadaje system.
-  - Ustawienie retencji uploadów (domyślnie 90 dni) w ustawieniach organizacji.
+  - Ustawienie retencji (domyślnie 90 dni) w ustawieniach organizacji: dotyczy uploadów (od dnia wgrania), plików raportów i danych przebiegów. Kopie zapasowe operatora nie podlegają tej retencji: ustal z klientem, jak długo je przechowujesz.
   - Dla integracji: klucz API z minimalnym zakresem (np. `uploads:write`, `runs:write`, `reports:read`), pokazany jeden raz i przekazany bezpiecznym kanałem.
 
 - [ ] **Krok 4: Uruchomienie pierwszego raportu baseline**
