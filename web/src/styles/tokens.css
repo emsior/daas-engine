@@ -1,0 +1,506 @@
+/* =====================================================================
+   tokens.css — design tokeny kokpitu „DaaS Engine Cloud” (marka PPC)
+   Trzy poziomy:
+     1. PRIMITIVE  — surowe wartości (kolory, rozmiary). Nigdy nie używane
+                     bezpośrednio w komponentach.
+     2. SEMANTIC   — role (--color-text, --color-primary…). To jedyny poziom,
+                     który zmienia się między trybami light/dark.
+     3. COMPONENT  — decyzje komponentów (--button-primary-bg…), zawsze
+                     wyprowadzone z poziomu SEMANTIC.
+   Zmiana wartości na poziomie 2 propaguje się na cały kokpit.
+
+   Tryby: :root = light. Dark = preferencja systemu (o ile użytkownik nie
+   wymusił light przez <html data-theme="light">) ALBO <html data-theme="dark">.
+   Atrybut data-theme ustawiaj WYŁĄCZNIE na <html> (tokeny komponentów są
+   liczone na :root).
+
+   Kontrasty: liczone wzorem WCAG 2.x
+     L = 0,2126·R + 0,7152·G + 0,0722·B   (R,G,B po linearyzacji sRGB)
+     kontrast = (L_jaśniejszy + 0,05) / (L_ciemniejszy + 0,05)
+   Wartości w komentarzach policzone ręcznie, zaokrąglone do 0,1; QA potwierdza
+   je narzędziem. Wymogi: tekst >= 4,5:1; duży tekst >= 3:1; elementy UI >= 3:1.
+
+   Breakpointy (zapytania @media nie przyjmują var(), więc wartości są
+   literałami; źródło prawdy to ten komentarz oraz @theme w tailwind.css):
+     375 px  — bazowy układ mobilny (mobile-first, bez zapytania)
+     640 px  = 40em — sm: tabele jako tabele, gutter 24 px, h1/h2 większe
+     1024 px = 64em — lg: układy wielokolumnowe
+     1280 px = 80em — xl: docelowy desktop (kontener ogranicza do 1200 px)
+   ===================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* ===================================================================
+     1. PRIMITIVE
+     =================================================================== */
+
+  /* --- neutralne (light) --- */
+  --white: #ffffff;
+  --slate-50: #f5f7fa;   /* powierzchnia */
+  --slate-100: #edf0f4;  /* zagłębienie, kod */
+  --slate-200: #d5dbe3;  /* obrys dekoracyjny, tor paska, nieaktywne */
+  --slate-500: #6b7685;  /* obrys elementów UI */
+  --slate-700: #4a5566;  /* tekst pomocniczy */
+  --slate-900: #1b2430;  /* tekst główny */
+
+  /* --- niebieski (primary) --- */
+  --blue-50: #e8f0fa;
+  --blue-700: #1f4e8c;
+  --blue-800: #173d70;
+  --blue-900: #12305a;
+
+  /* --- teal / zielony / bursztyn / czerwień (light) --- */
+  --steel-teal-700: #3c6e71;  /* secondary */
+  --teal-700: #0f766e;        /* accent (wykresy) */
+  --green-50: #e8f5ec;
+  --green-700: #1e6b3a;
+  --amber-50: #fdf3dc;
+  --amber-700: #8a5a00;
+  --red-50: #fdecea;
+  --red-700: #b42318;
+  --red-800: #912018;
+
+  /* --- neutralne (dark) --- */
+  --night-950: #0f141b;  /* tło */
+  --night-900: #18202b;  /* powierzchnia */
+  --night-800: #202a37;  /* powierzchnia podniesiona */
+  --night-700: #2b3645;  /* obrys dekoracyjny */
+  --night-500: #6f7b8c;  /* obrys elementów UI */
+  --mist-300: #a9b4c2;   /* tekst pomocniczy */
+  --mist-100: #e6ebf2;   /* tekst główny */
+
+  /* --- kolory (dark) --- */
+  --sky-950: #14243a;
+  --sky-400: #7aa6e8;
+  --sky-300: #8db6f0;    /* primary */
+  --sky-200: #a9c8f5;
+  --teal-300: #7fb8bb;   /* secondary */
+  --cyan-300: #5eead4;   /* accent */
+  --green-950: #12281b;
+  --green-300: #7fd19a;
+  --amber-950: #2a2210;
+  --amber-300: #f2c46b;
+  --red-950: #301816;
+  --red-300: #ff8a80;
+  --red-200: #ffa8a0;
+
+  /* --- typografia: rodziny --- */
+  --font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, "Noto Sans", sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, SFMono-Regular, Menlo,
+    "Noto Sans Mono", monospace;
+
+  /* --- typografia: rozmiary i interlinie (nazwane wg px przy bazie 16) --- */
+  --fs-12: 0.75rem;
+  --fs-14: 0.875rem;
+  --fs-16: 1rem;
+  --fs-18: 1.125rem;
+  --fs-20: 1.25rem;
+  --fs-24: 1.5rem;
+  --fs-28: 1.75rem;
+  --fs-30: 1.875rem;
+  --fs-36: 2.25rem;
+  --lh-16: 1rem;
+  --lh-20: 1.25rem;
+  --lh-24: 1.5rem;
+  --lh-28: 1.75rem;
+  --lh-32: 2rem;
+  --lh-36: 2.25rem;
+  --lh-38: 2.375rem;
+  --lh-44: 2.75rem;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* cyfry tabelaryczne (kwoty „7 255,95 zł”, kolumny liczb) */
+  --tabular: "tnum";
+
+  /* --- spacing: siatka 4 px (w rem, skaluje się z preferencją użytkownika) ---
+     Skala wg raportu UX: 4 8 12 16 24 32 40 48 64.
+     space-5 (20 px) jest na siatce, ale poza skalą raportu — używaj oszczędnie. */
+  --space-0: 0;
+  --space-1: 0.25rem;  /*  4 px — ikona–tekst */
+  --space-2: 0.5rem;   /*  8 px — wewnątrz komponentu */
+  --space-3: 0.75rem;  /* 12 px */
+  --space-4: 1rem;     /* 16 px — margines boczny mobile */
+  --space-5: 1.25rem;  /* 20 px */
+  --space-6: 1.5rem;   /* 24 px — wnętrze karty, między polami */
+  --space-8: 2rem;     /* 32 px — między sekcjami */
+  --space-10: 2.5rem;  /* 40 px */
+  --space-12: 3rem;    /* 48 px — między blokami */
+  --space-16: 4rem;    /* 64 px — tylko desktop */
+
+  /* --- promienie --- */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-full: 9999px;
+
+  /* --- obramowania, fokus --- */
+  --border-width: 1px;
+  --border-width-strong: 2px;
+  --border-width-accent: 4px;
+  --focus-width: 2px;   /* WCAG 2.4.13: >= 2 px */
+  --focus-offset: 2px;
+
+  /* --- rozmiary celów dotyku i elementów (WCAG 2.5.8 / zalecenie 44 px) --- */
+  --size-target-min: var(--space-6);  /* 24 px — twarde minimum AA */
+  --size-control: var(--space-10);    /* 40 px — standardowy przycisk/pole */
+  --size-target-cta: 2.75rem;         /* 44 px — CTA i pola na mobile */
+  --size-icon: var(--space-5);
+  --size-label-col: 8rem;             /* kolumna etykiet w tabeli-karcie */
+  --size-toast-max: 28rem;
+  --size-iframe-min: 32rem;
+
+  /* --- układ --- */
+  --container-max: 75rem;   /* 1200 px */
+  --container-narrow: 48rem; /* 768 px — formularze, tekst */
+  --gutter: var(--space-4);
+  --measure: 72ch;          /* maks. szerokość akapitu */
+  --grid-auto-min: 16rem;   /* minimalna szerokość komórki .grid-auto */
+
+  /* --- warstwy (z-index) --- */
+  --z-base: 0;
+  --z-raised: 10;
+  --z-sticky: 100;
+  --z-dropdown: 200;
+  --z-overlay: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+  --z-skip-link: 1000;
+
+  /* --- ruch --- */
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --duration-skeleton: 1500ms;
+  --ease-out: cubic-bezier(0, 0, 0.2, 1);
+  --opacity-pulse-low: 0.6;
+
+  /* ===================================================================
+     2. SEMANTIC — LIGHT (domyślny)
+     Podłoża: bg #FFFFFF (L=1,000), surface #F5F7FA (L=0,928),
+              sunken #EDF0F4 (L=0,869).
+     =================================================================== */
+
+  --color-bg: var(--white);
+  --color-surface: var(--slate-50);
+  --color-surface-raised: var(--white);
+  --color-surface-sunken: var(--slate-100);
+
+  /* tekst główny #1B2430 (L=0,017): bg 15,7 | surface 14,6 | sunken 13,7 */
+  --color-text: var(--slate-900);
+  /* tekst pomocniczy #4A5566 (L=0,089): bg 7,5 | surface 7,0 | sunken 6,6 */
+  --color-text-muted: var(--slate-700);
+
+  /* primary #1F4E8C (L=0,076): bg 8,3 | surface 7,7 | sunken 7,3 | info-bg 7,2 */
+  --color-primary: var(--blue-700);
+  /* biały napis na primary 8,3 | hover #173D70: 10,8 | active #12305A: 13,2 */
+  --color-primary-hover: var(--blue-800);
+  --color-primary-active: var(--blue-900);
+  --color-on-primary: var(--white);
+
+  /* secondary #3C6E71 (L=0,133): bg 5,7 | surface 5,3 */
+  --color-secondary: var(--steel-teal-700);
+  /* accent #0F766E (L=0,142): bg 5,5 | surface 5,1 (wykresy, ozdobniki) */
+  --color-accent: var(--teal-700);
+
+  /* sukces: tekst #1E6B3A (L=0,111): bg 6,5 | surface 6,1 | na success-bg 5,8 */
+  --color-success: var(--green-700);
+  --color-success-bg: var(--green-50);   /* L=0,885; tekst główny na nim 13,9 */
+  /* ostrzeżenie: #8A5A00 (L=0,127): bg 5,9 | surface 5,5 | na warning-bg 5,4 */
+  --color-warning: var(--amber-700);
+  --color-warning-bg: var(--amber-50);   /* L=0,902; tekst główny na nim 14,2 */
+  /* błąd: #B42318 (L=0,110): bg 6,6 | surface 6,1 | na danger-bg 5,7 */
+  --color-danger: var(--red-700);
+  --color-danger-bg: var(--red-50);      /* L=0,868; tekst główny na nim 13,7 */
+  /* biały na danger 6,6 | hover #912018: 8,7 */
+  --color-danger-hover: var(--red-800);
+  --color-on-danger: var(--white);
+  /* informacja = primary; tekst główny na info-bg 13,6 */
+  --color-info: var(--blue-700);
+  --color-info-bg: var(--blue-50);       /* L=0,864 */
+
+  /* obrys elementów UI #6B7685 (L=0,178): bg 4,6 | surface 4,3 | sunken 4,0 — wszystko >= 3:1 */
+  --color-border: var(--slate-500);
+  /* obrys DEKORACYJNY #D5DBE3: bg 1,4:1 — celowo < 3:1; tylko dla krawędzi
+     kart, separatorów i szkieletów, które nie niosą informacji (1.4.11 ich nie dotyczy) */
+  --color-border-subtle: var(--slate-200);
+
+  /* fokus = primary: bg 8,3 | surface 7,7 | sunken 7,3 | info-bg 7,2 | danger-bg 7,3 */
+  --color-focus: var(--blue-700);
+  /* link = primary (zawsze podkreślony — 1.4.1) */
+  --color-link: var(--blue-700);
+  --color-link-hover: var(--blue-800);   /* na bg 10,8 */
+
+  /* nieaktywne (wyłączone kontrolki są wyjęte z wymogu kontrastu, ale
+     zachowujemy czytelność): #4A5566 na #D5DBE3 = 5,4 */
+  --color-disabled-bg: var(--slate-200);
+  --color-disabled-fg: var(--slate-700);
+
+  /* neutralny status „nieznany”: #4A5566 na #EDF0F4 = 6,6 */
+  --color-neutral-bg: var(--slate-100);
+  --color-neutral-fg: var(--slate-700);
+
+  /* odwrócone (toast): biały na #1B2430 = 15,7 | link #8DB6F0 na #1B2430 = 7,5 */
+  --color-inverse-bg: var(--slate-900);
+  --color-inverse-text: var(--white);
+  --color-inverse-link: var(--sky-300);
+
+  --shadow-color: rgb(27 36 48 / 0.12);
+
+  /* ===================================================================
+     3. COMPONENT (wyprowadzone z SEMANTIC — bez własnych kolorów)
+     =================================================================== */
+
+  /* --- przyciski --- */
+  --button-primary-bg: var(--color-primary);
+  --button-primary-fg: var(--color-on-primary);
+  --button-primary-hover: var(--color-primary-hover);
+  --button-primary-active: var(--color-primary-active);
+  --button-secondary-fg: var(--color-primary);          /* na bg 8,3 */
+  --button-secondary-border: var(--color-primary);
+  --button-secondary-hover-bg: var(--color-info-bg);    /* primary na nim 7,2 */
+  --button-danger-bg: var(--color-danger);
+  --button-danger-fg: var(--color-on-danger);
+  --button-danger-hover: var(--color-danger-hover);
+  --button-disabled-bg: var(--color-disabled-bg);
+  --button-disabled-fg: var(--color-disabled-fg);
+
+  /* --- pola formularza --- */
+  --input-bg: var(--color-bg);
+  --input-fg: var(--color-text);
+  --input-border: var(--color-border);                  /* UI 4,6 na bg */
+  --input-focus: var(--color-focus);
+  --input-error: var(--color-danger);
+  --input-placeholder: var(--color-text-muted);         /* 7,5 na bg */
+  --input-disabled-bg: var(--color-disabled-bg);
+
+  /* --- karta --- */
+  --card-bg: var(--color-surface-raised);
+  --card-border: var(--color-border-subtle);
+  --card-border-hover: var(--color-primary);
+  --card-shadow: var(--shadow-sm);
+
+  /* --- odznaki statusów: tekst na tle (light) ---
+     ok      #1E6B3A na #E8F5EC 5,8
+     warn    #8A5A00 na #FDF3DC 5,4
+     error   #B42318 na #FDECEA 5,7
+     pending #1F4E8C na #E8F0FA 7,2
+     unknown #4A5566 na #EDF0F4 6,6   */
+  --badge-ok-bg: var(--color-success-bg);
+  --badge-ok-fg: var(--color-success);
+  --badge-warn-bg: var(--color-warning-bg);
+  --badge-warn-fg: var(--color-warning);
+  --badge-error-bg: var(--color-danger-bg);
+  --badge-error-fg: var(--color-danger);
+  --badge-pending-bg: var(--color-info-bg);
+  --badge-pending-fg: var(--color-info);
+  --badge-unknown-bg: var(--color-neutral-bg);
+  --badge-unknown-fg: var(--color-neutral-fg);
+
+  /* --- tabela --- */
+  --table-stripe: var(--color-surface);
+  --table-row-hover: var(--color-info-bg);
+  --table-header-border: var(--color-border);
+  --table-row-border: var(--color-border-subtle);
+
+  /* --- strefa upuszczania pliku ---
+     idle   obrys UI 4,6 (bg) / 4,3 (surface); tekst główny na surface 14,6
+     active primary na info-bg 7,2
+     error  danger na danger-bg 5,7 */
+  --dropzone-border: var(--color-border);
+  --dropzone-bg: var(--color-surface);
+  --dropzone-active-border: var(--color-primary);
+  --dropzone-active-bg: var(--color-info-bg);
+  --dropzone-error-border: var(--color-danger);
+  --dropzone-error-bg: var(--color-danger-bg);
+
+  /* --- kod i hash: tekst główny na sunken 13,7 --- */
+  --code-bg: var(--color-surface-sunken);
+  --code-fg: var(--color-text);
+  --code-border: var(--color-border-subtle);
+
+  /* --- postęp: wypełnienie primary na torze #D5DBE3 = 6,0; obrys toru 4,6 --- */
+  --progress-track: var(--color-border-subtle);
+  --progress-fill: var(--color-primary);
+  --progress-border: var(--color-border);
+
+  /* --- szkielet ładowania (dekoracyjny) --- */
+  --skeleton-bg: var(--color-border-subtle);
+
+  /* --- toast --- */
+  --toast-bg: var(--color-inverse-bg);
+  --toast-fg: var(--color-inverse-text);
+  --toast-action: var(--color-inverse-link);
+
+  /* --- ramka z raportem (raport rysuje własne tło — wymuszamy jasne płótno) --- */
+  --iframe-bg: var(--white);
+  --iframe-border: var(--color-border-subtle);
+
+  /* --- cienie (subtelne; bez glassmorphismu) --- */
+  --shadow-sm: 0 1px 2px var(--shadow-color);
+  --shadow-md: 0 4px 8px var(--shadow-color);
+
+  /* ===================================================================
+     TYPOGRAFIA — skala (rozmiar / interlinia wg raportu UX)
+     Nazwy zgodne z konwencją Tailwind v4 (--text-*, --text-*--line-height).
+     =================================================================== */
+  --text-xs: var(--fs-12);   --text-xs--line-height: var(--lh-16);   /* caption 12/16 */
+  --text-sm: var(--fs-14);   --text-sm--line-height: var(--lh-20);   /* small, mono 14/20 */
+  --text-base: var(--fs-16); --text-base--line-height: var(--lh-24); /* body 16/24 */
+  --text-lg: var(--fs-18);   --text-lg--line-height: var(--lh-28);   /* body-lg 18/28 */
+  --text-xl: var(--fs-20);   --text-xl--line-height: var(--lh-28);   /* h4 20/28 */
+  --text-2xl: var(--fs-24);  --text-2xl--line-height: var(--lh-32);  /* h3, h2 mobile 24/32 */
+  --text-3xl: var(--fs-30);  --text-3xl--line-height: var(--lh-38);  /* h2 30/38 */
+  --text-4xl: var(--fs-36);  --text-4xl--line-height: var(--lh-44);  /* h1 36/44 */
+
+  /* role nagłówków — mobile-first; od 640 px nadpisane niżej */
+  --heading-1-size: var(--fs-28);
+  --heading-1-lh: var(--lh-36);   /* h1 mobile 28/36 */
+  --heading-2-size: var(--fs-24);
+  --heading-2-lh: var(--lh-32);   /* h2 mobile 24/32 */
+  --heading-3-size: var(--text-2xl);
+  --heading-3-lh: var(--text-2xl--line-height);
+  --heading-4-size: var(--text-xl);
+  --heading-4-lh: var(--text-xl--line-height);
+}
+
+/* ---------------------------------------------------------------------
+   Od 640 px (sm): większe nagłówki i szerszy gutter
+   --------------------------------------------------------------------- */
+@media (min-width: 40em) {
+  :root {
+    --heading-1-size: var(--text-4xl);   /* 36/44 */
+    --heading-1-lh: var(--text-4xl--line-height);
+    --heading-2-size: var(--text-3xl);   /* 30/38 */
+    --heading-2-lh: var(--text-3xl--line-height);
+    --gutter: var(--space-6);
+  }
+}
+
+/* =====================================================================
+   SEMANTIC — DARK
+   Podłoża: bg #0F141B (L=0,0068), surface #18202B (L=0,0140),
+            raised #202A37 (L=0,0224). Sunken = bg.
+   UWAGA: poniższy blok występuje DWA razy (preferencja systemu oraz
+   data-theme="dark"). Każdą zmianę wykonuj w obu miejscach.
+   Kontrasty podano jako: bg | surface | raised.
+   ===================================================================== */
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --color-bg: var(--night-950);
+    --color-surface: var(--night-900);
+    --color-surface-raised: var(--night-800);
+    --color-surface-sunken: var(--night-950);
+
+    /* tekst #E6EBF2: 15,4 | 13,7 | 12,1 */
+    --color-text: var(--mist-100);
+    /* pomocniczy #A9B4C2: 8,8 | 7,8 | 6,9 */
+    --color-text-muted: var(--mist-300);
+
+    /* primary #8DB6F0: 8,9 | 7,9 | 7,0; przycisk: tekst #0F141B na primary 8,9,
+       hover #A9C8F5 10,8, active #7AA6E8 7,4 */
+    --color-primary: var(--sky-300);
+    --color-primary-hover: var(--sky-200);
+    --color-primary-active: var(--sky-400);
+    --color-on-primary: var(--night-950);
+
+    /* secondary #7FB8BB: 8,3 | 7,4 | 6,5 */
+    --color-secondary: var(--teal-300);
+    /* accent #5EEAD4: 12,5 | 11,1 | 9,8 */
+    --color-accent: var(--cyan-300);
+
+    /* sukces #7FD19A: 10,1 | 9,0 | 7,9; na success-bg #12281B 8,5 */
+    --color-success: var(--green-300);
+    --color-success-bg: var(--green-950);
+    /* ostrzeżenie #F2C46B: 11,3 | 10,1 | 8,9; na warning-bg #2A2210 9,7 */
+    --color-warning: var(--amber-300);
+    --color-warning-bg: var(--amber-950);
+    /* błąd #FF8A80: 8,1 | 7,2 | 6,4; na danger-bg #301816 7,3 */
+    --color-danger: var(--red-300);
+    --color-danger-bg: var(--red-950);
+    /* tekst #0F141B na danger 8,1 | hover #FFA8A0 10,0 */
+    --color-danger-hover: var(--red-200);
+    --color-on-danger: var(--night-950);
+    /* info #8DB6F0 na info-bg #14243A 7,5 */
+    --color-info: var(--sky-300);
+    --color-info-bg: var(--sky-950);
+
+    /* obrys UI #6F7B8C: 4,3 | 3,8 | 3,4 — wszystko >= 3:1 */
+    --color-border: var(--night-500);
+    --color-border-subtle: var(--night-700); /* dekoracyjny */
+
+    /* fokus #8DB6F0: 8,9 | 7,9 | 7,0 | info-bg 7,5 | danger-bg 8,0 */
+    --color-focus: var(--sky-300);
+    --color-link: var(--sky-300);
+    --color-link-hover: var(--sky-200);      /* na bg 10,8 */
+
+    /* #A9B4C2 na #202A37 = 6,9 */
+    --color-disabled-bg: var(--night-800);
+    --color-disabled-fg: var(--mist-300);
+    --color-neutral-bg: var(--night-800);
+    --color-neutral-fg: var(--mist-300);
+
+    /* toast: #0F141B na #E6EBF2 = 15,4 | link #1F4E8C na #E6EBF2 = 6,9 */
+    --color-inverse-bg: var(--mist-100);
+    --color-inverse-text: var(--night-950);
+    --color-inverse-link: var(--blue-700);
+
+    --shadow-color: rgb(0 0 0 / 0.5);
+  }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --color-bg: var(--night-950);
+  --color-surface: var(--night-900);
+  --color-surface-raised: var(--night-800);
+  --color-surface-sunken: var(--night-950);
+
+  --color-text: var(--mist-100);
+  --color-text-muted: var(--mist-300);
+
+  --color-primary: var(--sky-300);
+  --color-primary-hover: var(--sky-200);
+  --color-primary-active: var(--sky-400);
+  --color-on-primary: var(--night-950);
+
+  --color-secondary: var(--teal-300);
+  --color-accent: var(--cyan-300);
+
+  --color-success: var(--green-300);
+  --color-success-bg: var(--green-950);
+  --color-warning: var(--amber-300);
+  --color-warning-bg: var(--amber-950);
+  --color-danger: var(--red-300);
+  --color-danger-bg: var(--red-950);
+  --color-danger-hover: var(--red-200);
+  --color-on-danger: var(--night-950);
+  --color-info: var(--sky-300);
+  --color-info-bg: var(--sky-950);
+
+  --color-border: var(--night-500);
+  --color-border-subtle: var(--night-700);
+
+  --color-focus: var(--sky-300);
+  --color-link: var(--sky-300);
+  --color-link-hover: var(--sky-200);
+
+  --color-disabled-bg: var(--night-800);
+  --color-disabled-fg: var(--mist-300);
+  --color-neutral-bg: var(--night-800);
+  --color-neutral-fg: var(--mist-300);
+
+  --color-inverse-bg: var(--mist-100);
+  --color-inverse-text: var(--night-950);
+  --color-inverse-link: var(--blue-700);
+
+  --shadow-color: rgb(0 0 0 / 0.5);
+}

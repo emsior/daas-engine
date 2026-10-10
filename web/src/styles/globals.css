@@ -1,0 +1,4 @@
+/* Jedyny import stylów w layout.tsx. Kolejność: system projektowy (tailwind.css, który
+   ustala warstwy), potem uzupełnienia kokpitu w warstwie `components`. */
+@import "./tailwind.css";
+@import "./app.css" layer(components);
