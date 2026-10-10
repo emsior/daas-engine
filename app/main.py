@@ -19,6 +19,7 @@ from app.api.routes import LEGACY_PREFIXES, public_router, router
 from app.api.v1 import build_router as build_v1_router
 from app.control import db as control_db
 from app.control import service as control_service
+from app.control.executor import JobExecutor
 from app.control.mailer import build_mailer
 from app.control.tenancy import TenantRegistry
 from app.core.auth import API_KEY_HEADER
@@ -78,6 +79,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if settings.cloud and settings.daas_email_backend == "console":
             log.warning("DAAS_EMAIL_BACKEND=console: sign-in links are written to runtime/outbox/ and the log; "
                         "use smtp in production")
+        executor = JobExecutor(settings, app.state.db_sessionmaker, registry)
+        app.state.executor = executor
+        await executor.start()
         log.info(
             "DaaS Engine up · mode=%s · env=%s · api_key=%s", settings.daas_mode, settings.app_env,
             "set" if auth.configured else ("n/a" if settings.cloud else "MISSING"),
@@ -85,6 +89,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
+            await executor.stop()
             registry.close_all()
             await engine.dispose()
 

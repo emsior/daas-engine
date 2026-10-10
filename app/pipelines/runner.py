@@ -7,6 +7,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
@@ -24,6 +25,9 @@ from app.transforms.ecommerce_transform import transform_ecommerce
 from app.transforms.uksc_transform import transform_uksc
 
 log = logging.getLogger(__name__)
+
+#: `(procent 0-100, krotki komunikat)`; wolane z watku, w ktorym dziala run.
+ProgressCallback = Callable[[int, str], None]
 
 
 PIPELINES: dict[str, dict[str, Any]] = {
@@ -68,7 +72,17 @@ class PipelineRunner:
         return out
 
     # ------------------------------------------------------------------
-    def run(self, request: RunRequest) -> RunResult:
+    def run(self, request: RunRequest, on_progress: ProgressCallback | None = None) -> RunResult:
+        """Uruchamia pipeline. `on_progress(procent, komunikat)` jest wolane z watku runu na granicach etapow
+        (zrodlo+transformacja -> raport); wyjatek z callbacku nie przerywa runu."""
+        def progress(percent: int, message: str) -> None:
+            if on_progress is None:
+                return
+            try:
+                on_progress(percent, message)
+            except Exception:  # noqa: BLE001
+                log.warning("progress callback failed", exc_info=True)
+
         run_id = str(uuid.uuid4())
         started = datetime.utcnow()
         t0 = time.perf_counter()
@@ -76,6 +90,7 @@ class PipelineRunner:
         log.info("run start pipeline=%s run_id=%s", pipeline, run_id)
 
         try:
+            progress(10, "reading source")
             if self.settings.daas_policy_enforce:
                 from app.core.policy import Budget, ReadFile, enforce
                 audit_log_path = self.settings.audit_log_path
@@ -102,11 +117,13 @@ class PipelineRunner:
                 raise ValueError(f"unknown pipeline: {pipeline}")
             if src.data_status == DataStatus.BLOCKED_MISSING_SECRET and not src.records:
                 raise FileNotFoundError(src.detail)
+            progress(60, "metrics computed")
 
             rep = self.reports.write(
                 pipeline, run_id, src.data_status, metrics, src.detail, records, started,
                 client_name=request.client_name,
             )
+            progress(90, "report written")
             finished = datetime.utcnow()
             result = RunResult(
                 run_id=run_id,
