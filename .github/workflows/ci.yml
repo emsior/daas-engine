@@ -119,8 +119,6 @@ jobs:
     timeout-minutes: 25
     env:
       NEXT_TELEMETRY_DISABLED: "1"
-      E2E_WEB: http://127.0.0.1:3000
-      E2E_API: http://127.0.0.1:8000
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -141,67 +139,29 @@ jobs:
           echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
       - name: Install backend (runtime lock)
         run: pip install --require-hashes -r requirements.lock && pip install --no-deps -e .
-      - name: Install and build web
+      - name: Install web and Playwright (Chromium + system libraries)
         working-directory: web
-        env:
-          NEXT_PUBLIC_API_ORIGIN: http://127.0.0.1:8000
         run: |
           npm ci --no-audit --no-fund
-          npm run build
-      - name: Playwright (Chromium + system libraries)
-        working-directory: web
-        run: npx playwright install --with-deps chromium
-      - name: Start backend (DAAS_MODE=cloud, mail adapter console)
+          npx playwright install --with-deps chromium
+      # web/e2e/stack.sh: build kokpitu (NEXT_PUBLIC_API_ORIGIN pusty), API w DAAS_MODE=cloud z adapterem e-mail
+      # `console`, serwer standalone i proxy jednego originu (odtwarza Caddy: /api/* -> API, reszta -> kokpit).
+      - name: Start stack (API cloud + console mail, web, one-origin proxy)
         env:
-          DAAS_MODE: cloud
-          DAAS_EMAIL_BACKEND: console
-          DAAS_COOKIE_SECURE: "false"
-          DAAS_COCKPIT_ORIGIN: http://127.0.0.1:3000
-          APP_ENV: prod
-          APP_HOST: 127.0.0.1
-          APP_PORT: "8000"
-          # testy loguja sie wielokrotnie z jednego adresu: limity wylaczone (0), bez wplywu na kod produkcyjny
-          DAAS_RATE_LIMIT_IP_PER_MIN: "0"
-          DAAS_RATE_LIMIT_RUN_PER_MIN: "0"
-          DAAS_RATE_LIMIT_UPLOAD_PER_MIN: "0"
-          DAAS_RATE_LIMIT_AUTH_FAIL_PER_MIN: "0"
-          DAAS_RATE_LIMIT_MAGIC_EMAIL_PER_MIN: "0"
-          DAAS_RATE_LIMIT_MAGIC_IP_PER_MIN: "0"
+          PYTHON: python
         run: |
-          E2E_RUNTIME="$RUNNER_TEMP/daas-e2e"
-          mkdir -p "$E2E_RUNTIME"
-          echo "E2E_RUNTIME=$E2E_RUNTIME" >> "$GITHUB_ENV"
-          export DAAS_SECRET_KEY="$(openssl rand -hex 32)"
-          export DUCKDB_PATH="$E2E_RUNTIME/daas.duckdb" REPORTS_DIR="$E2E_RUNTIME/reports"
-          export DAAS_CONTROL_DB_URL="sqlite+aiosqlite:///$E2E_RUNTIME/control.db"
-          nohup python -m app.main > "$E2E_RUNTIME/api.log" 2>&1 &
-          for i in $(seq 1 40); do curl -sf "$E2E_API/ready" && break || sleep 1; done
-          curl -sf "$E2E_API/api/v1/health" | grep -q '"mode":"cloud"'
-      - name: Start web (standalone)
-        working-directory: web
-        env:
-          PORT: "3000"
-          HOSTNAME: 127.0.0.1
-          API_INTERNAL_ORIGIN: http://127.0.0.1:8000
-        run: |
-          cp -r public .next/standalone/public
-          mkdir -p .next/standalone/.next
-          cp -r .next/static .next/standalone/.next/static
-          nohup node .next/standalone/server.js > "$E2E_RUNTIME/web.log" 2>&1 &
-          for i in $(seq 1 40); do curl -sf "$E2E_WEB/login" -o /dev/null && break || sleep 1; done
-          curl -sf "$E2E_WEB/login" -o /dev/null
+          echo "E2E_RUNTIME=$RUNNER_TEMP/daas-e2e" >> "$GITHUB_ENV"
+          E2E_RUNTIME="$RUNNER_TEMP/daas-e2e" bash web/e2e/stack.sh start
       - name: E2E (Playwright)
         working-directory: web
         env:
           CI: "true"
-          E2E_BASE_URL: http://127.0.0.1:3000
-          E2E_API_URL: http://127.0.0.1:8000
+          E2E_BASE_URL: http://127.0.0.1:3100
         run: E2E_OUTBOX_DIR="$E2E_RUNTIME/outbox" npm run e2e
       - name: Server logs (on failure)
         if: failure()
         run: |
-          echo "--- api.log"; tail -n 200 "$E2E_RUNTIME/api.log" || true
-          echo "--- web.log"; tail -n 200 "$E2E_RUNTIME/web.log" || true
+          for f in api web proxy; do echo "--- $f.log"; tail -n 200 "$E2E_RUNTIME/$f.log" || true; done
       # Akcja przypieta do SHA v4.6.2. Podbija Dependabot (ekosystem github-actions).
       - name: Playwright report (artifact on failure)
         if: failure()
