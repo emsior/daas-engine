@@ -60,6 +60,11 @@ What to expect: an acknowledgement within 3 working days, an assessment and a fi
 These are accepted for 2.0 and documented so that nobody relies on more than is there:
 
 - Rate limits, the quota counter and pending webhook retries live in process memory: one worker only (the server refuses to start with more), counters reset on restart, and a restart drops retries in flight.
+- Webhook deliveries run in the application process and are not persisted: a restart loses retries still pending (only finished deliveries leave an audit entry).
+- Rotating `DAAS_SECRET_KEY` invalidates every webhook signing secret (secrets are derived from it) as well as all sessions; webhooks must be re-created to get new secrets.
+- Webhook addresses are checked when registered and resolved again at every delivery, but there is no pinning of the resolved address: a DNS rebinding race between the check and the connection is not excluded.
+- The webhook signature covers the body only. A captured delivery can be replayed; receivers should deduplicate on `X-DaaS-Delivery`.
+- The upload byte quota (storage and monthly plan limit) is enforced while streaming, but the monthly plan check before the request uses the declared `Content-Length` and is therefore approximate.
 - One node. The control database is SQLite in a volume; there is no failover. Jobs running during a restart end as `failed` with code `abandoned`.
 - The `console` mail adapter writes sign-in links to the log and to `runtime/outbox/`. It is for trials and end-to-end tests only; production needs `DAAS_EMAIL_BACKEND=smtp`.
 - Behind a proxy the application trusts `X-Forwarded-For` from the compose network (`FORWARDED_ALLOW_IPS=*`). That is safe only while the API port is not reachable by untrusted hosts; do not publish it on a public interface.
