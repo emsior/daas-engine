@@ -18,6 +18,17 @@ import type { Me } from "@/lib/api/types";
 
 const EMAIL_ID = "login-email";
 const TOKEN_ID = "login-token";
+/** Znacznik (bez tokena) że ekran potwierdzenia był otwarty: po odświeżeniu token jest utracony. */
+const CONFIRM_MARK = "daas.login.confirm";
+
+function markConfirm(on: boolean) {
+  try {
+    if (on) window.sessionStorage.setItem(CONFIRM_MARK, "1");
+    else window.sessionStorage.removeItem(CONFIRM_MARK);
+  } catch {
+    // pamięć sesji może być zablokowana: komunikat po odświeżeniu jest tylko ułatwieniem
+  }
+}
 
 function LoginView() {
   const t = useT();
@@ -35,7 +46,9 @@ function LoginView() {
   const [tokenOpen, setTokenOpen] = useState(false);
   const autoVerified = useRef(false);
   // link otwarty w innej przeglądarce niż ta, która go zamówiła: backend żąda jawnego potwierdzenia
+  // token trzymamy wyłącznie w stanie: adres jest czyszczony od razu po odczytaniu (historia, pasek adresu)
   const [pending, setPending] = useState<{ token: string; hint: string | null } | null>(null);
+  const [linkLost, setLinkLost] = useState(false);
 
   const tokenFromUrl = params.get("token");
 
@@ -51,12 +64,17 @@ function LoginView() {
     verify.mutate(
       { token: value, confirm },
       {
-        onSuccess: goAfterLogin,
+        onSuccess: (me) => {
+          markConfirm(false);
+          goAfterLogin(me);
+        },
         onError: (error) => {
           if (!confirm && isApiError(error) && error.code === "confirm_required") {
+            markConfirm(true);
             setPending({ token: value, hint: error.emailHint });
             return;
           }
+          markConfirm(false);
           setPending(null);
           failVerify();
         },
@@ -65,16 +83,29 @@ function LoginView() {
   };
 
   const cancelConfirm = () => {
+    markConfirm(false);
     setPending(null);
     setErrors({});
-    router.replace("/login"); // zdejmuje token z adresu
   };
 
-  // link z wiadomości prowadzi na /login?token=... : weryfikujemy automatycznie (raz)
+  // link z wiadomości prowadzi na /login?token=... : weryfikujemy automatycznie (raz),
+  // a token od razu przenosimy do stanu i zdejmujemy z adresu (też przy powodzeniu)
   useEffect(() => {
-    if (!tokenFromUrl || autoVerified.current) return;
+    if (autoVerified.current) return;
+    if (tokenFromUrl) {
+      autoVerified.current = true;
+      router.replace("/login");
+      verifyToken(tokenFromUrl);
+      return;
+    }
+    // bez tokena w adresie: jeśli ekran potwierdzenia był otwarty, odświeżenie zgubiło token
     autoVerified.current = true;
-    verifyToken(tokenFromUrl);
+    try {
+      if (window.sessionStorage.getItem(CONFIRM_MARK)) queueMicrotask(() => setLinkLost(true));
+    } catch {
+      // brak dostępu do pamięci sesji
+    }
+    markConfirm(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenFromUrl]);
 
@@ -161,7 +192,13 @@ function LoginView() {
         <ErrorSummary title={t("form.summaryTitle")} errors={summary} focusKey={attempt} />
       ) : null}
 
-      {verify.isPending && tokenFromUrl ? (
+      {linkLost && !sentTo ? (
+        <Alert variant="warning" role="status">
+          <p>{t("login.confirm.lost")}</p>
+        </Alert>
+      ) : null}
+
+      {verify.isPending ? (
         <Alert variant="info" role="status">
           <p>{t("login.verifying")}</p>
         </Alert>

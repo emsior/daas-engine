@@ -79,6 +79,7 @@
   "login.confirm.submit": "Zaloguj jako {email}",
   "login.confirm.cancel": "To nie ja, wróć",
   "login.confirm.unknownAddress": "ten adres",
+  "login.confirm.lost": "Link wygasł lub został już użyty. Wyślij nowy.",
   "login.lead": "Podaj adres e-mail. Wyślemy jednorazowy link logowania, hasło nie jest potrzebne.",
   "login.email": "Adres e-mail",
   "login.email.hint": "Np. imie@firma.pl",

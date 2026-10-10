@@ -79,6 +79,7 @@
   "login.confirm.submit": "Sign in as {email}",
   "login.confirm.cancel": "Not me, go back",
   "login.confirm.unknownAddress": "this address",
+  "login.confirm.lost": "The link has expired or was already used. Request a new one.",
   "login.lead": "Enter your email address. We will send a one-time sign-in link, no password needed.",
   "login.email": "Email address",
   "login.email.hint": "For example name@company.com",

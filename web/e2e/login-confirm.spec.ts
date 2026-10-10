@@ -15,6 +15,7 @@ test("link otwarty w tej samej przeglądarce loguje bez dodatkowego ekranu (adre
   const token = await requestLink(page, uniqueEmail("same"));
   await page.goto(`/login/verify?token=${token}`);
   await expect(page).toHaveURL(/\/onboarding$/);
+  expect(page.url()).not.toContain("token=");
 });
 
 test("link otwarty w innej przeglądarce wymaga potwierdzenia: ekran, zamaskowany adres, przycisk", async ({
@@ -34,6 +35,9 @@ test("link otwarty w innej przeglądarce wymaga potwierdzenia: ekran, zamaskowan
   });
   await expect(heading).toBeVisible();
   await expect(heading).toBeFocused();
+  // token siedzi w stanie strony, nie w pasku adresu ani historii
+  await expect(other).toHaveURL(/\/login$/);
+  expect(other.url()).not.toContain("token=");
   // adres jest zamaskowany: pełny e-mail nie pojawia się na ekranie
   await expect(other.locator("main")).not.toContainText(email);
   await expect(other.locator("main")).toContainText("@");
@@ -42,6 +46,7 @@ test("link otwarty w innej przeglądarce wymaga potwierdzenia: ekran, zamaskowan
 
   await other.getByRole("button", { name: /^Zaloguj jako/ }).click();
   await expect(other).toHaveURL(/\/onboarding$/);
+  expect(other.url()).not.toContain("token=");
 
   // link jest jednorazowy: powtórne użycie w pierwszej przeglądarce kończy się błędem
   await page.goto(`/login?token=${token}`);
@@ -66,6 +71,24 @@ test("„To nie ja”: rezygnacja wraca do formularza i zdejmuje token z adresu"
   // prawowity właściciel nadal może użyć linku
   await page.goto(`/login?token=${token}`);
   await expect(page).toHaveURL(/\/onboarding$/);
+});
+
+test("odświeżenie na ekranie potwierdzenia gubi token: komunikat „Link wygasł…”, brak tokena w adresie", async ({
+  page,
+  browser,
+  baseURL,
+}) => {
+  const token = await requestLink(page, uniqueEmail("reload"));
+  const otherContext = await browser.newContext({ baseURL, locale: "pl-PL" });
+  const other = await otherContext.newPage();
+  await other.goto(`/login/verify?token=${token}`);
+  await expect(other.getByRole("button", { name: /^Zaloguj jako/ })).toBeVisible();
+
+  await other.reload();
+  await expect(other.getByRole("heading", { name: "Zaloguj się", level: 1 })).toBeVisible();
+  await expect(other.getByText("Link wygasł lub został już użyty. Wyślij nowy.")).toBeVisible();
+  expect(other.url()).not.toContain("token=");
+  await otherContext.close();
 });
 
 test("ekran potwierdzenia po angielsku", async ({ page, browser, baseURL }) => {
