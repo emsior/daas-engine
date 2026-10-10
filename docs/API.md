@@ -232,11 +232,30 @@ def valid(secret: str, raw_body: bytes, header: str) -> bool:
     return hmac.compare_digest(expected, header)
 ```
 
-Delivery rules: success is any `2xx` within 5 seconds; redirects are not followed; up to 3 attempts with the pauses from `DAAS_WEBHOOK_BACKOFF_SEC` (default `1,5,25`); pending retries are kept in memory and do not survive a restart. Outside `APP_ENV=dev` the URL must be `https` and resolve only to public addresses (SSRF protection); at most 10 webhooks per organization. Use `X-DaaS-Delivery` to deduplicate.
+Delivery rules: success is any `2xx` within 5 seconds; redirects are not followed; at most 3 attempts in total, with the pauses from `DAAS_WEBHOOK_BACKOFF_SEC` (default `1,5,25`); pending retries are kept in memory and do not survive a restart. Use `X-DaaS-Delivery` to deduplicate. The signature covers the body only, not the timestamp header.
+
+Registration rules:
+
+- The URL must be `https`, carry no credentials and resolve only to public addresses (SSRF protection); outside `APP_ENV=dev` anything else answers `422 webhook_url_invalid` with a `reason_code` (`https_required`, `private_address`, `credentials_in_url`, `url_malformed`).
+- At most 10 webhooks per organization (`409 webhook_limit_reached`); the same URL twice answers `409 webhook_exists`.
+- The signing secret is derived from `DAAS_SECRET_KEY`; without that setting creation answers `503 webhooks_unavailable`.
+
+Test call: `POST .../webhooks/{webhook_id}/ping` sends one signed `ping` event (single attempt, body `{"event":"ping","org_id":"..."}`) and answers `{"delivered": true, "status": 200}`; `status` is the receiver's HTTP status, or `null` when the address or network failed.
 
 ## Usage and plan limits
 
-`GET /api/v1/orgs/{org_id}/usage` returns runs and uploaded bytes for the current and the previous calendar month (UTC) and the limits of the plan:
+`GET /api/v1/orgs/{org_id}/usage` (scope `usage:read`):
+
+```json
+{
+  "org_id": "01J...", "plan": "free", "retention_days": 90,
+  "current":  {"period": "2026-10", "runs": 3, "upload_bytes": 1048576},
+  "previous": {"period": "2026-09", "runs": 12, "upload_bytes": 52428800},
+  "limits":   {"runs_per_month": 20, "upload_bytes_per_month": 209715200}
+}
+```
+
+Periods are calendar months in UTC (`YYYY-MM`); a limit of `null` means unlimited.
 
 | Plan | Runs per month | Uploaded bytes per month |
 |---|---|---|
@@ -244,8 +263,31 @@ Delivery rules: success is any `2xx` within 5 seconds; redirects are not followe
 | `pro` | 500 | 5 GiB |
 | `selfhost` | unlimited | unlimited |
 
-When a limit is used up, `POST .../jobs` and `POST .../uploads` answer `429` with `code: plan_limit`. There is no online payment in 2.0.
+When a limit is used up, `POST .../jobs` and `POST .../uploads` answer `429` with `code: plan_limit` and these extra fields:
+
+```json
+{"code": "plan_limit", "status": 429, "detail": "monthly runs limit of the free plan reached",
+ "plan": "free", "resource": "runs", "limit": 20, "used": 20, "period": "2026-10"}
+```
+
+`resource` is `runs` or `upload_bytes`. Queued and running jobs count towards the run limit. The upload check uses the declared `Content-Length`, so it is approximate. A caller without access to the organization gets `404`/`403`, never `429`. There is no online payment in 2.0.
 
 ## Audit log
 
-`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (`limit` 1-200). Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `auth.login`, `auth.logout`, `auth_denied`. `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
+`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (scope `audit:read`; `limit` 1-200, default 50). Ordered by `(ts, id)` descending. The response is `{"items": [...], "next_cursor": "..." | null}`; the cursor is an opaque base64url value (an encoded `[ts, id]` pair): pass it back unchanged. A malformed cursor answers `422 invalid_cursor`. Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `auth.login`, `auth.logout`, `auth_denied`. `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
+
+## Metrics
+
+`GET /metrics` (root path, not under `/api/v1`) returns Prometheus text format 0.0.4. It needs `Authorization: Bearer <DAAS_METRICS_TOKEN>`; a wrong or missing token answers `401`, and when no token is configured the route answers `404`. Expose it only on loopback (the bundled Caddyfile hides it). Labels never carry customer data.
+
+| Metric | Type | Labels |
+|---|---|---|
+| `daas_build_info` | gauge | version, mode |
+| `daas_http_requests_total` | counter | `route` (template), `status` |
+| `daas_http_request_duration_seconds` | histogram | `route` (template), `le` |
+| `daas_jobs` | gauge | status (`queued`, `running`, `succeeded`, `failed`, `cancelled`) |
+| `daas_active_tenants` | gauge | none |
+
+```bash
+curl -sS -H "Authorization: Bearer $DAAS_METRICS_TOKEN" http://127.0.0.1:8000/metrics
+```
