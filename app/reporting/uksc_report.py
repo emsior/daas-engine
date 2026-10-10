@@ -1,7 +1,7 @@
-"""Render Markdown raportu 'Dowód UKSC' (HTML powstaje z tego MD przez app.reporting.html).
+"""Render Markdown raportu 'Raport statusu UKSC' (HTML powstaje z tego MD przez app.reporting.html).
 
 Struktura celowo pod czytelnika-kierownika (art. 73a) i kontrolera (art. 10):
-1. Podsumowanie   2. Kontrola -> artykuł -> status -> dowód   3. Do poświadczenia ręcznie
+1. Podsumowanie   2. Kontrola -> artykuł -> status -> artefakt   3. Do poświadczenia ręcznie
 4. Diff vs poprzedni run   5. Metryka paczki (integralność)
 Słownictwo: "dokumentuje", "wykazuje", "wymaga poświadczenia". Nigdy: "certyfikuje", "gwarantuje zgodność".
 Nazwy kontroli po polsku: app.reporting.uksc_pl (dane w paczce zostają w ASCII).
@@ -32,7 +32,7 @@ def render_uksc_markdown(payload: dict[str, Any], m: UkscMetrics) -> str:
     src = md_text(payload.get("source_detail") or "")
     host = md_text(m.host)
     lines: list[str] = []
-    lines.append(f"# Dowód UKSC — raport zgodności technicznej stacji `{md_code(m.host)}`")
+    lines.append(f"# Raport statusu UKSC — artefakty techniczne stacji `{md_code(m.host)}`")
     lines.append("")
     lines.append(f"> {md_text(payload.get('narrative', ''))}")
     if payload.get("narrative_source") == "LLM":
@@ -63,7 +63,7 @@ def render_uksc_markdown(payload: dict[str, Any], m: UkscMetrics) -> str:
     lines.append("## 3. Kontrole do naprawy (FAIL / WARN)")
     lines.append("")
     if m.failed_controls:
-        lines.append("| ID | Kontrola | Odniesienie | Status | Próg referencyjny | Dowód |")
+        lines.append("| ID | Kontrola | Odniesienie | Status | Próg referencyjny | Artefakt |")
         lines.append("|---|---|---|---|---|---|")
         for c in m.failed_controls:
             lines.append(f"| {md_text(c['control_id'])} | {md_text(uksc_pl.title(c['control_id'], c['title']))} | "
@@ -95,12 +95,12 @@ def render_uksc_markdown(payload: dict[str, Any], m: UkscMetrics) -> str:
         lines.append(f"- Regresje (PASS → FAIL/WARN): {md_text(', '.join(d['regressed'])) or 'brak'}")
         lines.append(f"- Nowe kontrole: {md_text(', '.join(d['new_controls'])) or 'brak'} · Usunięte: {md_text(', '.join(d['removed_controls'])) or 'brak'}")
         lines.append("")
-    lines.append("## Metryka paczki dowodowej")
+    lines.append("## Metryka paczki artefaktów")
     lines.append("")
     lines.append(f"- `package_sha256`: `{md_code(m.package_sha256 or 'brak')}`")
     lines.append(f"- Integralność paczki przy imporcie: **{md_text(m.integrity or 'nieznana')}**")
     lines.append("- Weryfikacja: sha256 z posortowanej konkatenacji `evidence_hash` wszystkich kontroli "
-                 "(każdy `evidence_hash` = sha256 kanonicznego JSON dowodu) musi dać powyższy `package_sha256`.")
+                 "(każdy `evidence_hash` = sha256 kanonicznego JSON artefaktu) musi dać powyższy `package_sha256`.")
     lines.append("")
     lines.append("Raport jest zapisem operacyjnym w rozumieniu art. 10 UKSC: stan techniczny stacji w chwili zebrania, "
                  "z hashem paczki weryfikowalnym niezależnie. Nie stanowi oceny prawnej ani potwierdzenia wdrożenia SZBI.")
