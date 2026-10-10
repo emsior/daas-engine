@@ -79,12 +79,15 @@ _WS = "[ \t\u00a0\u202f\u2009]"
 _AFFIX_ITEM = r"(?:z[łl]|pln|eur|usd|gbp|chf|czk|brutto|netto|szt|sztuk|pcs|[$€£¥%])\.?"
 _AFFIX = rf"(?:{_AFFIX_ITEM}{_WS}*)*"
 _AFFIX_ONLY_RE = re.compile(rf"{_WS}*{_AFFIX}", re.IGNORECASE)
+#: Liczba z opcjonalnym znakiem, ozdobnikami po obu stronach. Czesc `num` zaczyna sie cyfra (albo `.`/`,` i cyfra) i
+#: pochlania takze koncowe biale znaki, wiec miedzy nia a `_AFFIX` nie ma drugiego `{_WS}*` (nakladajace sie
+#: kwantyfikatory dawaly czas kwadratowy, ReDoS). `_digits_to_float` obcina brzegowe spacje i waliduje grupowanie.
 _CORE_RE = re.compile(
-    rf"(?P<sign>[-+])?{_WS}*{_AFFIX}(?P<num>[0-9.,\u00a0\u202f\u2009 \t]*[0-9][0-9.,\u00a0\u202f\u2009 \t]*?)"
-    rf"{_WS}*{_AFFIX}",
+    rf"(?P<sign>[-+])?{_WS}*{_AFFIX}(?P<num>[.,]?[0-9][0-9.,\u00a0\u202f\u2009 \t]*){_AFFIX}",
     re.IGNORECASE,
 )
-_ACCOUNTING_RE = re.compile(r"\(\s*([^()]*?)\s*\)\s*([^()]*)")
+#: Komorka dluzsza niz to (po strip) nie jest liczba: `(None, FLAG_INVALID)` przed jakimkolwiek regexem.
+MAX_NUMBER_CELL_CHARS = 64
 _SCI_RE = re.compile(r"[-+]?(?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)[eE][-+]?[0-9]+")
 _THOUSANDS_RE = {
     sep: re.compile(rf"[0-9]{{1,3}}(?:{re.escape(sep)}[0-9]{{3}})+") for sep in (",", ".", " ")
@@ -94,6 +97,14 @@ _THOUSANDS_RE = {
 FLAG_INVALID = "invalid"          # nie da sie odczytac jednoznacznie -> wartosc None
 FLAG_AMBIGUOUS = "ambiguous"      # "1,299" / "1.299": odczytano jako dziesietne (konwencja PL), ale moze to byc tysiac
 FLAG_DOT_THOUSANDS = "dot_thousands"   # "1.234.567": kropki jako separator tysiecy
+
+
+def _split_accounting(s: str) -> tuple[str, str] | None:
+    """`(wnetrze) ogon` -> (wnetrze, ogon) bez regexu (jeden nawias otwierajacy na poczatku, jeden zamykajacy)."""
+    if not s.startswith("(") or s.count("(") != 1 or s.count(")") != 1:
+        return None
+    close = s.index(")")
+    return s[1:close].strip(), s[close + 1:].strip()
 
 
 def _norm(s: str) -> str:
@@ -157,6 +168,8 @@ def parse_number(v: Any) -> tuple[float | None, str | None]:
     s = str(v).strip()
     if not s or s.lower() in _NUM_NULLS:
         return None, None
+    if len(s) > MAX_NUMBER_CELL_CHARS:
+        return None, FLAG_INVALID  # twardy limit przed regexami: jedna komorka nie moze zajac watku
     m = _PLAIN_NUM_RE.fullmatch(s)
     if m and not (m.group(2) and len(m.group(2)) == 3 and len(m.group(1)) <= 3 and m.group(1)[0] != "0"):
         return float(s), None
@@ -166,12 +179,11 @@ def parse_number(v: Any) -> tuple[float | None, str | None]:
         return (f, None) if math.isfinite(f) else (None, FLAG_INVALID)
     negative = False
     if "(" in s or ")" in s:
-        acc = _ACCOUNTING_RE.fullmatch(s)
+        acc = _split_accounting(s)
         # nawias tylko jako opakowanie calej liczby (+ ewentualna waluta za nawiasem), bez wlasnego znaku w srodku
-        if not acc or not s.startswith("(") or re.search(r"[-+]", acc.group(1)) \
-                or not _AFFIX_ONLY_RE.fullmatch(acc.group(2)):
+        if acc is None or re.search(r"[-+]", acc[0]) or not _AFFIX_ONLY_RE.fullmatch(acc[1]):
             return None, FLAG_INVALID
-        negative, s = True, f"{acc.group(1)} {acc.group(2)}"
+        negative, s = True, f"{acc[0]} {acc[1]}"
     core = _CORE_RE.fullmatch(s.strip())
     if not core:
         return None, FLAG_INVALID

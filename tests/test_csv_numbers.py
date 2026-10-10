@@ -100,3 +100,58 @@ def test_jednoznaczne_formaty_nie_ostrzegaja(values):
 def test_wartosci_niejednoznaczne_sa_czytane_wg_konwencji_pl_lub_tysiecy():
     out, _ = map_dataframe(_frame(kwota=["1.234.567", "1,299", "1.299"]))
     assert out["revenue"].tolist() == [1234567.0, 1.299, 1.299]
+
+
+# ---------------------------------------------------------------- ReDoS: czas parsowania nie zalezy kwadratowo od dlugosci
+import time  # noqa: E402
+
+from app.sources.csv_mapper import FLAG_INVALID, parse_number  # noqa: E402
+
+ADVERSARIAL = {
+    "digits": lambda n: "1" * n + "x",
+    "spaces": lambda n: "1" + " " * n + "x",
+    "commas": lambda n: "1," * n + "x",
+    "dots": lambda n: "1." * n + "x",
+    "paren_spaces": lambda n: "(" + " " * n + "x",
+    "affix_spaces": lambda n: "zł" + " " * n + "1" + " " * n + "x",
+    "long_valid_digits": lambda n: "1" * n,
+}
+
+
+@pytest.mark.parametrize("kind", sorted(ADVERSARIAL))
+@pytest.mark.parametrize("n", [20_000, 200_000])
+def test_parse_number_is_fast_on_adversarial_input(kind, n):
+    raw = ADVERSARIAL[kind](n)
+    started = time.perf_counter()
+    value, flag = parse_number(raw)
+    assert time.perf_counter() - started < 0.5
+    assert value is None and flag == FLAG_INVALID
+
+
+@pytest.mark.parametrize("kind", ["digits", "spaces", "commas", "dots", "paren_spaces"])
+def test_regexes_alone_are_not_quadratic_even_below_the_length_cap(kind):
+    """Zabezpieczenie niezalezne od limitu dlugosci: sam wzorzec ma byc liniowy (limit nie moze go maskowac)."""
+    from app.sources import csv_mapper as cm
+
+    s = ADVERSARIAL[kind](20_000)
+    started = time.perf_counter()
+    cm._CORE_RE.fullmatch(s)
+    if s.startswith("("):
+        cm._split_accounting(s)
+    assert time.perf_counter() - started < 0.5
+
+
+def test_cell_longer_than_64_chars_is_invalid_and_counted_in_the_warning():
+    assert parse_number("1" * 65) == (None, FLAG_INVALID)
+    assert parse_number(" " * 10 + "1" * 64 + " " * 10)[0] == pytest.approx(float("1" * 64))  # limit liczy po strip
+    out, rep = map_dataframe(_frame(kwota=["100", "1" * 500, "200"]))
+    assert out["revenue"].tolist() == [100.0, 200.0]
+    assert any("kwota" in w and "nie da się" in w for w in rep.warnings)
+
+
+def test_series_with_a_huge_cell_is_fast():
+    col = pd.Series(["100", "1" * 100_000 + "x", "1" + " " * 100_000 + "x", "7 255,95"], dtype=object)
+    started = time.perf_counter()
+    res = to_number_series(col)
+    assert time.perf_counter() - started < 0.5
+    assert res.tolist()[0] == 100.0 and res.isna().tolist() == [False, True, True, False]
