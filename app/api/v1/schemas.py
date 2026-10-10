@@ -342,3 +342,24 @@ class WebhookPing(BaseModel):
     delivered: bool
     status_code: int | None = None
     error: str | None = None
+
+
+# ----------------------------------------------------------------------------- usage / limity planu (A1, 10.10)
+class UsagePeriod(BaseModel):
+    period: str = Field(..., examples=["2026-10"], description="miesiac kalendarzowy UTC, `YYYY-MM`")
+    runs: int
+    upload_bytes: int
+
+
+class PlanLimitsOut(BaseModel):
+    runs_per_month: int | None = Field(default=None, description="`null` = bez limitu")
+    upload_bytes_per_month: int | None = Field(default=None, description="`null` = bez limitu")
+
+
+class UsageReport(BaseModel):
+    org_id: str
+    plan: str
+    retention_days: int
+    current: UsagePeriod
+    previous: UsagePeriod
+    limits: PlanLimitsOut
