@@ -32,7 +32,7 @@ jobs:
         run: pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
       - name: OPSEC check
         run: |
-          ! git grep -iE "mcq08[9]|bukmache[r]|bettin[g]|CS2Op[s]" -- ':!*.png' ':!*.mp4'
+          ! git grep -iE "mcq08[9]|bukmache[r]|bettin[g]|CS2Op[s]|Micha[łl]" -- ':!*.png' ':!*.mp4'
       - name: Lint (ruff)
         run: ruff check --output-format=github .
       - name: Tests (mock mode — no secrets)

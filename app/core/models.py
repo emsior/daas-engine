@@ -197,7 +197,7 @@ class EcommerceMetrics(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# UKSC EVIDENCE (dowody zgodnosci technicznej ze stacji Windows)
+# UKSC EVIDENCE (artefakty techniczne stacji (raport statusu))
 # ---------------------------------------------------------------------------
 UKSC_SCHEMA_VERSION = "1.0"
 

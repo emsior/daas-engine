@@ -86,7 +86,7 @@ tests\test_security.py ........                                          [100%]
 ## 6. Wynik Bezpieczeństwa
 - **Path Traversal:** Zablokowany. Wszelkie próby przekazania ścieżek systemowych lub wyjścia z `uploads/` skutkują statusem `BLOCKED_MISSING_SECRET` / błędem kontrolowanym.
 - **Wyciek danych osobowych (PII):** 0 trafień zakazanego nazwiska i starego adresu e-mail w kodzie źródłowym i konfiguracjach.
-- **Słownictwo hazardowe:** 0 wystąpień zakazanych fraz w kodzie i dokumentacji (zgodność z art. 110a k.k.s.).
+- **Słownictwo hazardowe:** 0 wystąpień zakazanych fraz w kodzie i dokumentacji (ze względów prawnych).
 - **Sekrety:** `.env` i `.secrets/` pozostają nienaruszone i chronione przez `.gitignore`.
 
 ---
