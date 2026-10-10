@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildCsp, generateNonce, isPublicPath } from "./security";
+import { buildCsp, forwardedHeaders, generateNonce, isPublicPath } from "./security";
 
 describe("CSP", () => {
   const csp = buildCsp({ nonce: "NONCE", apiOrigin: "http://127.0.0.1:8000" });
@@ -40,5 +40,22 @@ describe("CSP", () => {
     expect(isPublicPath("/dpa")).toBe(true);
     expect(isPublicPath("/upload")).toBe(false);
     expect(isPublicPath("/loginx")).toBe(false);
+  });
+});
+
+describe("forwardedHeaders", () => {
+  it("przekazuje pierwszy adres klienta i protokół z żądania", () => {
+    const headers = new Headers({
+      "x-forwarded-for": "203.0.113.7, 10.0.0.2",
+      "x-forwarded-proto": "https",
+    });
+    expect(forwardedHeaders(headers, "http:")).toEqual({
+      "x-forwarded-for": "203.0.113.7",
+      "x-forwarded-proto": "https",
+    });
+  });
+
+  it("bez nagłówków nie zgaduje adresu, a protokół bierze ze schematu adresu", () => {
+    expect(forwardedHeaders(new Headers(), "https:")).toEqual({ "x-forwarded-proto": "https" });
   });
 });

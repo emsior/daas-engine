@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   formatBytes,
   formatDate,
+  formatDateRange,
   formatDateTime,
   formatNumber,
   formatPLN,
@@ -50,5 +51,20 @@ describe("format", () => {
   it("formatuje rozmiary plików", () => {
     expect(formatBytes(512)).toBe("512 B");
     expect(formatBytes(10 * 1024 * 1024)).toBe("10 MB");
+  });
+});
+
+describe("formatDateRange", () => {
+  it("formatuje zakres po polsku dd.mm.rrrr", () => {
+    expect(formatDateRange("2026-08-03", "2026-08-31")).toBe("03.08.2026 – 31.08.2026");
+  });
+  it("jedna data, gdy początek = koniec lub znamy tylko jeden koniec", () => {
+    expect(formatDateRange("2026-08-03", "2026-08-03")).toBe("03.08.2026");
+    expect(formatDateRange("2026-08-03", null)).toBe("03.08.2026");
+    expect(formatDateRange(undefined, "2026-08-31")).toBe("31.08.2026");
+  });
+  it("null tylko gdy brak obu końców (wtedy widok pokazuje „Brak zakresu”)", () => {
+    expect(formatDateRange(null, null)).toBeNull();
+    expect(formatDateRange(undefined, "")).toBeNull();
   });
 });

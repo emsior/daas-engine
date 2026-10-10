@@ -7,7 +7,13 @@
  */
 import { NextResponse, type NextRequest } from "next/server";
 import { API_ORIGIN, API_PREFIX, LANG_COOKIE } from "@/lib/env";
-import { SECURITY_HEADERS, buildCsp, generateNonce, isPublicPath } from "@/lib/security";
+import {
+  SECURITY_HEADERS,
+  buildCsp,
+  forwardedHeaders,
+  generateNonce,
+  isPublicPath,
+} from "@/lib/security";
 import { normalizeLocale } from "@/i18n";
 
 const SESSION_CHECK_TIMEOUT_MS = 3000;
@@ -17,7 +23,11 @@ async function sessionRejected(request: NextRequest): Promise<boolean> {
   const base = process.env.API_INTERNAL_ORIGIN || API_ORIGIN || request.nextUrl.origin;
   try {
     const response = await fetch(`${base.replace(/\/+$/, "")}${API_PREFIX}/me`, {
-      headers: { cookie: request.headers.get("cookie") ?? "", accept: "application/json" },
+      headers: {
+        cookie: request.headers.get("cookie") ?? "",
+        accept: "application/json",
+        ...forwardedHeaders(request.headers, request.nextUrl.protocol),
+      },
       cache: "no-store",
       signal: AbortSignal.timeout(SESSION_CHECK_TIMEOUT_MS),
     });

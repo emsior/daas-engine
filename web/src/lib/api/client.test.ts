@@ -142,6 +142,8 @@ describe("client API", () => {
             status: "SUCCESS",
             created_at: "2026-10-10T01:00:00Z",
             job_id: "j1",
+            period_from: "2026-08-03",
+            period_to: "2026-08-31",
             report_sha256: { html: "a".repeat(64), md: null, json: "b".repeat(64) },
             links: {},
           },
@@ -153,6 +155,7 @@ describe("client API", () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]?.report_sha256).toEqual({ html: "a".repeat(64), json: "b".repeat(64) });
     expect(runs[0]?.metrics).toEqual({});
+    expect(runs[0]).toMatchObject({ period_from: "2026-08-03", period_to: "2026-08-31" });
   });
 
   it("getRun przenosi metryki skalarne i liczbę rekordów", async () => {

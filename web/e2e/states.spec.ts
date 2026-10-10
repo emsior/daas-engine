@@ -54,6 +54,16 @@ test("kokpit: loading -> error z ponowieniem -> empty -> success", async ({ page
   await expect(page.getByRole("heading", { name: "Raport tygodnia" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Archiwum raportów" })).toBeVisible();
   await expect(page.locator(".kpi")).toHaveCount(3);
+
+  // zakres danych z API (period_from/period_to) w karcie i w archiwum, bez „Brak zakresu”
+  await expect(page.getByText(/Zakres danych: \d{2}\.\d{2}\.\d{4}/)).toBeVisible();
+  await expect(
+    page
+      .getByRole("table")
+      .getByText(/^\d{2}\.\d{2}\.\d{4}( – \d{2}\.\d{2}\.\d{4})?$/)
+      .first(),
+  ).toBeVisible();
+  await expect(page.getByRole("table")).not.toContainText("Brak zakresu");
 });
 
 test("sesja wygasła: wywołanie API z 401 przenosi na /login", async ({ page, context }) => {

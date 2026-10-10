@@ -82,6 +82,8 @@ export function toRun(wire: WireRun | WireRunDetail): Run {
     status: wire.status,
     created_at: wire.created_at,
     report_sha256: definedHashes(wire.report_sha256),
+    period_from: wire.period_from ?? null,
+    period_to: wire.period_to ?? null,
     metrics: scalarMetrics(detail?.metrics),
     ...(detail && typeof detail.records_processed === "number"
       ? { records_processed: detail.records_processed }

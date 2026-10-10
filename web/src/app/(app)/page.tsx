@@ -14,7 +14,7 @@ import { useSession } from "@/components/shell/OrgGate";
 import { useT, useTDynamic } from "@/i18n/provider";
 import { useRun, useRuns } from "@/lib/api/hooks";
 import type { Run } from "@/lib/api/types";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate, formatDateRange, formatDateTime } from "@/lib/format";
 import { runKpis } from "@/lib/run-kpis";
 import { runStatusToBadge } from "@/lib/status";
 
@@ -27,9 +27,8 @@ function useRunLabels() {
     pipeline: (run: Run) => td(`pipeline.${run.pipeline}`, run.pipeline),
     status: (run: Run) => td(`run.status.${run.status}`, t("badge.unknown")),
     range: (run: Run) =>
-      run.period_from || run.period_to
-        ? `${formatDate(run.period_from)} – ${formatDate(run.period_to)}`
-        : t("dashboard.archive.noRange"),
+      formatDateRange(run.period_from, run.period_to) ?? t("dashboard.archive.noRange"),
+    rangeOrNull: (run: Run) => formatDateRange(run.period_from, run.period_to),
   };
 }
 
@@ -57,7 +56,8 @@ function LatestRun({ run, orgId }: { run: Run; orgId: string }) {
   const labels = useRunLabels();
   // lista uruchomień nie niesie metryk: liczby do karty pochodzą ze szczegółów ostatniego runu
   const detail = useRun(orgId, run.run_id);
-  const kpis = runKpis(detail.data ?? run);
+  const shown = detail.data ?? run;
+  const kpis = runKpis(shown);
   return (
     <Card title={t("dashboard.latest.title")}>
       <div className="stack-4">
@@ -68,6 +68,11 @@ function LatestRun({ run, orgId }: { run: Run; orgId: string }) {
           <Badge status={runStatusToBadge(run.status)} label={labels.status(run)} />
         </div>
         <p className="text-muted">{labels.pipeline(run)}</p>
+        {labels.rangeOrNull(shown) ? (
+          <p className="tabular">
+            {t("dashboard.latest.range", { range: labels.rangeOrNull(shown) ?? "" })}
+          </p>
+        ) : null}
         <div className="kpi-row">
           {kpis.map((kpi) => (
             <Kpi

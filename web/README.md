@@ -30,6 +30,8 @@ PORT=3000 HOSTNAME=0.0.0.0 node .next/standalone/server.js
 | `NEXT_PUBLIC_API_ORIGIN` | **build** (wstawiana do paczki) i proxy | `http://127.0.0.1:8000`                             | Origin API. Pusty (`NEXT_PUBLIC_API_ORIGIN=`) = ten sam origin co kokpit (Caddy: `/api/*` do API, reszta do kokpitu). Trafia do `connect-src` i `frame-src` w CSP. |
 | `API_INTERNAL_ORIGIN`    | runtime (serwer)                        | `NEXT_PUBLIC_API_ORIGIN`, a gdy pusty adres kokpitu | Adres, pod którym serwer kokpitu pyta `GET /api/v1/me` (przekierowanie na `/login`). W compose np. `http://api:8000`.                                              |
 
+Proxy kokpitu przekazuje do serwerowego `GET /api/v1/me` pierwszy adres z `x-forwarded-for` oraz `x-forwarded-proto` przychodzącego żądania (ustawia je Caddy), żeby limit per IP w API liczył klientów, a nie kontener `web`.
+
 Ramka z raportem: API wysyła raport z `frame-ancestors 'self'`, więc osadzenie działa tylko przy jednym originie kokpitu i API (produkcja za Caddy, albo lokalnie przez `e2e/proxy.mjs`). Przy `npm run dev` na osobnych portach przeglądarka zablokuje ramkę; „Otwórz raport” i pobieranie działają zawsze.
 
 Cookies: sesja `HttpOnly` i `daas_csrf` ustawia API. Kokpit i API muszą być w tej samej witrynie (ta sama domena, porty bez znaczenia; lokalnie otwieraj kokpit pod `http://127.0.0.1:3000`, nie `localhost`, bo domyślny adres API to `127.0.0.1:8000`), a po stronie API `DAAS_COCKPIT_ORIGIN` musi wskazywać origin kokpitu (CORS z `credentials`).

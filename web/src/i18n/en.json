@@ -104,6 +104,7 @@
   "dashboard.title": "Dashboard",
   "dashboard.latest.title": "Weekly report",
   "dashboard.latest.date": "Report date: {date}",
+  "dashboard.latest.range": "Data range: {range}",
   "dashboard.latest.open": "Open report",
   "dashboard.cta.title": "New report",
   "dashboard.cta.body": "Upload a CSV, XLSX or a JSON package from the collector. The report will be ready in a few moments.",

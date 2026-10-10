@@ -49,3 +49,20 @@ export const SECURITY_HEADERS: Record<string, string> = {
   "Referrer-Policy": "no-referrer",
   "X-Content-Type-Options": "nosniff",
 };
+
+/**
+ * Nagłówki przekazywane przy serwerowym `GET /api/v1/me` z proxy kokpitu: bez nich `limit_ip` backendu
+ * widzi jeden adres (kontener `web`) zamiast klientów. Pierwszy adres z `x-forwarded-for` żądania
+ * (ustawia go Caddy), a gdy go brak, nic nie zgadujemy. Protokół: `x-forwarded-proto` żądania albo schemat adresu.
+ */
+export function forwardedHeaders(
+  incoming: Pick<Headers, "get">,
+  fallbackProtocol: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  const client = incoming.get("x-forwarded-for")?.split(",")[0]?.trim();
+  if (client) out["x-forwarded-for"] = client;
+  const proto = incoming.get("x-forwarded-proto")?.split(",")[0]?.trim() || fallbackProtocol;
+  out["x-forwarded-proto"] = proto.replace(/:$/, "");
+  return out;
+}

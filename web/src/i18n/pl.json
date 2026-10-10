@@ -104,6 +104,7 @@
   "dashboard.title": "Kokpit",
   "dashboard.latest.title": "Raport tygodnia",
   "dashboard.latest.date": "Data raportu: {date}",
+  "dashboard.latest.range": "Zakres danych: {range}",
   "dashboard.latest.open": "Otwórz raport",
   "dashboard.cta.title": "Nowy raport",
   "dashboard.cta.body": "Wgraj plik CSV, XLSX lub paczkę JSON z kolektora. Raport będzie gotowy w kilka chwil.",

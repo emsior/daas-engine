@@ -71,6 +71,21 @@ export function formatDate(input: string | number | Date | null | undefined): st
   return `${p.day}.${p.month}.${p.year}`;
 }
 
+/**
+ * Zakres dat `03.08.2026 – 31.08.2026`; jedna data, gdy początek i koniec są tym samym dniem lub znamy tylko jeden.
+ * Zwraca `null`, gdy brak obu końców (wołający pokazuje wtedy „Brak zakresu”).
+ */
+export function formatDateRange(
+  from: string | null | undefined,
+  to: string | null | undefined,
+): string | null {
+  const start = from ? formatDate(from) : null;
+  const end = to ? formatDate(to) : null;
+  if (!start && !end) return null;
+  if (!start || !end || start === end) return start ?? end;
+  return `${start} – ${end}`;
+}
+
 /** `09.10.2026 14:05`. */
 export function formatDateTime(input: string | number | Date | null | undefined): string {
   if (input === null || input === undefined || input === "") return "—";

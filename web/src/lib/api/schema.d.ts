@@ -1112,6 +1112,16 @@ export interface components {
             };
             /** Narrative Source */
             narrative_source?: string | null;
+            /**
+             * Period From
+             * @description pierwszy dzien danych runu (ISO); `null` dla cs2_demo
+             */
+            period_from?: string | null;
+            /**
+             * Period To
+             * @description ostatni dzien danych runu (ISO); `null` dla cs2_demo
+             */
+            period_to?: string | null;
             /** Pipeline */
             pipeline: string;
             /** Records Processed */
@@ -1143,6 +1153,16 @@ export interface components {
             links?: {
                 [key: string]: string;
             };
+            /**
+             * Period From
+             * @description pierwszy dzien danych runu (ISO); `null` dla cs2_demo
+             */
+            period_from?: string | null;
+            /**
+             * Period To
+             * @description ostatni dzien danych runu (ISO); `null` dla cs2_demo
+             */
+            period_to?: string | null;
             /** Pipeline */
             pipeline: string;
             /** Report Sha256 */
