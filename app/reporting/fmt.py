@@ -10,12 +10,12 @@ from typing import Any
 
 
 def pln(x: float | int | None) -> str:
-    """Format PL: `7 255,95`. `None` -> `—`; NaN/inf oraz wartosci zaokraglajace sie do zera -> `0,00`."""
+    """Format PL: `7 255,95`. `None` -> `—`; NaN/inf -> `n/d`; wartosci zaokraglajace sie do zera -> `0,00`."""
     if x is None:
         return "—"
     value = float(x)
     if not math.isfinite(value):
-        return "0,00"
+        return "n/d"
     value = round(value, 2)
     if value == 0:                      # takze -0.0 i -0.004
         value = 0.0

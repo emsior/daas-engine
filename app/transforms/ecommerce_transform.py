@@ -101,7 +101,7 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
     if df.empty:
         return EcommerceMetrics(
             orders_total=0, orders_completed=0, orders_refunded=0, orders_cancelled=0,
-            revenue_total=0.0, cost_total=0.0, profit_total=0.0, margin_pct=0.0, avg_order_value=0.0,
+            revenue_total=0.0, cost_total=0.0, profit_total=0.0, margin_pct=None, avg_order_value=None,
             avg_discount_pct=0.0, loss_orders=[], loss_orders_count=0, loss_orders_total=0.0,
             top_categories=[], top_products=[], anomalies=[], weekly=[], wow=None,
         )
@@ -147,8 +147,9 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
         revenue_total=round(revenue, 2),
         cost_total=round(cost, 2),
         profit_total=round(profit, 2),
-        margin_pct=round(100 * profit / revenue, 2) if revenue else 0.0,
-        avg_order_value=round(revenue / len(pnl), 2) if len(pnl) else 0.0,
+        # przychod calkowity <= 0 (np. korekta znosi sprzedaz): marza i AOV sa nieokreslone, nie 0,00
+        margin_pct=round(100 * profit / revenue, 2) if revenue > 0 else None,
+        avg_order_value=round(revenue / len(pnl), 2) if len(pnl) and revenue > 0 else None,
         avg_discount_pct=round(100 * float(pnl["discount"].mean()), 2) if len(pnl) else 0.0,
         loss_orders=sanitize_floats(loss_rows.to_dict(orient="records")),
         loss_orders_count=int(len(loss)),

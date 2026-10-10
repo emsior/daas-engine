@@ -43,11 +43,11 @@ def _walk(node):
 
 @pytest.mark.parametrize("fn", [_pln, narrative_pln])
 @pytest.mark.parametrize("value,expected", [
-    (float("nan"), "0,00"), (float("inf"), "0,00"), (float("-inf"), "0,00"),
+    (float("nan"), "n/d"), (float("inf"), "n/d"), (float("-inf"), "n/d"),
     (-0.004, "0,00"), (-0.0, "0,00"), (0.004, "0,00"), (7255.95, "7 255,95"), (-1000.5, "-1 000,50"),
     (0, "0,00"), (1234567.891, "1 234 567,89"),
 ])
-def test_pln_nie_pokazuje_nan_ani_minus_zera(fn, value, expected):
+def test_pln_nan_inf_to_nd_i_brak_minus_zera(fn, value, expected):
     assert fn(value) == expected
 
 

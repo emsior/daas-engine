@@ -183,8 +183,8 @@ class EcommerceMetrics(BaseModel):
     revenue_total: float
     cost_total: float
     profit_total: float
-    margin_pct: float
-    avg_order_value: float
+    margin_pct: float | None       # None gdy przychod calkowity <= 0 (marza nieokreslona)
+    avg_order_value: float | None  # None gdy przychod calkowity <= 0
     avg_discount_pct: float
     loss_orders: list[dict[str, Any]]
     loss_orders_count: int

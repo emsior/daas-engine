@@ -183,7 +183,10 @@ def render_cs2_markdown(payload: dict[str, Any], m: CS2Metrics) -> str:
 
 
 def render_ecommerce_markdown(payload: dict[str, Any], m: EcommerceMetrics) -> str:
-    verdict = "MARŻA ZDROWA" if m.margin_pct >= 25 else "MARŻA POD PRESJĄ" if m.margin_pct >= 10 else "MARŻA KRYTYCZNA"
+    if m.margin_pct is None:
+        verdict = "MARŻA NIEOKREŚLONA"
+    else:
+        verdict = "MARŻA ZDROWA" if m.margin_pct >= 25 else "MARŻA POD PRESJĄ" if m.margin_pct >= 10 else "MARŻA KRYTYCZNA"
     s = _header(payload, "E-Commerce B2B Sales Report")
     s += f"## WNIOSEK\n\n**{verdict}** — marża **{pct(m.margin_pct, 2)}**, przychód **{_pln(m.revenue_total)}**, "
     s += f"zysk **{_pln(m.profit_total)}**, {m.loss_orders_count} zamówień stratnych (łącznie {_pln(m.loss_orders_total)}).\n\n"
@@ -204,7 +207,7 @@ def render_ecommerce_markdown(payload: dict[str, Any], m: EcommerceMetrics) -> s
         {"metryka": "Koszt", "wartość": _pln(m.cost_total)},
         {"metryka": "Zysk", "wartość": _pln(m.profit_total)},
         {"metryka": "Marża", "wartość": pct(m.margin_pct, 2)},
-        {"metryka": "Średnia wartość zamówienia", "wartość": _pln(m.avg_order_value)},
+        {"metryka": "Średnia wartość zamówienia", "wartość": "n/d" if m.avg_order_value is None else _pln(m.avg_order_value)},
         {"metryka": "Średni rabat", "wartość": pct(m.avg_discount_pct, 2)},
     ], ["metryka", "wartość"])
     if m.weekly:

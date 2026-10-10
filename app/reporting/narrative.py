@@ -133,7 +133,7 @@ def template_narrative(pipeline: str, metrics: Any, client_name: str | None = No
         s = (f"Raport{who} obejmuje {m.orders_total} zamówień ({m.orders_completed} zrealizowanych, "
              f"{m.orders_refunded} zwrotów, {m.orders_cancelled} anulowanych). Przychód wyniósł {_pln(m.revenue_total)} "
              f"przy koszcie {_pln(m.cost_total)}, co daje zysk {_pln(m.profit_total)} i marżę {pct(m.margin_pct, 2)}. "
-             f"Średnia wartość zamówienia to {_pln(m.avg_order_value)}, średni rabat {pct(m.avg_discount_pct, 2)}.")
+             f"Średnia wartość zamówienia to {'n/d' if m.avg_order_value is None else _pln(m.avg_order_value)}, średni rabat {pct(m.avg_discount_pct, 2)}.")
         if m.loss_orders_count:
             s += (f" Wykryto {m.loss_orders_count} zamówień stratnych o łącznym wyniku {_pln(m.loss_orders_total)} — "
                   f"to pierwszy obszar do naprawy.")
