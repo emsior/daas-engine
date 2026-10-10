@@ -48,6 +48,7 @@ from app.core.upload_guard import (
     validate_original_filename,
 )
 from app.pipelines.runner import PIPELINES, PipelineRunner
+from app.sources.xlsx_formulas import formula_warning
 
 log = logging.getLogger(__name__)
 
@@ -252,9 +253,12 @@ async def upload(request: Request, file: UploadFile = File(...),
         raw = tmp_path.read_bytes()
         received_sha256 = content_hash(raw)  # skrot pliku w tej postaci, w jakiej przyszedl (XLSX albo CSV)
         max_records = MAX_RECORDS
+        formula_note: str | None = None
         if is_xlsx_name(file.filename or ""):
             # parsowanie poza petla zdarzen: odczyt XLSX bywa kosztowny
             raw, _ = await run_in_threadpool(xlsx_import.xlsx_to_csv_bytes, tmp_path, sheet)
+            # C14: skan formul na zwalidowanym XLSX, przed nadpisaniem pliku tymczasowego konwersja CSV
+            formula_note = await run_in_threadpool(formula_warning, tmp_path, sheet)
             tmp_path.write_bytes(raw)  # od tej chwili plik tymczasowy to CSV
             max_records = xlsx_import.MAX_XLSX_ROWS
         result = validate_csv_bytes(raw, max_records=max_records)
@@ -281,7 +285,7 @@ async def upload(request: Request, file: UploadFile = File(...),
             mapping=rep.mapping,
             unmapped_columns=rep.unmapped_columns,
             generated=rep.generated,
-            warnings=rep.warnings,
+            warnings=[*rep.warnings, formula_note] if formula_note else rep.warnings,
             confidence=rep.confidence,
             ready=rep.rows_out > 0,
             run_payload={"pipeline": "ecommerce_demo", "upload_id": upload_id,

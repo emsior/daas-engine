@@ -9,12 +9,14 @@ Funkcja zaklada plik juz zwalidowany przez `xlsx_import.validate_container` (lim
 from __future__ import annotations
 
 import logging
+import threading
 from pathlib import Path
 from typing import Any
 
 import openpyxl
 
 from app.core import xlsx_import
+from app.core.upload_guard import UploadRejected
 
 log = logging.getLogger(__name__)
 
@@ -29,11 +31,12 @@ def _sheet(wb: Any, sheet: str | None) -> Any:
     return ws
 
 
-def count_formulas_without_value(path: Path, sheet: str | None = None) -> int:
+def count_formulas_without_value(path: Path, sheet: str | None = None,
+                                 cancel: threading.Event | None = None) -> int:
     """Liczba komorek z formula, dla ktorych brak zbuforowanej wartosci (pierwszy arkusz albo `sheet`).
 
     Blad odczytu zwraca 0 i trafia do logu — konwersja pliku (`xlsx_to_csv_bytes`) odrzuci taki plik osobno,
-    wiec ostrzezenie nie moze go zasloniac.
+    wiec ostrzezenie nie moze go zasloniac. `cancel` (ustawiany po przekroczeniu limitu czasu) przerywa skan: 0.
     """
     try:
         with path.open("rb") as fh_f, path.open("rb") as fh_v:
@@ -46,6 +49,8 @@ def count_formulas_without_value(path: Path, sheet: str | None = None) -> int:
                 for scanned, (row_f, row_v) in enumerate(zip(rows_f, rows_v, strict=False), start=1):
                     if scanned > xlsx_import.MAX_XLSX_SCANNED_ROWS:
                         break
+                    if cancel is not None and scanned % 500 == 0 and cancel.is_set():
+                        return 0
                     missing += sum(1 for f, v in zip(row_f, row_v, strict=False)
                                    if isinstance(f, str) and f.startswith("=") and v is None)
                 return missing
@@ -58,6 +63,14 @@ def count_formulas_without_value(path: Path, sheet: str | None = None) -> int:
 
 
 def formula_warning(path: Path, sheet: str | None = None) -> str | None:
-    """Gotowe ostrzezenie dla uzytkownika albo `None`, gdy wszystkie formuly maja wartosci."""
-    n = count_formulas_without_value(path, sheet)
+    """Gotowe ostrzezenie dla uzytkownika albo `None`, gdy wszystkie formuly maja wartosci.
+
+    Skan jest ograniczony tym samym limitem czasu co konwersja (`xlsx_import.run_bounded`). Po przekroczeniu
+    czasu ostrzezenia nie ma (upload i tak przeszedl walidacje kontenera): to podpowiedz, nie warunek przyjecia.
+    """
+    try:
+        n = xlsx_import.run_bounded(count_formulas_without_value, path, sheet)
+    except UploadRejected:
+        log.warning("formula scan skipped: time limit")
+        return None
     return FORMULA_WARNING.format(n=n) if n else None

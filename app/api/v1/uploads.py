@@ -40,6 +40,7 @@ from app.core.upload_guard import (
     validate_original_filename,
 )
 from app.sources.uksc_source import MAX_PACKAGE_BYTES
+from app.sources.xlsx_formulas import formula_warning
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["uploads"])
@@ -121,6 +122,7 @@ async def create_upload(request: Request, file: UploadFile = File(...),
     tmp_path = ensure_inside_root(root / f"{upload_id}.tmp", root)
     size = 0
     final_path: Path | None = None
+    formula_note: str | None = None
     try:
         kind = _kind_of(file.filename)
         limit = MAX_PACKAGE_BYTES if kind == "package" else MAX_UPLOAD_BYTES
@@ -138,6 +140,8 @@ async def create_upload(request: Request, file: UploadFile = File(...),
             max_records = MAX_RECORDS
             if kind == "xlsx":
                 raw, _ = await run_in_threadpool(xlsx_import.xlsx_to_csv_bytes, tmp_path, sheet)
+                # C14: skan formul na zwalidowanym XLSX, PRZED nadpisaniem pliku tymczasowego konwersja CSV
+                formula_note = await run_in_threadpool(formula_warning, tmp_path, sheet)
                 tmp_path.write_bytes(raw)
                 max_records = xlsx_import.MAX_XLSX_ROWS
             validate_csv_bytes(raw, max_records=max_records)
@@ -153,6 +157,8 @@ async def create_upload(request: Request, file: UploadFile = File(...),
                 "unmapped_columns": rep.unmapped_columns, "generated": rep.generated, "warnings": rep.warnings,
                 "confidence": rep.confidence, "ready": rep.rows_out > 0,
             }
+            if formula_note:
+                mapping["warnings"] = [*rep.warnings, formula_note]
 
         row = Upload(
             id=upload_id, org_id=ctx.org_id, kind=kind, filename=(file.filename or "")[:128], bytes=size,

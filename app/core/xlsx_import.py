@@ -25,16 +25,19 @@ import logging
 import re
 import threading
 import zipfile
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, TypeVar
 
 import openpyxl
 
 from app.core.upload_guard import ReasonCode, UploadRejected
 
 log = logging.getLogger(__name__)
+
+T = TypeVar("T")
 
 # --------------------------------------------------------------------------- limity
 MAX_XLSX_ROWS = 200_000                          # wierszy danych (bez naglowka)
@@ -200,10 +203,19 @@ def xlsx_to_csv_bytes(path: Path, sheet: str | None = None) -> tuple[bytes, int]
     `XLSX_PARSE_TIMEOUT_SEC`; po przekroczeniu: 422 `xlsx_timeout`. Watku nie da sie zabic, wiec dostaje
     flage `cancel` sprawdzana w petlach skanu i odczytu wierszy i konczy sie sam (nie blokujemy na nim zamkniecia).
     """
+    return run_bounded(_convert, path, sheet)
+
+
+def run_bounded(func: Callable[..., T], *args: Any) -> T:
+    """Wykonuje `func(*args, cancel)` w watku, czekajac najwyzej `XLSX_PARSE_TIMEOUT_SEC` (inaczej `xlsx_timeout`).
+
+    Wspolny limit czasu dla konwersji i dla skanu formul (`xlsx_formulas`). `func` dostaje na koncu
+    `threading.Event`, ktory zostaje ustawiony po przekroczeniu czasu.
+    """
     cancel = threading.Event()
     pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="xlsx-parse")
     try:
-        future = pool.submit(_convert, path, sheet, cancel)
+        future = pool.submit(func, *args, cancel)
         done, _ = wait([future], timeout=XLSX_PARSE_TIMEOUT_SEC)
         if not done:
             cancel.set()
