@@ -4,12 +4,14 @@ Kontrole (kazda konczy sie odmowa z wlasnym kodem powodu, komunikat bez tresci p
     1. kontener ZIP: poprawny archiwum, liczba wpisow, suma rozpakowanych bajtow i wspolczynnik kompresji
        (zip-bomb) liczone z katalogu centralnego PRZED jakimkolwiek parsowaniem XML,
     2. makra i obiekty osadzone: `vbaProject.bin`, `macrosheets/`, `embeddings/`, typ zawartosci `macroEnabled`,
-    3. DTD/encje w czesciach XML (XXE, billion laughs) oraz kodowania UTF-16/32 omijajace kontrole 3,
+    3. DTD/encje w CALEJ czesci XML (skan strumieniowy, odmowa przy pierwszym `<!DOCTYPE`/`<!ENTITY`; XXE,
+       billion laughs) oraz kodowania UTF-16/32 omijajace skan; dodatkowo `openpyxl` parsuje przez `defusedxml`,
     4. arkusze: dokladnie jeden albo wskazany polem `sheet`; twardy limit liczby arkuszy,
     5. odczyt `openpyxl` w trybie `read_only=True, data_only=True` (formuly nie sa liczone ani przepisywane;
        zbuforowana wartosc albo puste pole), z `reset_dimensions()` — deklarowany wymiar arkusza jest
        niezaufany (`A1:XFD1048576` rozdmuchalby kazdy wiersz do 16384 komorek),
-    6. limity wierszy i kolumn.
+    6. limity wierszy i kolumn,
+    7. limit `sharedStrings` (liczba wpisow i rozmiar) oraz limit czasu calej konwersji (`XLSX_PARSE_TIMEOUT_SEC`).
 
 Odrzucamy rowniez skoroszyty z makrami zapisane pod nazwa `.xlsx`; `.xlsm`/`.xls`/`.xlsb` odpadaja juz na
 rozszerzeniu (`upload_guard.validate_original_filename`). Zewnetrzne powiazania (`externalLinks`) nie sa
@@ -20,7 +22,10 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
+import threading
 import zipfile
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 from typing import Any
@@ -36,13 +41,22 @@ MAX_XLSX_ROWS = 200_000                          # wierszy danych (bez naglowka)
 MAX_XLSX_COLUMNS = 256                           # kolumn w naglowku/wierszu (po obcieciu pustych koncowek)
 MAX_XLSX_SHEETS = 20                             # arkuszy w skoroszycie, niezaleznie od pola `sheet`
 MAX_XLSX_ENTRIES = 5_000                         # wpisow w archiwum ZIP
-MAX_XLSX_UNCOMPRESSED_BYTES = 150 * 1024 * 1024  # suma rozpakowanych bajtow wszystkich wpisow
+MAX_XLSX_UNCOMPRESSED_BYTES = 48 * 1024 * 1024   # suma rozpakowanych bajtow wszystkich wpisow
 MAX_XLSX_RATIO = 100                             # rozpakowane / skompresowane, liczone od RATIO_CHECK_FROM_BYTES
 RATIO_CHECK_FROM_BYTES = 10 * 1024 * 1024
 MAX_XLSX_SCANNED_ROWS = 1_048_577                # twardy limit Excela (+ naglowek); chroni czas odczytu
 MAX_SHEET_NAME_LEN = 64
-_PART_PROLOG_BYTES = 8_192
+MAX_SHARED_STRINGS = 200_000                     # wpisow <si> w xl/sharedStrings.xml
+MAX_SHARED_STRINGS_BYTES = 24 * 1024 * 1024      # rozmiar rozpakowanego xl/sharedStrings.xml
+XLSX_PARSE_TIMEOUT_SEC = 30.0                    # caly czas konwersji (kontener + odczyt arkusza)
+_SCAN_CHUNK_BYTES = 256 * 1024
+_CANCEL_CHECK_EVERY_ROWS = 500
 _MAX_CONTENT_TYPES_BYTES = 1024 * 1024
+_SHARED_STRINGS_PART = "xl/sharedstrings.xml"
+_SI_TAG = re.compile(rb"<(?:\w+:)?si[\s/>]")
+_XML_BOMS = (b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff", b"\xff\xfe\x00\x00")
+_XML_FORBIDDEN_MARKERS = (b"<!DOCTYPE", b"<!ENTITY")
+_OVERLAP = 64                                    # bajty na styku porcji: znacznik/tag nie ucieknie skanowi
 
 #: Przedrostki nazw wpisow ZIP swiadczace o makrach lub obiektach osadzonych (porownanie po lower()).
 _FORBIDDEN_PREFIXES = ("xl/macrosheets/", "xl/dialogsheets/", "xl/embeddings/", "xl/activex/")
@@ -56,9 +70,55 @@ def _invalid() -> UploadRejected:
     return _reject(ReasonCode.XLSX_INVALID, 415, "plik nie jest poprawnym skoroszytem XLSX")
 
 
+def _too_large() -> UploadRejected:
+    return _reject(ReasonCode.XLSX_UNPACKED_TOO_LARGE, 413, "skoroszyt po rozpakowaniu jest zbyt duzy")
+
+
+class _Cancelled(Exception):
+    """Wewnetrzny sygnal: wywolujacy przestal czekac (timeout), watek konwersji ma sie zakonczyc."""
+
+
+def _check_cancel(cancel: threading.Event | None) -> None:
+    if cancel is not None and cancel.is_set():
+        raise _Cancelled
+
+
+def _scan_xml_part(part: Any, *, count_strings: bool, cancel: threading.Event | None) -> None:
+    """Skan strumieniowy CALEJ czesci XML: odmowa przy pierwszym `<!DOCTYPE`/`<!ENTITY` albo BOM UTF-16/32.
+
+    Porcje sa czytane z nakladka `_OVERLAP`, wiec znacznik na granicy porcji nie umyka skanowi. Dla
+    `sharedStrings` liczy tez wpisy `<si>` i rozmiar (limity `MAX_SHARED_STRINGS*`).
+    """
+    carry = b""
+    first = True
+    size = 0
+    strings = 0
+    while True:
+        _check_cancel(cancel)
+        chunk = part.read(_SCAN_CHUNK_BYTES)
+        if not chunk:
+            return
+        if first:
+            first = False
+            if chunk.startswith(_XML_BOMS):
+                raise _invalid()  # UTF-16/32 omijaloby skan DTD
+        window = carry + chunk
+        if any(marker in window for marker in _XML_FORBIDDEN_MARKERS):
+            raise _invalid()
+        if count_strings:
+            size += len(chunk)
+            strings += sum(1 for m in _SI_TAG.finditer(window) if m.end() > len(carry))
+            if size > MAX_SHARED_STRINGS_BYTES or strings > MAX_SHARED_STRINGS:
+                raise _too_large()
+        carry = window[-_OVERLAP:]
+
+
 # --------------------------------------------------------------------------- kontener
-def validate_container(path: Path) -> None:
-    """Sprawdza archiwum ZIP bez parsowania zawartosci arkuszy. Rzuca `UploadRejected`."""
+def validate_container(path: Path, cancel: threading.Event | None = None) -> None:
+    """Sprawdza archiwum ZIP bez parsowania zawartosci arkuszy. Rzuca `UploadRejected`.
+
+    `cancel` (opcjonalne) przerywa skan, gdy wywolujacy przestal czekac (patrz `xlsx_to_csv_bytes`).
+    """
     try:
         with path.open("rb") as fh, zipfile.ZipFile(fh) as zf:
             infos = zf.infolist()
@@ -69,7 +129,7 @@ def validate_container(path: Path) -> None:
             packed = max(1, sum(i.compress_size for i in infos))
             if total > MAX_XLSX_UNCOMPRESSED_BYTES or (
                     total > RATIO_CHECK_FROM_BYTES and total / packed > MAX_XLSX_RATIO):
-                raise _reject(ReasonCode.XLSX_UNPACKED_TOO_LARGE, 413, "skoroszyt po rozpakowaniu jest zbyt duzy")
+                raise _too_large()
 
             names = {i.filename.lower(): i for i in infos}
             if "[content_types].xml" not in names or "xl/workbook.xml" not in names:
@@ -89,16 +149,17 @@ def validate_container(path: Path) -> None:
                 raise _reject(ReasonCode.XLSX_MACROS, 415,
                               "skoroszyty z makrami i obiektami osadzonymi nie sa przyjmowane")
 
-            for name, info in names.items():
+            shared = names.get(_SHARED_STRINGS_PART)
+            if shared is not None and shared.file_size > MAX_SHARED_STRINGS_BYTES:
+                raise _too_large()
+
+            for info in infos:  # kazdy wpis, rowniez zdublowane nazwy (nie tylko ostatni z `names`)
+                name = info.filename.lower()
                 if not name.endswith((".xml", ".rels")):
                     continue
                 with zf.open(info) as part:
-                    prolog = part.read(_PART_PROLOG_BYTES)
-                if prolog.startswith((b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff", b"\xff\xfe\x00\x00")):
-                    raise _invalid()  # UTF-16/32 omijaloby skan DTD
-                if b"<!DOCTYPE" in prolog or b"<!ENTITY" in prolog:
-                    raise _invalid()
-    except UploadRejected:
+                    _scan_xml_part(part, count_strings=name == _SHARED_STRINGS_PART, cancel=cancel)
+    except (UploadRejected, _Cancelled):
         raise
     except (zipfile.BadZipFile, NotImplementedError, RuntimeError, OSError, EOFError, ValueError) as exc:
         log.info("xlsx container rejected: %s", type(exc).__name__)
@@ -133,8 +194,28 @@ def _trim(values: tuple[Any, ...]) -> list[str]:
 
 # --------------------------------------------------------------------------- konwersja
 def xlsx_to_csv_bytes(path: Path, sheet: str | None = None) -> tuple[bytes, int]:
-    """Waliduje skoroszyt i zwraca (CSV w UTF-8, liczba wierszy danych). Rzuca `UploadRejected`."""
-    validate_container(path)
+    """Waliduje skoroszyt i zwraca (CSV w UTF-8, liczba wierszy danych). Rzuca `UploadRejected`.
+
+    Cala praca (kontener + odczyt arkusza) idzie w osobnym watku, na ktory czekamy co najwyzej
+    `XLSX_PARSE_TIMEOUT_SEC`; po przekroczeniu: 422 `xlsx_timeout`. Watku nie da sie zabic, wiec dostaje
+    flage `cancel` sprawdzana w petlach skanu i odczytu wierszy i konczy sie sam (nie blokujemy na nim zamkniecia).
+    """
+    cancel = threading.Event()
+    pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="xlsx-parse")
+    try:
+        future = pool.submit(_convert, path, sheet, cancel)
+        done, _ = wait([future], timeout=XLSX_PARSE_TIMEOUT_SEC)
+        if not done:
+            cancel.set()
+            log.warning("xlsx parse timed out after %.1fs", XLSX_PARSE_TIMEOUT_SEC)
+            raise _reject(ReasonCode.XLSX_TIMEOUT, 422, "odczyt skoroszytu trwal zbyt dlugo")
+        return future.result()
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
+
+
+def _convert(path: Path, sheet: str | None, cancel: threading.Event) -> tuple[bytes, int]:
+    validate_container(path, cancel)
 
     wb = None
     try:
@@ -157,8 +238,8 @@ def xlsx_to_csv_bytes(path: Path, sheet: str | None = None) -> tuple[bytes, int]
 
             ws = wb[chosen]
             ws.reset_dimensions()  # niezaufany wymiar z pliku (patrz docstring modulu)
-            return _sheet_to_csv(ws)
-    except UploadRejected:
+            return _sheet_to_csv(ws, cancel)
+    except (UploadRejected, _Cancelled):
         raise
     except Exception as exc:  # noqa: BLE001  openpyxl/XML rzucaja wiele typow; do klienta idzie tylko komunikat ogolny
         log.info("xlsx parse rejected: %s", type(exc).__name__, exc_info=log.isEnabledFor(logging.DEBUG))
@@ -168,7 +249,7 @@ def xlsx_to_csv_bytes(path: Path, sheet: str | None = None) -> tuple[bytes, int]
             wb.close()
 
 
-def _sheet_to_csv(ws: Any) -> tuple[bytes, int]:
+def _sheet_to_csv(ws: Any, cancel: threading.Event | None = None) -> tuple[bytes, int]:
     out = io.StringIO()
     writer = csv.writer(out, lineterminator="\n")
     header: list[str] | None = None
@@ -176,6 +257,8 @@ def _sheet_to_csv(ws: Any) -> tuple[bytes, int]:
     data_rows = 0
 
     for scanned, values in enumerate(ws.iter_rows(values_only=True), start=1):
+        if scanned % _CANCEL_CHECK_EVERY_ROWS == 0:
+            _check_cancel(cancel)
         if scanned > MAX_XLSX_SCANNED_ROWS:
             raise _reject(ReasonCode.TOO_MANY_RECORDS, 413, "arkusz zawiera zbyt wiele wierszy")
         cells = _trim(values)

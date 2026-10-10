@@ -74,6 +74,7 @@ class ReasonCode:
     XLSX_TOO_MANY_SHEETS = "xlsx_too_many_sheets"
     XLSX_SHEET_NOT_FOUND = "xlsx_sheet_not_found"
     XLSX_TOO_WIDE = "xlsx_too_wide"
+    XLSX_TIMEOUT = "xlsx_timeout"
 
 
 class UploadRejected(Exception):

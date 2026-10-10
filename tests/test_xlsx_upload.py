@@ -398,3 +398,196 @@ def test_filename_with_traversal_is_still_rejected_for_xlsx(client: TestClient, 
     r = post(client, workbook_bytes(fixture_workbook()), name="../../x.xlsx")
     assert r.status_code == 400
     assert_clean(settings)
+
+
+# ---------------------------------------------------------------- round 3: limity, skan DTD, timeout, defusedxml
+MIB = 1024 * 1024
+
+
+def sheet_with_late_doctype(pad: int, marker: bytes = b"<!DOCTYPE x [<!ENTITY a 'b'>]>") -> bytes:
+    """Poprawny XML, w ktorym DTD pojawia sie dopiero po `pad` bajtach (dalej niz dawny prolog 8 KiB)."""
+    return (b'<?xml version="1.0"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            b"<!--" + b"x" * pad + b"-->" + marker + b"<sheetData/></worksheet>")
+
+
+def test_unpacked_limit_is_48_mib():
+    assert xi.MAX_XLSX_UNCOMPRESSED_BYTES == 48 * MIB
+
+
+def test_unpacked_size_just_over_the_limit_is_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(xi, "RATIO_CHECK_FROM_BYTES", 10**12)  # sam wspolczynnik nie ma tu decydowac
+    ok = tmp_path / "ok.xlsx"
+    ok.write_bytes(zeros_zip(megabytes=44))
+    xi.validate_container(ok)  # workbook (kilka KB) + 44 MiB < 48 MiB
+
+    big = tmp_path / "big.xlsx"
+    big.write_bytes(zeros_zip(megabytes=49))
+    with pytest.raises(xi.UploadRejected) as exc:
+        xi.validate_container(big)
+    assert exc.value.reason == ReasonCode.XLSX_UNPACKED_TOO_LARGE and exc.value.http_status == 413
+
+
+def with_part(name: str, body: bytes) -> bytes:
+    """Skoroszyt z podmieniona (albo dodana, gdy openpyxl jej nie zapisal) czescia `name`."""
+    raw = rewrite_zip(workbook_bytes(fixture_workbook()), lambda n, d: None if n == name else (n, d))
+    return add_entry(raw, name, body)
+
+
+def shared_strings_zip(body: bytes) -> bytes:
+    return with_part("xl/sharedStrings.xml", body)
+
+
+
+def test_shared_strings_entry_count_limit(tmp_path: Path):
+    assert xi.MAX_SHARED_STRINGS == 200_000
+    item = b"<si><t>a</t></si>"
+    head = b'<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    at_limit = tmp_path / "at.xlsx"
+    at_limit.write_bytes(shared_strings_zip(head + item * xi.MAX_SHARED_STRINGS + b"</sst>"))
+    xi.validate_container(at_limit)
+
+    over = tmp_path / "over.xlsx"
+    over.write_bytes(shared_strings_zip(head + item * (xi.MAX_SHARED_STRINGS + 1) + b"</sst>"))
+    with pytest.raises(xi.UploadRejected) as exc:
+        xi.validate_container(over)
+    assert exc.value.reason == ReasonCode.XLSX_UNPACKED_TOO_LARGE
+
+
+def test_shared_strings_prefixed_tags_are_counted_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(xi, "MAX_SHARED_STRINGS", 10)
+    body = (b'<?xml version="1.0"?><x:sst xmlns:x="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+            + b"<x:si><x:t>a</x:t></x:si>" * 11 + b"</x:sst>")
+    p = tmp_path / "p.xlsx"
+    p.write_bytes(shared_strings_zip(body))
+    with pytest.raises(xi.UploadRejected) as exc:
+        xi.validate_container(p)
+    assert exc.value.reason == ReasonCode.XLSX_UNPACKED_TOO_LARGE
+
+
+def test_shared_strings_count_is_exact_across_chunk_boundaries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(xi, "_SCAN_CHUNK_BYTES", 7)  # kazdy tag <si> trafia na granice porcji
+    monkeypatch.setattr(xi, "MAX_SHARED_STRINGS", 50)
+    head = b'<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+    exact = tmp_path / "exact.xlsx"
+    exact.write_bytes(shared_strings_zip(head + b"<si><t>a</t></si>" * 50 + b"</sst>"))
+    xi.validate_container(exact)  # 50 wpisow = limit: bez podwojnego liczenia na nakladkach
+    over = tmp_path / "over.xlsx"
+    over.write_bytes(shared_strings_zip(head + b"<si><t>a</t></si>" * 51 + b"</sst>"))
+    with pytest.raises(xi.UploadRejected):
+        xi.validate_container(over)
+
+
+def test_shared_strings_size_limit(tmp_path: Path):
+    assert xi.MAX_SHARED_STRINGS_BYTES == 24 * MIB
+    head = b'<?xml version="1.0"?><sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>'
+    p = tmp_path / "s.xlsx"
+    p.write_bytes(shared_strings_zip(head + b"a" * (25 * MIB) + b"</t></si></sst>"))
+    with pytest.raises(xi.UploadRejected) as exc:
+        xi.validate_container(p)
+    assert exc.value.reason == ReasonCode.XLSX_UNPACKED_TOO_LARGE and exc.value.http_status == 413
+
+
+@pytest.mark.parametrize("part", ["docProps/core.xml", "xl/worksheets/sheet1.xml", "xl/sharedStrings.xml",
+                                  "xl/_rels/workbook.xml.rels"])
+@pytest.mark.parametrize("marker", [b"<!DOCTYPE x>", b"<!ENTITY a 'b'>"])
+def test_doctype_far_beyond_the_old_prolog_is_rejected(client: TestClient, settings: Settings, part: str,
+                                                      marker: bytes):
+    raw = with_part(part, sheet_with_late_doctype(2 * MIB, marker))
+    r = post(client, raw)
+    assert r.status_code == 415
+    assert audit(settings)[-1]["reason_code"] == "xlsx_invalid"
+    assert_clean(settings)
+
+
+@pytest.mark.parametrize("offset", range(0, 12))
+def test_doctype_straddling_a_chunk_boundary_is_found(monkeypatch: pytest.MonkeyPatch, offset: int):
+    monkeypatch.setattr(xi, "_SCAN_CHUNK_BYTES", 16)
+    data = b"<a>" + b" " * (16 - 3 + offset) + b"<!DOCTYPE x>" + b"</a>"
+    with pytest.raises(xi.UploadRejected):
+        xi._scan_xml_part(io.BytesIO(data), count_strings=False, cancel=None)
+
+
+def test_clean_large_xml_part_passes_the_scan():
+    data = b"<a>" + b"<b>&lt;!DOCTYPE</b>" * 50_000 + b"</a>"  # zakodowane DOCTYPE w tekscie nie jest DTD
+    xi._scan_xml_part(io.BytesIO(data), count_strings=False, cancel=None)
+
+
+@pytest.mark.filterwarnings("ignore:Duplicate name")
+def test_duplicate_zip_entry_names_are_all_scanned(client: TestClient):
+    raw = workbook_bytes(fixture_workbook())
+    out = io.BytesIO()
+    evil = sheet_with_late_doctype(10)
+    with zipfile.ZipFile(io.BytesIO(raw)) as zin, zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zout:
+        zout.writestr("xl/worksheets/sheet1.xml", evil)  # pierwszy wpis: zlosliwy
+        for info in zin.infolist():
+            zout.writestr(info, zin.read(info.filename))  # drugi (ostatni) wpis o tej samej nazwie: czysty
+    assert post(client, out.getvalue()).status_code == 415
+
+
+def test_slow_parse_gives_422_xlsx_timeout(client: TestClient, settings: Settings, monkeypatch: pytest.MonkeyPatch):
+    import time
+
+    monkeypatch.setattr(xi, "XLSX_PARSE_TIMEOUT_SEC", 0.2)
+    seen: list[object] = []
+
+    def slow(ws, cancel=None):
+        seen.append(cancel)
+        for _ in range(100):  # ~5 s, ale konczy sie zaraz po ustawieniu flagi
+            if cancel is not None and cancel.is_set():
+                return b"", 0
+            time.sleep(0.05)
+        return b"", 0
+
+    monkeypatch.setattr(xi, "_sheet_to_csv", slow)
+    started = time.monotonic()
+    r = post(client, workbook_bytes(fixture_workbook()))
+    assert time.monotonic() - started < 3
+    assert r.status_code == 422
+    assert audit(settings)[-1]["reason_code"] == "xlsx_timeout"
+    assert_clean(settings)
+    assert seen and seen[0] is not None and seen[0].is_set()  # watek dostal sygnal przerwania
+
+
+def test_timeout_reason_is_in_the_v1_error_code(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
+    import time
+
+    monkeypatch.setattr(xi, "XLSX_PARSE_TIMEOUT_SEC", 0.1)
+    monkeypatch.setattr(xi, "validate_container", lambda path, cancel=None: time.sleep(0.5))
+    p = tmp_path / "a.xlsx"
+    p.write_bytes(b"x")
+    with pytest.raises(xi.UploadRejected) as exc:
+        xi.xlsx_to_csv_bytes(p)
+    assert exc.value.reason == "xlsx_timeout" and exc.value.http_status == 422
+
+
+def test_row_loop_stops_when_cancelled():
+    import threading
+
+    class Rows:
+        def iter_rows(self, values_only=True):
+            while True:
+                yield ("a", "b")
+
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(xi._Cancelled):
+        xi._sheet_to_csv(Rows(), cancel)
+
+
+def test_fast_conversion_returns_normally_within_the_timeout():
+    wb = numbered_workbook(50)
+    buf = io.BytesIO()
+    wb.save(buf)
+    p = Path(__import__("tempfile").mkstemp(suffix=".xlsx")[1])
+    try:
+        p.write_bytes(buf.getvalue())
+        data, rows = xi.xlsx_to_csv_bytes(p)
+    finally:
+        p.unlink(missing_ok=True)
+    assert rows == 50 and data.startswith(b"")
+
+
+def test_openpyxl_parses_through_defusedxml():
+    import openpyxl.xml as ox
+
+    assert ox.DEFUSEDXML is True
