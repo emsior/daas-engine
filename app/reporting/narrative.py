@@ -19,7 +19,7 @@ from typing import Any
 import httpx
 
 from app.core.models import CS2Metrics, EcommerceMetrics, UkscMetrics
-from app.reporting.fmt import pln
+from app.reporting.fmt import pct, pln
 
 log = logging.getLogger(__name__)
 
@@ -132,8 +132,8 @@ def template_narrative(pipeline: str, metrics: Any, client_name: str | None = No
             return "Brak zamówień w analizowanym pliku — streszczenie niedostępne."
         s = (f"Raport{who} obejmuje {m.orders_total} zamówień ({m.orders_completed} zrealizowanych, "
              f"{m.orders_refunded} zwrotów, {m.orders_cancelled} anulowanych). Przychód wyniósł {_pln(m.revenue_total)} "
-             f"przy koszcie {_pln(m.cost_total)}, co daje zysk {_pln(m.profit_total)} i marżę {m.margin_pct}%. "
-             f"Średnia wartość zamówienia to {_pln(m.avg_order_value)}, średni rabat {m.avg_discount_pct}%.")
+             f"przy koszcie {_pln(m.cost_total)}, co daje zysk {_pln(m.profit_total)} i marżę {pct(m.margin_pct, 2)}. "
+             f"Średnia wartość zamówienia to {_pln(m.avg_order_value)}, średni rabat {pct(m.avg_discount_pct, 2)}.")
         if m.loss_orders_count:
             s += (f" Wykryto {m.loss_orders_count} zamówień stratnych o łącznym wyniku {_pln(m.loss_orders_total)} — "
                   f"to pierwszy obszar do naprawy.")
@@ -142,12 +142,12 @@ def template_narrative(pipeline: str, metrics: Any, client_name: str | None = No
             dr = w["revenue_delta_pct"]
             kier = "wzrósł" if (dr or 0) > 0 else "spadł" if (dr or 0) < 0 else "nie zmienił się"
             s += (f" Tydzień {w['week']} vs {w['prev_week']}: przychód {kier}"
-                  f"{f' o {abs(dr)}%' if dr else ''}, marża {w['margin_prev']}% → {w['margin_pct']}%"
+                  f"{f' o {pct(abs(dr))}' if dr else ''}, marża {pct(w['margin_prev'])} → {pct(w['margin_pct'])}"
                   f"{' (ostatni tydzień niepełny)' if w.get('partial_week') else ''}.")
         if m.top_categories:
             top = m.top_categories[0]
-            margin = "n/d" if top["margin_pct"] is None else f"{top['margin_pct']}%"
-            s += f" Największą kategorią jest {top['category']} ({top['revenue_share_pct']}% przychodu, marża {margin})."
+            s += (f" Największą kategorią jest {top['category']} ({pct(top['revenue_share_pct'])} przychodu, "
+                  f"marża {pct(top['margin_pct'])}).")
         rec = ("ograniczyć rabaty na produktach, które generują straty" if m.loss_orders_count
                else "utrzymać politykę cenową i monitorować marżę tydzień do tygodnia")
         s += f" Rekomendacja: {rec}."

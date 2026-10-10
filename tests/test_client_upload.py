@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.models import DataStatus, RunRequest, RunStatus
+from app.reporting.fmt import pct
 from app.reporting.narrative import build_narrative, template_narrative
 from app.sources.csv_mapper import _to_number, detect_mapping, map_dataframe, read_client_csv
 from app.transforms.ecommerce_transform import transform_ecommerce
@@ -106,7 +107,7 @@ def test_narrative_falls_back_to_template(monkeypatch):
     m = transform_ecommerce(out.to_dict(orient="records"))
     text, source = build_narrative("ecommerce_demo", m, "Firma X")
     assert source == "TEMPLATE"
-    assert "Firma X" in text and str(m.orders_total) in text and f"{m.margin_pct}%" in text
+    assert "Firma X" in text and str(m.orders_total) in text and pct(m.margin_pct, 2) in text
 
 
 def test_narrative_llm_error_falls_back(monkeypatch):

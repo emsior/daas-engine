@@ -6,7 +6,7 @@ from typing import Any
 import pandas as pd
 
 from app.core.models import EcommerceMetrics
-from app.reporting.fmt import sanitize_floats
+from app.reporting.fmt import pct, pln, sanitize_floats
 
 # Statusy liczone do przychodu/zysku (refund/cancel wykluczone z P&L, ale raportowane).
 REVENUE_STATUSES = {"completed", "pending"}
@@ -36,9 +36,9 @@ def detect_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
         })
 
     for _, r in df[df["profit"] < 0].iterrows():
-        add(r, "NEGATIVE_PROFIT", f"strata {r['profit']:.2f} przy rabacie {100*r['discount']:.0f}%")
+        add(r, "NEGATIVE_PROFIT", f"strata {pln(-r['profit'])} przy rabacie {pct(100 * r['discount'], 0)}")
     for _, r in df[(df["discount"] >= 0.25) & (df["profit"] >= 0)].iterrows():
-        add(r, "DEEP_DISCOUNT", f"rabat {100*r['discount']:.0f}% zjada marżę do {r['margin_pct']:.1f}%")
+        add(r, "DEEP_DISCOUNT", f"rabat {pct(100 * r['discount'], 0)} zjada marżę do {pct(r['margin_pct'])}")
 
     for _cat, g in df.groupby("category"):
         if len(g) < 3:
@@ -47,12 +47,12 @@ def detect_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
         mad = (g["margin_pct"] - med).abs().median() or 1.0
         thr = med - 2 * mad
         for _, r in g[(g["margin_pct"] < thr) & (g["profit"] >= 0)].iterrows():
-            add(r, "MARGIN_OUTLIER", f"marża {r['margin_pct']:.1f}% vs mediana kategorii {med:.1f}%")
+            add(r, "MARGIN_OUTLIER", f"marża {pct(r['margin_pct'])} vs mediana kategorii {pct(med)}")
 
     q1, q3 = df["revenue"].quantile([0.25, 0.75])
     hi = q3 + 1.5 * (q3 - q1)
     for _, r in df[df["revenue"] > hi].iterrows():
-        add(r, "REVENUE_OUTLIER", f"przychód {r['revenue']:.2f} > próg {hi:.2f}")
+        add(r, "REVENUE_OUTLIER", f"przychód {pln(r['revenue'])} > próg {pln(hi)}")
     return out
 
 
