@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -234,6 +234,8 @@ class RunOut(BaseModel):
     job_id: str | None = None
     report_sha256: dict[str, str | None]
     links: dict[str, str] = Field(default_factory=dict)
+    period_from: date | None = Field(default=None, description="pierwszy dzien danych runu (ISO); `null` dla cs2_demo")
+    period_to: date | None = Field(default=None, description="ostatni dzien danych runu (ISO); `null` dla cs2_demo")
 
 
 class RunPage(BaseModel):

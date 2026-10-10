@@ -50,7 +50,8 @@ def _links(org_id: str, record: RunRecord) -> dict[str, str]:
 
 def run_out(record: RunRecord) -> RunOut:
     return RunOut(run_id=record.run_id, pipeline=record.pipeline, status=record.status, created_at=record.created_at,
-                  job_id=record.job_id, report_sha256=record.report_sha256, links=_links(record.org_id, record))
+                  job_id=record.job_id, report_sha256=record.report_sha256, links=_links(record.org_id, record),
+                  period_from=record.period_from, period_to=record.period_to)
 
 
 async def _load_record(db: AsyncSession, org_id: str, run_id: str) -> RunRecord:

@@ -6,13 +6,14 @@ Migracje: `alembic/versions/`; test `tests/test_control_plane.py` pilnuje zgodno
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from sqlalchemy import (
     JSON,
     BigInteger,
     Boolean,
+    Date,
     ForeignKey,
     Index,
     Integer,
@@ -180,6 +181,9 @@ class RunRecord(Base):
     sha256_html: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sha256_md: Mapped[str | None] = mapped_column(String(64), nullable=True)
     sha256_json: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # zakres dat w danych runu (ecommerce_demo: min/max daty zamowienia; uksc_evidence: data zbioru paczki); NULL = brak
+    period_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_to: Mapped[date | None] = mapped_column(Date, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     __table_args__ = (

@@ -15,6 +15,7 @@ import hashlib
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from fastapi.concurrency import run_in_threadpool
@@ -184,6 +185,8 @@ class JobExecutor:
         try:
             result = await run_in_threadpool(runner.run, request, on_progress)
             hashes = await run_in_threadpool(self._hash_reports, result)
+            period = (None, None) if result.run_status == RunStatus.FAILED else await run_in_threadpool(
+                self._run_period, runner.db, job.pipeline, result.run_id)
         finally:
             self.running_now -= 1
             self.registry.release(org_id)
@@ -194,7 +197,7 @@ class JobExecutor:
         async with self.sessionmaker() as db:
             db.add(RunRecord(run_id=result.run_id, org_id=org_id, pipeline=job.pipeline, status=run_status,
                              job_id=job_id, sha256_html=hashes.get("html"), sha256_md=hashes.get("md"),
-                             sha256_json=hashes.get("json")))
+                             sha256_json=hashes.get("json"), period_from=period[0], period_to=period[1]))
             if not failed:
                 await service.add_usage(db, org_id, runs=1)
             await db.execute(update(Job).where(Job.id == job_id).values(
@@ -215,6 +218,25 @@ class JobExecutor:
                 await listener(event)
             except Exception:  # noqa: BLE001
                 log.exception("run.finished listener failed job_id=%s", job_id)
+
+    @staticmethod
+    def _run_period(db, pipeline: str, run_id: str) -> tuple[date | None, date | None]:
+        """Zakres dat w danych runu z bazy najemcy: ecommerce_demo = min/max daty zamowienia, uksc_evidence = dzien
+        zbioru paczki (`collected_at_utc`), cs2_demo = brak. Blad odczytu nie psuje runu (jest logowany)."""
+        sql = {
+            "ecommerce_demo": "SELECT min(order_date), max(order_date) FROM ecommerce_orders WHERE run_id = ?",
+            "uksc_evidence": "SELECT CAST(min(collected_at_utc) AS DATE), CAST(max(collected_at_utc) AS DATE) "
+                             "FROM uksc_hosts WHERE run_id = ?",
+        }.get(pipeline)
+        if sql is None:
+            return None, None
+        try:
+            with db.connect() as con:
+                first, last = con.execute(sql, [run_id]).fetchone()
+        except Exception:  # noqa: BLE001
+            log.exception("could not read the data period run_id=%s", run_id)
+            return None, None
+        return first, last
 
     @staticmethod
     def _hash_reports(result) -> dict[str, str]:
