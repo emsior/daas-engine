@@ -19,7 +19,8 @@ export function readLatestLoginToken(email: string): string {
   for (const file of files) {
     const content = readFileSync(path.join(dir, file.name), "utf8");
     if (!content.includes(email)) continue;
-    const match = /token=([A-Za-z0-9_\-.~]+)/.exec(content) ?? /(https?:\/\/\S+)/.exec(content);
+    // wiadomości z linkiem logowania mają `token=`; zaproszenia wskazują tylko /login (pomijamy je)
+    const match = /token=([A-Za-z0-9_\-.~]+)/.exec(content);
     if (match?.[1]) return match[1];
   }
   throw new Error(`Brak wiadomości dla ${email} w ${dir}`);
@@ -46,3 +47,38 @@ export async function onboard(page: Page, orgName = "Firma Testowa"): Promise<vo
 }
 
 export const SAMPLE_CSV = path.resolve(__dirname, "../public/samples/client_export_pl.csv");
+
+/** Paczka kolektora (fixture): wszystkie kontrole PASS. */
+export const UKSC_FIXTURE = path.resolve(__dirname, "../../data/fixtures/uksc/host_compliant.json");
+
+/** Wgrywa plik w kreatorze, uruchamia raport i czeka na ekran „Raport jest gotowy”. */
+export async function runReportFrom(
+  page: Page,
+  file: string | { name: string; mimeType: string; buffer: Buffer },
+) {
+  await page.goto("/upload");
+  await page.setInputFiles("#upload-file", file);
+  await page.getByRole("button", { name: "Sprawdź plik" }).click();
+  await page.getByRole("button", { name: "Uruchom raport" }).click();
+  await expect(page.getByText("Raport jest gotowy").first()).toBeVisible({ timeout: 60_000 });
+}
+
+/** Logowanie + onboarding w jednym kroku (świeże konto z pustą organizacją). */
+export async function signUp(
+  page: Page,
+  prefix = "e2e",
+  orgName = "Firma Testowa",
+): Promise<string> {
+  const email = uniqueEmail(prefix);
+  await login(page, email);
+  await onboard(page, orgName);
+  return email;
+}
+
+/** Strona nie może mieć poziomego przewijania (WCAG 1.4.10 Reflow). */
+export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
+  const overflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+  );
+  expect(overflow, "poziome przewijanie strony").toBeLessThanOrEqual(0);
+}
