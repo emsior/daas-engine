@@ -1,0 +1,144 @@
+# DaaS Engine Cloud: api + web (+ opcjonalnie caddy). Jeden VPS (2 vCPU / 4 GB), osobny projekt compose.
+#
+#   cd deploy && ./gen-env.sh --domain raporty.example.com     # tworzy .env (sekrety), nie nadpisuje istniejacego
+#   docker compose build                                       # obrazy api i web, tag = DAAS_VERSION
+#   docker compose --profile edge up -d                        # z Caddy (TLS na 80/443)
+#   docker compose up -d                                       # bez Caddy (wspolne proxy na VPS)
+#
+# Porty aplikacji sa publikowane WYLACZNIE na 127.0.0.1. Publiczny dostep daje Caddy (profil `edge`)
+# albo wspolny reverse proxy hosta. Opis: deploy/README.md.
+name: daas-engine
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  api:
+    image: ${DAAS_API_IMAGE:-daas-engine-api}:${DAAS_VERSION:-2.0.0}
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    # Wszystkie zmienne DAAS_* z .env trafiaja do kontenera (pelna lista: docs/DEPLOY.md). Ponizej tylko to,
+    # co wdrozenie narzuca albo wymaga. Brak .env nie jest bledem skladni: brak sekretu zglasza `:?` nizej.
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DAAS_MODE: cloud
+      APP_ENV: prod
+      # Dane poza obrazem: control plane (SQLite) i dane organizacji (DuckDB, uploady, raporty, audyt).
+      DAAS_CONTROL_DB_URL: sqlite+aiosqlite:////data/control/control.db
+      DUCKDB_PATH: /data/runtime/daas.duckdb
+      REPORTS_DIR: /data/runtime/reports
+      DAAS_SECRET_KEY: ${DAAS_SECRET_KEY:?DAAS_SECRET_KEY must be set (min. 32 characters); run deploy/gen-env.sh}
+      # Origin kokpitu dla CORS z cookie. Za Caddy: https://<domena>. Lokalnie bez TLS: http://127.0.0.1:3000.
+      DAAS_COCKPIT_ORIGIN: ${DAAS_COCKPIT_ORIGIN:-https://${DAAS_DOMAIN:-localhost}}
+      DAAS_COOKIE_SECURE: ${DAAS_COOKIE_SECURE:-true}
+      DAAS_EMAIL_BACKEND: ${DAAS_EMAIL_BACKEND:-console}
+      DAAS_METRICS_TOKEN: ${DAAS_METRICS_TOKEN:-}
+      # Adres klienta z X-Forwarded-For (limity per IP, audyt). API jest osiagalne tylko z sieci compose
+      # i z loopbacku hosta; naglowek ustawia Caddy (nadpisuje wartosc od klienta).
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - control:/data/control
+      - runtime:/data/runtime
+    ports:
+      - "127.0.0.1:${DAAS_API_PORT:-8000}:8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3).status==200 else 1)"
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 1536m
+    pids_limit: 256
+    logging: *default-logging
+
+  web:
+    image: ${DAAS_WEB_IMAGE:-daas-engine-web}:${DAAS_VERSION:-2.0.0}
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+      args:
+        # build-time: pusty = ten sam origin co kokpit (Caddy: /api/* -> api). Zmiana wymaga `docker compose build web`.
+        NEXT_PUBLIC_API_ORIGIN: ${NEXT_PUBLIC_API_ORIGIN:-}
+    restart: unless-stopped
+    environment:
+      # runtime (serwer kokpitu): adres, pod ktorym kokpit pyta API o sesje (siec compose, bez Caddy)
+      API_INTERNAL_ORIGIN: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${DAAS_WEB_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:3000/login"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    mem_limit: 384m
+    pids_limit: 256
+    logging: *default-logging
+
+  # TLS i reverse proxy. Wylacz (nie uzywaj profilu `edge`), gdy VPS ma juz wspolne proxy na 80/443.
+  caddy:
+    image: caddy:2
+    profiles: ["edge"]
+    restart: unless-stopped
+    environment:
+      DAAS_DOMAIN: ${DAAS_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    depends_on:
+      - api
+      - web
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 128m
+    pids_limit: 256
+    logging: *default-logging
+
+  # Jednorazowy kontener operatora dla backup.sh i restore.sh (docker compose run --rm maint ...): ten sam obraz,
+  # te same wolumeny, root bez sieci. Nie startuje z `up`; nie wymaga sekretow z .env.
+  maint:
+    image: ${DAAS_API_IMAGE:-daas-engine-api}:${DAAS_VERSION:-2.0.0}
+    profiles: ["tools"]
+    pull_policy: never
+    user: "0"
+    network_mode: none
+    volumes:
+      - control:/data/control
+      - runtime:/data/runtime
+    security_opt:
+      - no-new-privileges:true
+    mem_limit: 256m
+    logging: *default-logging
+
+volumes:
+  control:
+  runtime:
+  caddy_data:
+  caddy_config:

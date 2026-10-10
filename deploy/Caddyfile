@@ -1,0 +1,57 @@
+# Caddy 2: TLS (Let's Encrypt, automatycznie), reverse proxy dla kokpitu i API.
+# Domena z DAAS_DOMAIN (deploy/.env). Bez zmiennej: `localhost` (certyfikat z lokalnego CA Caddy, do prob).
+# Rekordy DNS A/AAAA domeny musza wskazywac na VPS, a porty 80 i 443 byc otwarte.
+#
+#   /api/*   -> api:8000   (API v1, SSE, raporty)
+#   reszta   -> web:3000   (kokpit Next.js)
+
+{$DAAS_DOMAIN:localhost} {
+	# Dziennik dostepu w JSON na stdout (docker compose logs caddy). Klucz API i cookie nie trafiaja do dziennika.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers>X-Api-Key delete
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>headers>X-Csrf-Token delete
+				resp_headers>Set-Cookie delete
+			}
+		}
+	}
+
+	# Naglowki bezpieczenstwa. `?` = ustaw tylko gdy aplikacja jeszcze nie ustawila (CSP z nonce zostaje po stronie kokpitu i API).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "no-referrer"
+		?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		-Server
+	}
+
+	# Metryki sa tylko dla operatora: na 127.0.0.1:8000, nigdy przez internet.
+	# (blok `handle` przed pozostalymi, bo `handle` wyprzedza `respond` w kolejnosci dyrektyw Caddy)
+	@metrics path /metrics /metrics/* /api/v1/metrics /api/v1/metrics/*
+	handle @metrics {
+		respond 404
+	}
+
+	handle /api/* {
+		# Najwiekszy upload (CSV/XLSX 10 MiB) + narzut multipart.
+		request_body {
+			max_size 12MiB
+		}
+		reverse_proxy api:8000 {
+			# SSE (/api/v1/orgs/*/jobs/*/events): bez buforowania, zdarzenia ida od razu.
+			flush_interval -1
+		}
+	}
+
+	handle {
+		request_body {
+			max_size 1MiB
+		}
+		reverse_proxy web:3000
+	}
+}
