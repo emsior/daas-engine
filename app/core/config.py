@@ -96,7 +96,7 @@ class Settings(BaseSettings):
     daas_max_concurrent_runs: int = Field(default=2, ge=1, le=64)
     #: Ile organizacji ma jednoczesnie otwarty runner (LRU); starsze sa zamykane.
     daas_max_active_tenants: int = Field(default=16, ge=1, le=1024)
-    #: Token dla GET /metrics (Authorization: Bearer ...). Bez tokenu /metrics przyjmuje tylko petle zwrotna.
+    #: Token dla GET /metrics (Authorization: Bearer ...). Bez tokenu /metrics odpowiada 404.
     daas_metrics_token: str | None = Field(default=None, repr=False)
     #: Domyslna retencja uploadow nowej organizacji, w dniach.
     daas_retention_days: int = Field(default=90, ge=1, le=3650)
