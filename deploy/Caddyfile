@@ -68,6 +68,9 @@
 			max_size 12MiB
 		}
 		reverse_proxy api:8000 {
+			# Adres klienta: jawnie NADPISZ X-Forwarded-For (nigdy nie dopisuj do wartosci od klienta). API ufa temu
+			# naglowkowi (FORWARDED_ALLOW_IPS), wiec wpis podstawiony przez klienta dawalby falszywy adres w limitach i audycie.
+			header_up X-Forwarded-For {remote_host}
 			# SSE (/api/v1/orgs/*/jobs/*/events): bez buforowania, zdarzenia ida od razu.
 			flush_interval -1
 		}
@@ -77,6 +80,8 @@
 		request_body {
 			max_size 1MiB
 		}
-		reverse_proxy web:3000
+		reverse_proxy web:3000 {
+			header_up X-Forwarded-For {remote_host}
+		}
 	}
 }

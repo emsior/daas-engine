@@ -142,11 +142,14 @@ raporty.example.com {
 			max_size 12MiB
 		}
 		reverse_proxy api:8000 {
+			header_up X-Forwarded-For {remote_host}
 			flush_interval -1
 		}
 	}
 	handle {
-		reverse_proxy web:3000
+		reverse_proxy web:3000 {
+			header_up X-Forwarded-For {remote_host}
+		}
 	}
 }
 ```
@@ -158,7 +161,7 @@ Adresy `api:8000` i `web:3000` działają, gdy kontener wspólnego proxy jest w 
 - **Jawna lista zmiennych.** `compose.yml` nie używa `env_file`: kontener `api` dostaje tylko zmienne trybu cloud wymienione w sekcji `environment` (z `.env` lub powłoki, gdy ustawione). `FACEIT_*`, `APIFY_*`, `ECOMMERCE_CSV_PATH`, `DISCORD_WEBHOOK_URL`, `DAAS_API_KEY` i `ANTHROPIC_API_KEY` nie przechodzą, nawet jeśli leżą w `.env`. Nową zmienną aplikacji trzeba dopisać do `compose.yml`.
 - **Streszczenie modelu (LLM) jest wyłączone.** Klucz `ANTHROPIC_API_KEY` trafia do kontenera tylko przez nakładkę `compose.llm.yml`, która też ustawia `DAAS_LLM_NARRATIVE=true`. Włączenie: w `.env` dopisz `ANTHROPIC_API_KEY=...` i `COMPOSE_FILE=compose.yml:compose.llm.yml`, potem `docker compose up -d`; wyłączenie: usuń `COMPOSE_FILE`. Zasady tego, co wychodzi do dostawcy: [`docs/SECURITY.md`](../docs/SECURITY.md).
 - **System plików tylko do odczytu.** `api` i `web` mają `read_only: true`; zapisywalne są wyłącznie wolumeny (`/data/control`, `/data/runtime`) i `tmpfs` (`/tmp`, dla `web` także `.next/cache`). Wszystkie kontenery mają `cap_drop: ALL` (Caddy dodatkowo `NET_BIND_SERVICE` dla portów 80/443) i `no-new-privileges`. Po aktualizacji obrazu sprawdź `./smoke.sh`; gdyby kontener zgłaszał błąd zapisu poza wolumenem, zgłoś go zamiast wyłączać `read_only`.
-- **Adres klienta (`FORWARDED_ALLOW_IPS`).** Limity per IP i audyt czytają adres z `X-Forwarded-For`, ale uvicorn ufa nagłówkowi tylko od adresów z tej listy. Domyślnie `*` (`DAAS_FORWARDED_ALLOW_IPS` w `.env`): bezpieczne z Caddy z tego projektu, bo API słucha tylko w sieci compose i na loopbacku hosta, a Caddy nadpisuje `X-Forwarded-For` wartością od klienta. Ze **wspólnym proxy** ustaw `DAAS_FORWARDED_ALLOW_IPS` na adres proxy widziany przez kontener (proxy w kontenerze: jego adres w sieci `daas-engine_default`; proxy na hoście: zwykle brama tej sieci, np. `172.18.0.1`, sprawdź `docker network inspect daas-engine_default`). Zbyt szeroka lista pozwala każdemu, kto dosięgnie portu API, podszyć się pod dowolny adres; zbyt wąska sprawia, że wszyscy klienci mają adres proxy i dzielą jeden limit.
+- **Adres klienta (`FORWARDED_ALLOW_IPS`).** Limity per IP i audyt czytają adres z `X-Forwarded-For`, ale uvicorn ufa nagłówkowi tylko od adresów z tej listy. Domyślnie `*` (`DAAS_FORWARDED_ALLOW_IPS` w `.env`): bezpieczne wyłącznie za Caddy z tego projektu (`header_up X-Forwarded-For {remote_host}` nadpisuje wartość od klienta; sprawdzone na Caddy 2.10.2, 10.10.2026), a bezpośredni dostęp do `127.0.0.1:8000` na hoście to dostęp operatora. API słucha tylko w sieci compose i na loopbacku hosta. Ze **wspólnym proxy** ustaw `DAAS_FORWARDED_ALLOW_IPS` na adres proxy widziany przez kontener (proxy w kontenerze: jego adres w sieci `daas-engine_default`; proxy na hoście: zwykle brama tej sieci, np. `172.18.0.1`, sprawdź `docker network inspect daas-engine_default`). Zbyt szeroka lista pozwala każdemu, kto dosięgnie portu API, podszyć się pod dowolny adres; zbyt wąska sprawia, że wszyscy klienci mają adres proxy i dzielą jeden limit.
 - **Dziennik Caddy.** Nagłówki `X-Api-Key`, `Cookie`, `Authorization`, `X-Csrf-Token`, `Referer` i parametr `?token=` (link logowania) są usuwane lub zamazane zarówno w dzienniku dostępu, jak i w dzienniku błędów (np. 502 w trakcie restartu API).
 
 ## Operacje
