@@ -165,6 +165,8 @@ export interface EvidenceControl {
 /** `GET /orgs/{id}/evidence`: status kontroli z ostatniego runu `uksc_evidence`. */
 export interface EvidenceReport {
   run_id: string | null;
+  /** Status runu kolektora; `PARTIAL` = niepełna paczka (część kontroli bez artefaktu). */
+  run_status?: RunStatus | null;
   collected_at: string | null;
   host?: string | null;
   collector_command: string | null;

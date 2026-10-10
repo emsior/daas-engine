@@ -843,3 +843,8 @@ textarea.input {
     border: var(--border-width) solid GrayText;
   }
 }
+
+/* Ostrzeżenia do pliku: pełny tekst (bez ucinania), długie nazwy kolumn łamią się. */
+.warning-list {
+  overflow-wrap: anywhere;
+}

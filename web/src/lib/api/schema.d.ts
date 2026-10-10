@@ -224,7 +224,7 @@ export interface paths {
         };
         /**
          * Artifact status of the latest collector run
-         * @description Control -> requirement -> status -> artifact (source and SHA-256) from the latest successful `uksc_evidence` run. Artifact contents are not returned.
+         * @description Control -> requirement -> status -> artifact (source and SHA-256) from the latest successful `uksc_evidence` run. `run_status` is `SUCCESS` or `PARTIAL` (an incomplete package). Artifact contents are not returned.
          */
         get: operations["evidence_api_v1_orgs__org_id__evidence_get"];
         put?: never;
@@ -802,6 +802,12 @@ export interface components {
             package_sha256?: string | null;
             /** Run Id */
             run_id: string;
+            /**
+             * Run Status
+             * @description status runu kolektora; `PARTIAL` = niepelna paczka (czesc kontroli bez artefaktu)
+             * @enum {string}
+             */
+            run_status: "SUCCESS" | "PARTIAL" | "FAILED";
         };
         /** HTTPValidationError */
         HTTPValidationError: {

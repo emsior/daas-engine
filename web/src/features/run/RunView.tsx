@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { Alert } from "@/components/Alert";
@@ -14,6 +15,7 @@ import { reportUrl } from "@/lib/api/client";
 import { useReportStatus, useRun } from "@/lib/api/hooks";
 import type { ReportFormat, Run } from "@/lib/api/types";
 import { formatDate, formatDateTime } from "@/lib/format";
+import { runSummary } from "@/lib/run-kpis";
 import { runStatusToBadge } from "@/lib/status";
 import { VerifyBlock } from "./VerifyBlock";
 
@@ -34,6 +36,7 @@ function RunDetails({ run, orgId }: { run: Run; orgId: string }) {
   const htmlUrl = reportUrl(orgId, run.run_id, "html");
   const status = useReportStatus(orgId, run.run_id);
   const expired = status.data === "expired";
+  const summary = runSummary(run, t("common.nd"));
 
   return (
     <>
@@ -52,6 +55,24 @@ function RunDetails({ run, orgId }: { run: Run; orgId: string }) {
           <dd className="tabular">{formatDateTime(run.created_at)}</dd>
         </dl>
       </Card>
+
+      {summary.length > 0 ? (
+        <Card title={t("run.summary.title")}>
+          <div className="stack-3">
+            <dl className="meta-list">
+              {summary.map((item) => (
+                <Fragment key={item.labelKey}>
+                  <dt>{t(item.labelKey)}</dt>
+                  <dd className="tabular">{item.value}</dd>
+                </Fragment>
+              ))}
+            </dl>
+            {summary.some((item) => item.undefinedValue) ? (
+              <p className="text-muted">{t("run.summary.ndHint", { nd: t("common.nd") })}</p>
+            ) : null}
+          </div>
+        </Card>
+      ) : null}
 
       {expired ? (
         <Alert variant="warning" role="status">

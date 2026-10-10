@@ -6,7 +6,9 @@ import {
   formatDateTime,
   formatNumber,
   formatPLN,
+  formatPLNOrNd,
   formatPercent,
+  formatPercentOrNd,
 } from "./format";
 
 describe("format", () => {
@@ -66,5 +68,24 @@ describe("formatDateRange", () => {
   it("null tylko gdy brak obu końców (wtedy widok pokazuje „Brak zakresu”)", () => {
     expect(formatDateRange(null, null)).toBeNull();
     expect(formatDateRange(undefined, "")).toBeNull();
+  });
+});
+
+describe("wartości nieokreślone (n/d)", () => {
+  it("null, undefined, NaN i nieskończoność dają „n/d”, nigdy NaN ani 0,0 %", () => {
+    for (const value of [null, undefined, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(formatPercentOrNd(value)).toBe("n/d");
+      expect(formatPLNOrNd(value)).toBe("n/d");
+    }
+  });
+
+  it("zero jest zwykłą liczbą, nie „n/d”", () => {
+    expect(formatPercentOrNd(0)).toBe("0,0\u00a0%");
+    expect(formatPLNOrNd(0)).toBe("0,00\u00a0zł");
+  });
+
+  it("przyjmuje własny tekst zastępczy (EN: n/a)", () => {
+    expect(formatPercentOrNd(null, "n/a")).toBe("n/a");
+    expect(formatPLNOrNd(12.5)).toBe("12,50\u00a0zł");
   });
 });

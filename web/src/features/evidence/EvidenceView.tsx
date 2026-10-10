@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { Alert } from "@/components/Alert";
 import { Badge } from "@/components/Badge";
 import { Button, LinkButton } from "@/components/Button";
 import { Card } from "@/components/Card";
@@ -110,8 +111,23 @@ function ControlRows({
 
 function EvidenceTable({ report }: { report: EvidenceReport }) {
   const t = useT();
+  const partial = report.run_status === "PARTIAL";
+  const failed = report.run_status === "FAILED";
   return (
     <div className="stack-4">
+      {partial || failed ? (
+        <Alert variant={failed ? "danger" : "warning"} role="status">
+          <div className="stack-2">
+            <Badge
+              status={failed ? "error" : "warn"}
+              label={failed ? t("evidence.runStatus.failed") : t("evidence.runStatus.partial")}
+            />
+            <p>
+              {failed ? t("evidence.runStatus.failedBody") : t("evidence.runStatus.partialBody")}
+            </p>
+          </div>
+        </Alert>
+      ) : null}
       <p className="text-muted">
         {report.collected_at ? (
           <span className="tabular">

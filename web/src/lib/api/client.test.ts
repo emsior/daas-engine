@@ -284,6 +284,7 @@ describe("client API", () => {
     fetchMock.mockResolvedValueOnce(
       jsonResponse({
         run_id: "r1",
+        run_status: "PARTIAL",
         host: "WS-01",
         collected_at: null,
         checks: [
@@ -298,6 +299,7 @@ describe("client API", () => {
       }),
     );
     const report = await api.evidence("o1");
+    expect(report.run_status).toBe("PARTIAL");
     expect(report.controls[0]?.control_id).toBe("ENC-01");
     expect(report.controls[0]?.artifact?.sha256).toBe("d".repeat(64));
 

@@ -1,5 +1,5 @@
 import type { MessageKey } from "@/i18n";
-import { formatNumber, formatPLN } from "./format";
+import { ND, formatNumber, formatPLN, formatPLNOrNd, formatPercentOrNd } from "./format";
 import type { Run } from "./api/types";
 
 export interface KpiItem {
@@ -44,4 +44,37 @@ export function runKpis(run: Run): KpiItem[] {
     { labelKey: "kpi.revenue", value: money(num(m, "revenue_total")) },
     { labelKey: "kpi.profit", value: money(num(m, "profit_total")) },
   ];
+}
+
+export interface SummaryItem {
+  labelKey: MessageKey;
+  value: string;
+  /** Wartość nieokreślona w danych (np. przychód całkowity <= 0): pokazana jako „n/d”. */
+  undefinedValue: boolean;
+}
+
+const SUMMARY_FIELDS: { key: string; labelKey: MessageKey; kind: "pln" | "pct" }[] = [
+  { key: "revenue_total", labelKey: "kpi.revenue", kind: "pln" },
+  { key: "profit_total", labelKey: "kpi.profit", kind: "pln" },
+  { key: "margin_pct", labelKey: "run.summary.margin", kind: "pct" },
+  { key: "avg_order_value", labelKey: "run.summary.aov", kind: "pln" },
+];
+
+/**
+ * Podsumowanie runu ze skalarnych metryk. Pokazuje pola, które backend zwrócił (także jako `null`):
+ * `margin_pct` i `avg_order_value` są `null` przy przychodzie całkowitym <= 0 (korekty, zwroty),
+ * wtedy wartością jest „n/d”, a nie `NaN` ani `0,0 %`.
+ */
+export function runSummary(run: Run, nd: string = ND): SummaryItem[] {
+  const items: SummaryItem[] = [];
+  for (const field of SUMMARY_FIELDS) {
+    if (!(field.key in run.metrics)) continue;
+    const value = num(run.metrics, field.key);
+    items.push({
+      labelKey: field.labelKey,
+      value: field.kind === "pct" ? formatPercentOrNd(value, nd) : formatPLNOrNd(value, nd),
+      undefinedValue: value === null,
+    });
+  }
+  return items;
 }

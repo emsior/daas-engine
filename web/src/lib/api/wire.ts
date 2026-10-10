@@ -131,6 +131,7 @@ export function toEvidence(wire: WireEvidence): EvidenceReport {
   }));
   return {
     run_id: wire.run_id,
+    run_status: wire.run_status ?? null,
     collected_at: wire.collected_at ?? null,
     host: wire.host ?? null,
     collector_command: COLLECTOR_COMMAND,

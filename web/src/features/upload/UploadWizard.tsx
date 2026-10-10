@@ -142,10 +142,10 @@ function MappingPreview({
         </p>
       ) : null}
       {preview.warnings.length > 0 ? (
-        <Alert variant="warning" title={t("upload.preview.warnings")}>
-          <ul>
-            {preview.warnings.map((warning) => (
-              <li key={warning}>{warning}</li>
+        <Alert variant="warning" role="status" title={t("upload.preview.warnings")}>
+          <ul className="warning-list">
+            {preview.warnings.map((warning, index) => (
+              <li key={`${index}-${warning}`}>{warning}</li>
             ))}
           </ul>
         </Alert>

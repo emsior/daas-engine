@@ -39,6 +39,21 @@ export function formatPercent(value: number): string {
   return `${hardSpaces(percentFormat.format(value))}${NBSP}%`;
 }
 
+/** Wartość nieokreślona (np. marża przy przychodzie całkowitym <= 0): „n/d”, nigdy `NaN` ani `0,0 %`. */
+export const ND = "n/d";
+
+function isFiniteNumber(value: number | null | undefined): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+export function formatPercentOrNd(value: number | null | undefined, nd: string = ND): string {
+  return isFiniteNumber(value) ? formatPercent(value) : nd;
+}
+
+export function formatPLNOrNd(value: number | null | undefined, nd: string = ND): string {
+  return isFiniteNumber(value) ? formatPLN(value) : nd;
+}
+
 const dateParts = new Intl.DateTimeFormat("pl-PL", {
   day: "2-digit",
   month: "2-digit",

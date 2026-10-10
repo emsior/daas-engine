@@ -25,7 +25,10 @@ interface Finding {
 
 async function scan(page: Page, screen: string, theme: "light" | "dark"): Promise<Finding[]> {
   await page.evaluate((value) => document.documentElement.setAttribute("data-theme", value), theme);
-  const results = await new AxeBuilder({ page }).withTags(TAGS).analyze();
+  const results = await new AxeBuilder({ page })
+    .exclude("iframe.iframe-report") // treść raportu to osobny dokument w sandboxie; axe potrafi się na nim zawiesić
+    .withTags(TAGS)
+    .analyze();
   const findings = results.violations.map((violation) => ({
     screen,
     theme,
