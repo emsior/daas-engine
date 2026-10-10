@@ -22,9 +22,12 @@ Kontekst projektu (stack, stan, pułapki środowiska) jest w `CLAUDE.md`.
    nazwisk, e-maili, NIP-ów, telefonów.
 6. Żadnych lokalnych ścieżek dyskowych (`C:\Users\...`, `D:\...`) w plikach repo.
 7. Kwoty w formacie polskim (`7 255,95`) — nie zamieniać na format US.
-8. **CODE FREEZE od v1.0.0 (28.09.2026).** Zmiany w `app/` i `tests/` tylko wtedy, gdy
-   płacący klient zgłasza konkretne wymaganie albo trzech różnych klientów zadaje
-   to samo pytanie. Dokumentacja nie podlega zamrożeniu.
+8. **CODE FREEZE od v1.0.0 (28.09.2026) — uchylony poleceniem właściciela 09.10.2026.** Prace nad wersją 2.0.0
+   idą na gałęzi `claude/saas-2026-10`; zmiany w `app/`, `tests/`, `web/`, `deploy/` i `alembic/` są dozwolone w zakresie
+   zadania. Pozostałe zasady z tej listy obowiązują bez zmian. Dokumentacja nigdy nie podlegała zamrożeniu.
+9. **`web/` bez zewnętrznych CDN.** Kokpit nie ładuje fontów, skryptów, stylów ani obrazów z cudzych domen: fonty
+   systemowe, zasoby z własnego originu, CSP z nonce bez `unsafe-inline`. Nowe zależności npm tylko jako
+   devDependencies albo po uzgodnieniu, zawsze z zaktualizowanym `package-lock.json`.
 
 ## Git
 
@@ -45,8 +48,8 @@ git config user.name  "PPC"
 1. Najpierw plan: 3 punkty i lista plików do zmiany. Czekaj na „ok".
 2. Jedna rzecz na raz. Zmiany poza zakresem zadania to błąd, nie bonus.
 3. Nie instaluj pakietów i nie dodawaj technologii bez pytania.
-4. Po zmianie w kodzie uruchom `pytest -p no:cacheprovider` i pokaż wynik.
-   Wynik poniżej stanu bazowego z `CLAUDE.md` oznacza regresję.
+4. Po zmianie w kodzie uruchom `pytest -p no:cacheprovider` i pokaż wynik; po zmianie w `web/` dodatkowo
+   `npm run typecheck && npm run lint && npm test` w katalogu `web/`. Wynik poniżej stanu bazowego z `CLAUDE.md` oznacza regresję.
 5. Nie pisz README od zera — zaczyna się od tego, co dostaje klient, i to jest celowe.
 
 ## Agenci i komendy

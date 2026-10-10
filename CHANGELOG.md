@@ -4,8 +4,9 @@ All notable changes to DaaS Engine. Dates are merge dates (Europe/Warsaw).
 
 ## [2.0.0] — Unreleased
 
-Hardening release. Behaviour changes below are breaking for existing deployments: configure `DAAS_API_KEY`
-and update API clients before upgrading.
+Hardening and cloud release. One code base, two modes (`DAAS_MODE=selfhost|cloud`). Behaviour changes in
+the hardening sections are breaking for existing deployments: configure `DAAS_API_KEY` and update API
+clients before upgrading. The `cloud` section is additive; `selfhost` keeps the existing routes.
 
 ### Changed
 
@@ -35,11 +36,29 @@ and update API clients before upgrading.
 - n8n workflows, the CI smoke test, the container health check and the PowerShell launcher send the API key.
 - Docker Compose pins `n8nio/n8n` to `2.43.1` instead of `latest`.
 
+### Cloud
+
+- **Organizations and members.** Control plane (SQLAlchemy 2.0 async, Alembic `0001_initial`; SQLite by default, Postgres through `DAAS_CONTROL_DB_URL`) with organizations, users, memberships (`owner`, `admin`, `member`) and invitations. Each organization has its own data directory `runtime/tenants/<org_id>/` with its own DuckDB file, uploads, reports and audit lines.
+- **Sign-in.** Magic link by e-mail (no passwords), cookie sessions (`HttpOnly`, `Secure`, `SameSite=Lax`) with CSRF double submit, `console` and `smtp` mail adapters. `DAAS_SECRET_KEY` (at least 32 characters) is required in cloud mode.
+- **API keys.** Per organization, with scopes, expiry and revocation; shown once and stored as SHA-256.
+- **API v1** under `/api/v1` with `application/problem+json` errors and `request_id`: organizations, members, invitations, API keys, uploads (CSV, XLSX, collector package), jobs, runs, reports (`ETag` = SHA-256), hash verification, artifact status of the latest collector run, `GET /me`, `/health`, `/ready`.
+- **Jobs.** `POST .../jobs` answers `202`; in-process executor with one run per organization and `DAAS_MAX_CONCURRENT_RUNS` overall, state kept in the control database, recovery after restart (`running` becomes `failed` with `abandoned`), cancellation of queued jobs, progress over Server-Sent Events.
+- **Cockpit.** `web/`: Next.js 16, React 19, TypeScript, Tailwind 4, no external CDN; Polish and English, light and dark; report in a sandboxed iframe; local SHA-256 check in the browser; strict CSP with nonce.
+- **Webhooks.** `run.finished` with HMAC-SHA256 signature `X-DaaS-Signature`, three attempts with `DAAS_WEBHOOK_BACKOFF_SEC`, SSRF protection (public HTTPS addresses only).
+- **Usage and plans.** `GET .../usage`; monthly limits of the `free` and `pro` plans answer `429 plan_limit`. No online payments.
+- **Audit and metrics.** `GET .../audit` with cursor pagination; `GET /metrics` in Prometheus text format behind `DAAS_METRICS_TOKEN`.
+- **Operator tools.** `python -m app.cli migrate | migrate-runtime | create-org`; `migrate-runtime` moves a 1.x `runtime/` into `runtime/tenants/default/` (idempotent).
+- **Deploy.** `deploy/compose.yml` (`api`, `web`, optional Caddy with TLS), `Caddyfile`, `gen-env.sh`, `backup.sh` and `restore.sh` (UTC-dated tar with SHA-256 and retention), `smoke.sh`; `web/Dockerfile` (standalone, non-root); the API image now contains `alembic/` and `/data` volumes. Ports are published on `127.0.0.1` only. Update, rollback and shared-proxy instructions: `deploy/README.md`.
+- **CI.** New jobs `web` (eslint, tsc, vitest, `next build`) and `e2e` (Playwright against the API in cloud mode with the console mail adapter); `pip-audit` in `security`; Python 3.13 in the test matrix; web image build and cloud-mode container smoke in `docker`.
+- **Documentation.** `docs/API.md`, `docs/DEPLOY.md`, `docs/SECURITY.md`, `docs/DPA_v1_PL.md` (draft awaiting legal review), rewritten `docs/ARCHITECTURE.md`, pilot materials aligned with 2.0, READMEs for both modes.
+
 ### Known limitations
 
-- Rate limits and the quota counter live in process memory (one worker, reset on restart).
-- Docker was not run during this change; the image build and container smoke test are covered by CI only.
-- A single instance key replaces per-user authentication; there are no roles.
+- Rate limits, the quota counter and pending webhook retries live in process memory (one worker, reset on restart).
+- Docker was not run during this change; image builds, the container smoke tests and the Caddy configuration are covered by CI and by `deploy/smoke.sh` after installation.
+- `selfhost` mode uses a single instance key and has no roles; roles exist in `cloud` mode.
+- Cloud mode runs on one node with a SQLite control database; there is no failover. The `console` mail adapter is for trials only.
+- No passkeys, SSO, online payments or external timestamps.
 
 ## [1.0.0] — 2026-09-28
 
