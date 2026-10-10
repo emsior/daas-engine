@@ -213,6 +213,11 @@ class DeprecationMiddleware:
 
 
 # --------------------------------------------------------------------------- metryki
+#: Granice histogramu czasu odpowiedzi (sekundy), jak domyslne w bibliotekach klienckich Prometheusa.
+DURATION_BUCKETS: tuple[float, ...] = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0)
+PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
+
+
 class Metrics:
     """Liczniki HTTP w pamieci procesu. Etykiety: szablon trasy i status — nigdy sciezka z identyfikatorami,
     parametry ani dane klienta (kardynalnosc ograniczona liczba tras)."""
@@ -220,18 +225,90 @@ class Metrics:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self.http: dict[tuple[str, int], int] = {}
+        #: per szablon trasy: `[liczniki kubelkow (nie skumulowane) + (+Inf), suma sekund]`
+        self.durations: dict[str, list[float]] = {}
 
-    def observe(self, route: str, status: int) -> None:
+    def observe(self, route: str, status: int, duration_sec: float | None = None) -> None:
         with self._lock:
             self.http[(route, status)] = self.http.get((route, status), 0) + 1
+            if duration_sec is None:
+                return
+            hist = self.durations.setdefault(route, [0.0] * (len(DURATION_BUCKETS) + 2))
+            index = next((i for i, bound in enumerate(DURATION_BUCKETS) if duration_sec <= bound),
+                         len(DURATION_BUCKETS))
+            hist[index] += 1
+            hist[-1] += duration_sec
 
     def snapshot(self) -> dict[tuple[str, int], int]:
         with self._lock:
             return dict(self.http)
 
+    def duration_snapshot(self) -> dict[str, list[float]]:
+        with self._lock:
+            return {route: list(hist) for route, hist in self.durations.items()}
+
+
+def _label(value: object) -> str:
+    """Wartosc etykiety wg formatu ekspozycji 0.0.4: ucieczki dla `\\`, `"` i nowej linii."""
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def _num(value: float) -> str:
+    return repr(int(value)) if float(value).is_integer() else repr(round(value, 6))
+
+
+def render_prometheus(metrics: Metrics, *, job_counts: dict[str, int], active_tenants: int,
+                      version: str, mode: str) -> str:
+    """Tekst w formacie ekspozycji Prometheus 0.0.4. Etykiety wylacznie: szablon trasy, status HTTP, status zadania,
+    wersja i tryb — zadnych identyfikatorow organizacji, adresow e-mail ani nazw plikow."""
+    out: list[str] = [
+        "# HELP daas_build_info Wersja aplikacji i tryb pracy.",
+        "# TYPE daas_build_info gauge",
+        f'daas_build_info{{version="{_label(version)}",mode="{_label(mode)}"}} 1',
+        "# HELP daas_http_requests_total Zapytania HTTP wg szablonu trasy i statusu.",
+        "# TYPE daas_http_requests_total counter",
+    ]
+    for (route, status), count in sorted(metrics.snapshot().items()):
+        out.append(f'daas_http_requests_total{{route="{_label(route)}",status="{status}"}} {count}')
+    out += [
+        "# HELP daas_http_request_duration_seconds Czas obslugi zapytania HTTP wg szablonu trasy.",
+        "# TYPE daas_http_request_duration_seconds histogram",
+    ]
+    for route, hist in sorted(metrics.duration_snapshot().items()):
+        cumulative = 0.0
+        for bound, bucket in zip((*DURATION_BUCKETS, float("inf")), hist[:-1], strict=True):
+            cumulative += bucket
+            le = "+Inf" if bound == float("inf") else repr(bound)
+            out.append(f'daas_http_request_duration_seconds_bucket{{route="{_label(route)}",le="{le}"}} '
+                       f"{_num(cumulative)}")
+        out.append(f'daas_http_request_duration_seconds_sum{{route="{_label(route)}"}} {_num(hist[-1])}')
+        out.append(f'daas_http_request_duration_seconds_count{{route="{_label(route)}"}} {_num(cumulative)}')
+    out += [
+        "# HELP daas_jobs Liczba zadan wg statusu (stan biezacy control plane).",
+        "# TYPE daas_jobs gauge",
+    ]
+    out += [f'daas_jobs{{status="{_label(status)}"}} {count}' for status, count in sorted(job_counts.items())]
+    out += [
+        "# HELP daas_active_tenants Organizacje z otwartym runnerem danych (rejestr LRU).",
+        "# TYPE daas_active_tenants gauge",
+        f"daas_active_tenants {active_tenants}",
+    ]
+    return "\n".join(out) + "\n"
+
+
+def route_template(scope: Scope) -> str:
+    """Szablon trasy do etykiety: `/api/v1/orgs/{org_id}/jobs`, nigdy realna sciezka. W nowszym FastAPI
+    `route.path` bywa wzgledne wobec routera (bez `/api/v1`), wiec prefiks dopisujemy na podstawie sciezki zadania."""
+    path = getattr(scope.get("route"), "path", None)
+    if not path:
+        return "unmatched"
+    if is_v1_path(scope.get("path", "")) and not is_v1_path(path):
+        return "/api/v1" + path
+    return path
+
 
 class MetricsMiddleware:
-    """Zlicza zapytania HTTP wg szablonu trasy (`/api/v1/orgs/{org_id}/jobs`) i statusu."""
+    """Zlicza zapytania HTTP wg szablonu trasy (`/api/v1/orgs/{org_id}/jobs`), statusu i czasu obslugi."""
 
     def __init__(self, app: ASGIApp, metrics: Metrics) -> None:
         self.app = app
@@ -242,6 +319,7 @@ class MetricsMiddleware:
             await self.app(scope, receive, send)
             return
         status = 500
+        started = time.perf_counter()
 
         async def send_counting(message: Message) -> None:
             nonlocal status
@@ -252,5 +330,4 @@ class MetricsMiddleware:
         try:
             await self.app(scope, receive, send_counting)
         finally:
-            route = getattr(scope.get("route"), "path", None) or "unmatched"
-            self.metrics.observe(route, status)
+            self.metrics.observe(route_template(scope), status, time.perf_counter() - started)

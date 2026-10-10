@@ -17,6 +17,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from app.api.problems import PROBLEM_MEDIA_TYPE, code_for, is_v1_path, problem_body
 from app.api.routes import LEGACY_PREFIXES, public_router, router
 from app.api.v1 import build_router as build_v1_router
+from app.api.v1.metrics import router as metrics_router
 from app.control import db as control_db
 from app.control import service as control_service
 from app.control.executor import JobExecutor
@@ -166,6 +167,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(SecurityHeadersMiddleware, csp_exempt_paths=DOCS_PATHS if dev else ())
     app.include_router(public_router)
     app.include_router(build_v1_router())
+    app.include_router(metrics_router)  # GET /metrics: poza /api/v1, wlasny token (404 gdy nieustawiony)
     if not settings.cloud:
         app.include_router(router)  # trasy legacy: tylko selfhost; w cloud odpowiadaja 404
     return app
