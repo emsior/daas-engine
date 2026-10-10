@@ -21,7 +21,7 @@ Obrazy `api` i `web` budują się z kodu w repozytorium. Tag obrazu to `DAAS_VER
 ## Wymagania
 
 - VPS: 2 vCPU, 4 GB RAM, kilka GB dysku na obrazy i dane. Limity pamięci w `compose.yml`: `api` 1,5 GB, `web` 384 MB, `caddy` 128 MB (razem ok. 2 GB, reszta zostaje dla drugiej aplikacji na tym samym serwerze).
-- Docker Engine 25+ z Docker Compose v2.24+ (`env_file` z `required: false`).
+- Docker Engine 25+ z Docker Compose v2 (testowane na v5.5).
 - Dla profilu `edge`: rekord DNS A/AAAA domeny na adres VPS i wolne porty 80 i 443.
 - `openssl`, `curl`, `sha256sum` na hoście.
 
@@ -52,8 +52,8 @@ Właściciel organizacji loguje się linkiem z e-maila (`https://raporty.example
 
 ### Poczta (link logowania)
 
-- `DAAS_EMAIL_BACKEND=console` (domyślnie po `gen-env.sh`): link trafia do dziennika (`docker compose logs api | grep "console mailer"`) i do `runtime/outbox/` w wolumenie. Tylko do prób: każdy z dostępem do dziennika zna linki logowania.
-- Produkcja: `DAAS_EMAIL_BACKEND=smtp` oraz `DAAS_EMAIL_FROM`, `DAAS_SMTP_HOST`, `DAAS_SMTP_PORT`, `DAAS_SMTP_USER`, `DAAS_SMTP_PASSWORD` (szablon w `.env`). Po zmianie `.env`: `docker compose up -d`.
+- `DAAS_EMAIL_BACKEND=console` (domyślnie po `gen-env.sh`, razem z `DAAS_ALLOW_CONSOLE_MAIL=true`): link trafia wyłącznie do pliku w `runtime/outbox/` w wolumenie (w produkcji nie ma go w dzienniku). Tylko do prób. Przy `APP_ENV=prod` API **odmawia startu** z `console`, jeśli `DAAS_ALLOW_CONSOLE_MAIL` nie jest ustawione na `true`.
+- Produkcja: `DAAS_EMAIL_BACKEND=smtp` (usuń `DAAS_ALLOW_CONSOLE_MAIL` z `.env`) oraz `DAAS_EMAIL_FROM`, `DAAS_SMTP_HOST`, `DAAS_SMTP_PORT`, `DAAS_SMTP_USER`, `DAAS_SMTP_PASSWORD` (szablon w `.env`). Po zmianie `.env`: `docker compose up -d`.
 
 ### Wartości, które trzeba znać
 
@@ -151,11 +151,19 @@ raporty.example.com {
 }
 ```
 
-Adresy `api:8000` i `web:3000` działają, gdy kontener wspólnego proxy jest w sieci tego projektu (`daas-engine_default`): w jego compose dodaj `networks: [default, daas]` oraz `daas: { external: true, name: daas-engine_default }`. Gdy proxy działa na hoście (nie w kontenerze), użyj `127.0.0.1:8000` i `127.0.0.1:3000`. Pamiętaj o `DAAS_DOMAIN` w `.env`: z niego wynika `DAAS_COCKPIT_ORIGIN` (CORS z cookie). Proxy musi przekazywać `X-Forwarded-For` (Caddy robi to domyślnie) i nie buforować odpowiedzi `text/event-stream`.
+Adresy `api:8000` i `web:3000` działają, gdy kontener wspólnego proxy jest w sieci tego projektu (`daas-engine_default`): w jego compose dodaj `networks: [default, daas]` oraz `daas: { external: true, name: daas-engine_default }`. Gdy proxy działa na hoście (nie w kontenerze), użyj `127.0.0.1:8000` i `127.0.0.1:3000`. Pamiętaj o `DAAS_DOMAIN` w `.env`: z niego wynika `DAAS_COCKPIT_ORIGIN` (CORS z cookie). Proxy musi przekazywać `X-Forwarded-For` (Caddy robi to domyślnie), nie buforować odpowiedzi `text/event-stream` i nie zapisywać w dzienniku parametru `?token=` ani nagłówków `Cookie`/`Authorization` (filtr dziennika: `deploy/Caddyfile`). Ustaw też `DAAS_FORWARDED_ALLOW_IPS` na adres proxy (sekcja „Zmienne i utwardzenie kontenerów”).
+
+## Zmienne i utwardzenie kontenerów
+
+- **Jawna lista zmiennych.** `compose.yml` nie używa `env_file`: kontener `api` dostaje tylko zmienne trybu cloud wymienione w sekcji `environment` (z `.env` lub powłoki, gdy ustawione). `FACEIT_*`, `APIFY_*`, `ECOMMERCE_CSV_PATH`, `DISCORD_WEBHOOK_URL`, `DAAS_API_KEY` i `ANTHROPIC_API_KEY` nie przechodzą, nawet jeśli leżą w `.env`. Nową zmienną aplikacji trzeba dopisać do `compose.yml`.
+- **Streszczenie modelu (LLM) jest wyłączone.** Klucz `ANTHROPIC_API_KEY` trafia do kontenera tylko przez nakładkę `compose.llm.yml`, która też ustawia `DAAS_LLM_NARRATIVE=true`. Włączenie: w `.env` dopisz `ANTHROPIC_API_KEY=...` i `COMPOSE_FILE=compose.yml:compose.llm.yml`, potem `docker compose up -d`; wyłączenie: usuń `COMPOSE_FILE`. Zasady tego, co wychodzi do dostawcy: [`docs/SECURITY.md`](../docs/SECURITY.md).
+- **System plików tylko do odczytu.** `api` i `web` mają `read_only: true`; zapisywalne są wyłącznie wolumeny (`/data/control`, `/data/runtime`) i `tmpfs` (`/tmp`, dla `web` także `.next/cache`). Wszystkie kontenery mają `cap_drop: ALL` (Caddy dodatkowo `NET_BIND_SERVICE` dla portów 80/443) i `no-new-privileges`. Po aktualizacji obrazu sprawdź `./smoke.sh`; gdyby kontener zgłaszał błąd zapisu poza wolumenem, zgłoś go zamiast wyłączać `read_only`.
+- **Adres klienta (`FORWARDED_ALLOW_IPS`).** Limity per IP i audyt czytają adres z `X-Forwarded-For`, ale uvicorn ufa nagłówkowi tylko od adresów z tej listy. Domyślnie `*` (`DAAS_FORWARDED_ALLOW_IPS` w `.env`): bezpieczne z Caddy z tego projektu, bo API słucha tylko w sieci compose i na loopbacku hosta, a Caddy nadpisuje `X-Forwarded-For` wartością od klienta. Ze **wspólnym proxy** ustaw `DAAS_FORWARDED_ALLOW_IPS` na adres proxy widziany przez kontener (proxy w kontenerze: jego adres w sieci `daas-engine_default`; proxy na hoście: zwykle brama tej sieci, np. `172.18.0.1`, sprawdź `docker network inspect daas-engine_default`). Zbyt szeroka lista pozwala każdemu, kto dosięgnie portu API, podszyć się pod dowolny adres; zbyt wąska sprawia, że wszyscy klienci mają adres proxy i dzielą jeden limit.
+- **Dziennik Caddy.** Nagłówki `X-Api-Key`, `Cookie`, `Authorization`, `X-Csrf-Token`, `Referer` i parametr `?token=` (link logowania) są usuwane lub zamazane zarówno w dzienniku dostępu, jak i w dzienniku błędów (np. 502 w trakcie restartu API).
 
 ## Operacje
 
-- Stan: `docker compose ps`, `docker compose logs -f api` (dziennik JSON z `request_id`), `docker compose logs caddy` (dostęp; nagłówki `X-Api-Key`, `Cookie`, `Authorization` są usuwane z dziennika).
+- Stan: `docker compose ps`, `docker compose logs -f api` (dziennik JSON z `request_id`), `docker compose logs caddy` (dostęp; nagłówki z kluczami i cookie oraz token linku logowania są usuwane z dziennika).
 - Metryki: `curl -H "Authorization: Bearer $DAAS_METRICS_TOKEN" http://127.0.0.1:8000/metrics`.
 - Restart po zmianie `.env`: `docker compose up -d` (kontenery z nową konfiguracją są tworzone od nowa, dane zostają w wolumenach).
 - Zapora: otwórz tylko 22, 80 i 443. Porty aplikacji są na loopbacku; nie zmieniaj ich na `0.0.0.0`.
@@ -165,5 +173,5 @@ Adresy `api:8000` i `web:3000` działają, gdy kontener wspólnego proxy jest w 
 
 - Jeden węzeł, brak HA: control plane to SQLite w wolumenie (`DAAS_CONTROL_DB_URL` pozwala przejść na Postgres, wymaga dodatkowej zależności `asyncpg`, patrz `pyproject.toml`).
 - Aktualizacja zatrzymuje `api` na czas restartu (sekundy); trwające zadania w locie kończą się jako `failed` z kodem `abandoned`.
-- `Caddyfile` i `compose.yml` przeszły walidację składni (`docker compose config`), ale pełny rozruch na docelowym VPS to zadanie operatora: wykonaj `./smoke.sh --public ...` i potraktuj go jako bramę przyjęcia.
+- `Caddyfile` przeszedł `caddy validate` (2.10) i próbę filtra dziennika na lokalnym Caddy, a `compose.yml` `docker compose config`; obrazy nie były budowane ani uruchamiane lokalnie (brak demona Dockera; budowę obrazów sprawdza job `docker` w CI), więc pełny rozruch na docelowym VPS to zadanie operatora: wykonaj `./smoke.sh --public ...` i potraktuj go jako bramę przyjęcia.
 - Obrazy bazowe są przypięte tagami (`python:3.12-slim`, `node:22-alpine`, `caddy:2`), nie skrótami. Dependabot (ekosystem `docker`) podpowiada podbicia.

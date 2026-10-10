@@ -74,8 +74,10 @@ DAAS_SECRET_KEY=$secret_key
 DAAS_METRICS_TOKEN=$metrics_token
 
 # --- Logowanie e-mailem (magic link) ---
-# console = link tylko w dzienniku i w runtime/outbox: wylacznie proby. Produkcja: smtp.
+# console = link tylko w runtime/outbox/ (w produkcji nie ma go w dzienniku): wylacznie proby. Produkcja: smtp.
+# API odmawia startu przy console + APP_ENV=prod bez jawnej zgody ponizej; przy smtp usun DAAS_ALLOW_CONSOLE_MAIL.
 DAAS_EMAIL_BACKEND=console
+DAAS_ALLOW_CONSOLE_MAIL=true
 # DAAS_EMAIL_BACKEND=smtp
 # DAAS_EMAIL_FROM=DaaS Engine <raporty@$domain>
 # DAAS_SMTP_HOST=smtp.example.com

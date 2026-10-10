@@ -4,14 +4,39 @@
 #
 #   /api/*   -> api:8000   (API v1, SSE, raporty)
 #   reszta   -> web:3000   (kokpit Next.js)
-
-{$DAAS_DOMAIN:localhost} {
-	# Dziennik dostepu w JSON na stdout (docker compose logs caddy). Klucz API i cookie nie trafiaja do dziennika.
+{
+	# Dziennik domyslny (m.in. bledy proxy, np. 502 przy restarcie API) niesie to samo zapytanie co dziennik dostepu,
+	# wiec dostaje ten sam filtr: bez tokenu linku logowania, cookie i kluczy.
 	log {
 		output stdout
 		format filter {
 			wrap json
 			fields {
+				request>uri query {
+					replace token REDACTED
+				}
+				request>headers>Referer delete
+				request>headers>X-Api-Key delete
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>headers>X-Csrf-Token delete
+			}
+		}
+	}
+}
+
+{$DAAS_DOMAIN:localhost} {
+	# Dziennik dostepu w JSON na stdout (docker compose logs caddy). Klucz API, cookie i token linku logowania
+	# (?token=... w /login/verify) nie trafiaja do dziennika: naglowki sa usuwane, parametr `token` zamazany.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace token REDACTED
+				}
+				request>headers>Referer delete
 				request>headers>X-Api-Key delete
 				request>headers>Cookie delete
 				request>headers>Authorization delete
