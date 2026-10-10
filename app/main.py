@@ -203,4 +203,6 @@ if __name__ == "__main__":
 
     s = get_settings()
     # workers=1 jawnie: DuckDB (single writer) i limiter w pamieci procesu nie wspolpracuja z wieloma procesami
-    uvicorn.run("app.main:app", host=s.app_host, port=s.app_port, reload=s.app_env == "dev", workers=1)
+    # timeout_graceful_shutdown: otwarte strumienie SSE nie moga przytrzymac zamkniecia procesu dluzej niz 5 s
+    uvicorn.run("app.main:app", host=s.app_host, port=s.app_port, reload=s.app_env == "dev", workers=1,
+                timeout_graceful_shutdown=5)

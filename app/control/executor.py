@@ -52,11 +52,28 @@ class RunFinished:
 Listener = Callable[[RunFinished], Awaitable[None]]
 
 
+class StreamSlot:
+    """Miejsce w limicie strumieni SSE; `release()` jest idempotentne (generator i zadanie w tle wolaja je oba)."""
+
+    def __init__(self, bus: JobBus, key: str) -> None:
+        self._bus, self._key, self._released = bus, key, False
+
+    def release(self) -> None:
+        if not self._released:
+            self._released = True
+            self._bus._release(self._key)
+
+
 class JobBus:
-    """Powiadomienia o zmianie zadania dla SSE: `wait` budzi sie od razu po `publish` (albo po timeout)."""
+    """Powiadomienia o zmianie zadania dla SSE: `wait` budzi sie od razu po `publish` (albo po timeout).
+
+    Prowadzi tez ewidencje otwartych strumieni (limity per podmiot i globalny) oraz flage zamkniecia serwera:
+    `shutdown()` budzi wszystkie strumienie, ktore wtedy koncza sie same."""
 
     def __init__(self) -> None:
         self._events: dict[str, set[asyncio.Event]] = {}
+        self._streams: dict[str, int] = {}
+        self.closing = False
 
     def subscribe(self, job_id: str) -> asyncio.Event:
         event = asyncio.Event()
@@ -73,6 +90,32 @@ class JobBus:
     def publish(self, job_id: str) -> None:
         for event in list(self._events.get(job_id, ())):
             event.set()
+
+    # ------------------------------------------------------------------ strumienie SSE
+    @property
+    def active_streams(self) -> int:
+        return sum(self._streams.values())
+
+    def open_stream(self, key: str, *, per_key: int, total: int) -> StreamSlot | None:
+        """Rezerwuje miejsce na strumien dla podmiotu `key`; None, gdy limit podmiotu albo globalny jest wyczerpany."""
+        if self._streams.get(key, 0) >= per_key or self.active_streams >= total:
+            return None
+        self._streams[key] = self._streams.get(key, 0) + 1
+        return StreamSlot(self, key)
+
+    def _release(self, key: str) -> None:
+        left = self._streams.get(key, 0) - 1
+        if left > 0:
+            self._streams[key] = left
+        else:
+            self._streams.pop(key, None)
+
+    def shutdown(self) -> None:
+        """Serwer sie zamyka: nie przyjmujemy nowych strumieni, istniejace sie koncza (budzimy je)."""
+        self.closing = True
+        for listeners in list(self._events.values()):
+            for event in list(listeners):
+                event.set()
 
 
 def sha256_file(path: Path) -> str | None:
@@ -124,6 +167,7 @@ class JobExecutor:
     async def stop(self) -> None:
         """Anuluje oczekujace taski. Trwajacy w watku run nie da sie przerwac; jego `running` zostanie po
         restarcie oznaczone jako `abandoned`."""
+        self.bus.shutdown()
         for task in list(self._tasks):
             task.cancel()
         if self._tasks:

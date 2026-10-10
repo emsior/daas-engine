@@ -107,6 +107,10 @@ class Settings(BaseSettings):
     #: Odstepy miedzy ponowieniami dostawy webhooka, w sekundach (po jednej probie poczatkowej).
     daas_webhook_backoff_sec: str = "1,5,25"
     daas_sse_heartbeat_sec: float = Field(default=15.0, gt=0)
+    #: Limity strumieni SSE (`GET .../jobs/{id}/events`): na podmiot (klucz/uzytkownik), globalnie i czas zycia jednego.
+    daas_sse_max_per_principal: int = Field(default=5, ge=1, le=100)
+    daas_sse_max_total: int = Field(default=100, ge=1, le=10000)
+    daas_sse_max_seconds: int = Field(default=1800, ge=1, le=86400)
 
     # CORS domyslnie wylaczony: n8n i klienci API wolaja serwer-serwer, przegladarka niepotrzebna.
     # Wlaczenie: CORS_ORIGINS='["https://prochpc.pl"]' w .env

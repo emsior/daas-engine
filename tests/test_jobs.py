@@ -220,12 +220,15 @@ def test_sse_streams_status_progress_log_and_ends_with_done(cloud_client, cloud_
     thread = threading.Thread(target=consume)
     thread.start()
     time.sleep(0.4)
+    bus = cloud_client.app.state.executor.bus
     update_rows(cloud_settings, models.Job, {"status": "running", "progress": 40, "message": "mapping columns"},
                 models.Job.id == job_id)
-    time.sleep(1.4)
+    cloud_client.portal.call(bus.publish, job_id)      # stan zmienia executor i budzi szyne; tu robimy to recznie
+    time.sleep(0.6)
     update_rows(cloud_settings, models.Job, {"status": "succeeded", "progress": 100, "message": "done",
                                              "finished_at": utcnow(), "run_id": new_ulid()},
                 models.Job.id == job_id)
+    cloud_client.portal.call(bus.publish, job_id)
     thread.join(timeout=20)
     assert not thread.is_alive(), "the stream did not close after the terminal state"
     events = parse_sse(out["body"])

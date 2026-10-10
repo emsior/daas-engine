@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.background import BackgroundTask
 
 from app.api.problems import ProblemError, not_found
 from app.api.v1.deps import OrgContext, org_access
@@ -17,10 +18,10 @@ from app.api.v1.schemas import JobCreate, JobOut, JobPage, JobStatus
 from app.control import scopes as sc
 from app.control.audit import record_event
 from app.control.db import get_db
-from app.control.executor import TERMINAL
+from app.control.executor import TERMINAL, StreamSlot
 from app.control.models import Job, Upload
 from app.control.types import utcnow
-from app.core.ratelimit_v1 import enforce
+from app.core.ratelimit_v1 import enforce, principal_key
 
 log = logging.getLogger(__name__)
 router = APIRouter(tags=["jobs"])
@@ -145,12 +146,18 @@ def _snapshot(job: Job) -> dict:
     return json.loads(job_out(job).model_dump_json())
 
 
-async def _event_stream(request: Request, org_id: str, job_id: str) -> AsyncIterator[str]:
+#: Fallback: bez zdarzenia z szyny stan zadania jest odczytywany co tyle sekund (zwykle budzi `JobBus.publish`).
+SSE_FALLBACK_POLL_SEC = 5.0
+
+
+async def _event_stream(request: Request, org_id: str, job_id: str, slot: StreamSlot) -> AsyncIterator[str]:
     state = request.app.state
     bus, heartbeat = state.executor.bus, state.settings.daas_sse_heartbeat_sec
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + state.settings.daas_sse_max_seconds
     event = bus.subscribe(job_id)
     last: tuple | None = None
-    last_beat = asyncio.get_running_loop().time()
+    last_beat = loop.time()
     yield "retry: 3000\n\n"
     try:
         while True:
@@ -170,29 +177,39 @@ async def _event_stream(request: Request, org_id: str, job_id: str) -> AsyncIter
                 if job.message and (last is None or job.message != last[2]):
                     yield _sse("log", {"id": job.id, "message": job.message, "ts": utcnow().isoformat()})
                 last = state_now
-                last_beat = asyncio.get_running_loop().time()
+                last_beat = loop.time()
             if job.status in TERMINAL:
                 yield _sse("done", snap)
                 return
+            if bus.closing:
+                yield ": server shutting down, reconnect\n\n"
+                return
+            if loop.time() >= deadline:
+                yield ": maximum stream lifetime reached, reconnect\n\n"
+                return
             if await request.is_disconnected():
                 return
-            now = asyncio.get_running_loop().time()
+            now = loop.time()
             if now - last_beat >= heartbeat:
                 yield ": heartbeat\n\n"
                 last_beat = now
+            timeout = max(0.05, min(SSE_FALLBACK_POLL_SEC, heartbeat, deadline - now))
             try:
-                await asyncio.wait_for(event.wait(), timeout=min(1.0, heartbeat))
+                await asyncio.wait_for(event.wait(), timeout=timeout)
             except TimeoutError:
                 pass
     finally:
         bus.unsubscribe(job_id, event)
+        slot.release()
 
 
 @router.get(
     "/orgs/{org_id}/jobs/{job_id}/events", summary="Stream job events (SSE)",
     description="`text/event-stream`. Events: `status` (job snapshot on every status change), `progress` "
                 "(`{id, progress}`), `log` (`{id, message, ts}`) and a final `done` (job snapshot); the stream closes "
-                "after `done`. A comment line `: heartbeat` is sent every 15 seconds of silence.",
+                "after `done`. A comment line `: heartbeat` is sent every 15 seconds of silence. Limits: 5 open streams per "
+                "caller and 100 in total (`429 sse_limit`); a stream lives at most 30 minutes (reconnect; the first event of a "
+                "stream is always a full `status` snapshot).",
     response_class=StreamingResponse,
     responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}},
 )
@@ -200,6 +217,17 @@ async def job_events(job_id: str, request: Request, ctx: OrgContext = Depends(_R
                      db: AsyncSession = Depends(get_db)) -> StreamingResponse:
     await _load_job(db, ctx.org_id, job_id)  # 404 zanim zaczniemy strumien
     await db.close()  # sesja zadania nie ma trzymac polaczenia przez caly strumien
+    state = request.app.state
+    bus = state.executor.bus
+    if bus.closing:
+        raise ProblemError(503, "shutting_down", "the server is shutting down, retry shortly",
+                           headers={"Retry-After": "5"})
+    slot = bus.open_stream(principal_key(request), per_key=state.settings.daas_sse_max_per_principal,
+                           total=state.settings.daas_sse_max_total)
+    if slot is None:
+        raise ProblemError(429, "sse_limit", "too many open event streams; close one or retry shortly",
+                           headers={"Retry-After": "5"})
+    # slot zwalnia generator (finally) oraz zadanie w tle (gdy odpowiedz nie zdazyla wystartowac); zwolnienie jest idempotentne
     return StreamingResponse(
-        _event_stream(request, ctx.org_id, job_id), media_type="text/event-stream",
-        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+        _event_stream(request, ctx.org_id, job_id, slot), media_type="text/event-stream",
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"}, background=BackgroundTask(slot.release))
