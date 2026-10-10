@@ -169,9 +169,9 @@ async def remove_member(user_id: str, request: Request, ctx: OrgContext = Depend
 )
 async def change_role(user_id: str, body: MemberRolePatch, request: Request, ctx: OrgContext = Depends(_MANAGE),
                       db: AsyncSession = Depends(get_db)) -> MemberOut:
+    membership, user = await _member_of(db, ctx.org_id, user_id)   # 404 przed 403: obcy id nie ujawnia roli wolajacego
     if ctx.role != "owner":
         raise ProblemError(403, "forbidden", "only an owner can change roles")
-    membership, user = await _member_of(db, ctx.org_id, user_id)
     if membership.role != body.role:
         if membership.role == "owner" and await _owner_count(db, ctx.org_id) <= 1:
             raise ProblemError(409, "last_owner", "the organization must keep at least one owner")
