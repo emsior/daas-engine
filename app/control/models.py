@@ -97,6 +97,8 @@ class MagicLink(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
     used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # SHA-256 nonce z cookie `daas_ml` ustawianego przegladarce, ktora poprosila o link (ochrona przed login CSRF)
+    nonce_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class Session(Base):
@@ -164,7 +166,8 @@ class Job(Base):
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
 
-    __table_args__ = (Index("ix_jobs_org_id_created_at", "org_id", "created_at"), Index("ix_jobs_status", "status"))
+    __table_args__ = (Index("ix_jobs_org_id_created_at", "org_id", "created_at"), Index("ix_jobs_status", "status"),
+                      Index("ix_jobs_org_id_id", "org_id", "id"))
 
 
 class RunRecord(Base):
@@ -184,6 +187,8 @@ class RunRecord(Base):
     # zakres dat w danych runu (ecommerce_demo: min/max daty zamowienia; uksc_evidence: data zbioru paczki); NULL = brak
     period_from: Mapped[date | None] = mapped_column(Date, nullable=True)
     period_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # kiedy retencja usunela pliki raportow tego runu (rekord i hashe zostaja, `verify` dziala dalej); NULL = pliki sa
+    report_purged_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     __table_args__ = (
@@ -211,7 +216,8 @@ class AuditEvent(Base):
     ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     meta: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # wylacznie klucze z AUDIT_META_KEYS
 
-    __table_args__ = (Index("ix_audit_events_org_id_id", "org_id", "id"),)
+    __table_args__ = (Index("ix_audit_events_org_id_id", "org_id", "id"),
+                      Index("ix_audit_events_org_id_ts_id", "org_id", "ts", "id"))
 
 
 class UsageCounter(Base):

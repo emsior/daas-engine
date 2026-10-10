@@ -144,3 +144,38 @@ def test_migration_0002_adds_two_nullable_date_columns_and_keeps_rows(tmp_path: 
         return (await db.execute(text("SELECT run_id FROM run_records"))).scalars().all()
 
     assert with_db(s, ids) == ["R1"]
+
+
+# ================================================================ migracja 0003
+def _indexes(settings: Settings, table: str) -> set[str]:
+    async def go(db):
+        return {r[1] for r in (await db.execute(text(f"PRAGMA index_list({table})"))).all()}  # noqa: S608
+
+    return with_db(settings, go)
+
+
+def _table_columns(settings: Settings, table: str) -> set[str]:
+    async def go(db):
+        return {r[1] for r in (await db.execute(text(f"PRAGMA table_info({table})"))).all()}  # noqa: S608
+
+    return with_db(settings, go)
+
+
+def test_migration_0003_adds_columns_and_indexes_and_reverts_cleanly(tmp_path: Path):
+    from alembic import command
+
+    s = _settings(tmp_path)
+    upgrade_sync(s, "0002")
+    assert "report_purged_at" not in _table_columns(s, "run_records")
+    assert "ix_jobs_org_id_id" not in _indexes(s, "jobs")
+    upgrade_sync(s)
+    assert "report_purged_at" in _table_columns(s, "run_records")
+    assert "nonce_hash" in _table_columns(s, "magic_links")
+    assert "ix_audit_events_org_id_ts_id" in _indexes(s, "audit_events")
+    assert "ix_jobs_org_id_id" in _indexes(s, "jobs")
+    command.downgrade(alembic_config(resolve_db_url(s)), "0002")
+    assert "report_purged_at" not in _table_columns(s, "run_records")
+    assert "nonce_hash" not in _table_columns(s, "magic_links")
+    assert not {"ix_audit_events_org_id_ts_id"} & _indexes(s, "audit_events")
+    assert "ix_jobs_org_id_id" not in _indexes(s, "jobs")
+    assert "period_from" in _table_columns(s, "run_records")  # 0002 zostaje
