@@ -25,7 +25,7 @@ test("zaproszenie członka: formularz, błędy, przyjęcie po pierwszym logowani
   await page.getByLabel("Adres e-mail zapraszanej osoby").fill(invited);
   await page.getByLabel("Rola").selectOption("member");
   await page.getByRole("button", { name: "Wyślij zaproszenie" }).click();
-  await expect(page.getByText(`Zaproszenie wysłane na adres ${invited}.`)).toBeVisible();
+  await expect(page.getByText(`Zaproszenie dla ${invited} przyjęte.`)).toBeVisible();
 
   // zaproszona osoba loguje się po raz pierwszy: trafia od razu do organizacji (bez onboardingu)
   const guestContext = await browser.newContext({ baseURL, locale: "pl-PL" });

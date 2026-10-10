@@ -9,6 +9,7 @@ import type {
   CreateOrgRequest,
   CreateWebhookRequest,
   InviteRequest,
+  Role,
   UpdateOrgRequest,
 } from "./types";
 
@@ -19,6 +20,7 @@ export const qk = {
   evidence: (org: string) => ["orgs", org, "evidence"] as const,
   apiKeys: (org: string) => ["orgs", org, "api-keys"] as const,
   members: (org: string) => ["orgs", org, "members"] as const,
+  invitations: (org: string) => ["orgs", org, "invitations"] as const,
   org: (org: string) => ["orgs", org] as const,
   usage: (org: string) => ["orgs", org, "usage"] as const,
   webhooks: (org: string) => ["orgs", org, "webhooks"] as const,
@@ -43,7 +45,8 @@ export function useRequestMagicLink() {
 export function useVerifyMagicLink() {
   const client = useQueryClient();
   return useMutation({
-    mutationFn: (token: string) => api.verifyMagicLink(token),
+    mutationFn: (vars: { token: string; confirm?: boolean }) =>
+      api.verifyMagicLink(vars.token, vars.confirm),
     onSuccess: (me) => client.setQueryData(qk.me, me),
   });
 }
@@ -74,6 +77,14 @@ export function useRun(org: string, id: string) {
   return useQuery({ queryKey: qk.run(org, id), queryFn: () => api.getRun(org, id) });
 }
 
+export function useReportStatus(org: string, id: string) {
+  return useQuery({
+    queryKey: ["orgs", org, "runs", id, "report-status"] as const,
+    queryFn: ({ signal }) => api.reportStatus(org, id, signal),
+    staleTime: 60_000,
+  });
+}
+
 export function useEvidence(org: string) {
   return useQuery({ queryKey: qk.evidence(org), queryFn: () => api.evidence(org) });
 }
@@ -100,7 +111,7 @@ export function useJobPolling(org: string, jobId: string | null, enabled: boolea
     enabled: enabled && jobId !== null,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
-      return status === "succeeded" || status === "failed" || status === "cancelled" ? false : 2000;
+      return status === "succeeded" || status === "failed" || status === "cancelled" ? false : 3000;
     },
   });
 }
@@ -137,6 +148,35 @@ export function useInvite(org: string) {
   const client = useQueryClient();
   return useMutation({
     mutationFn: (body: InviteRequest) => api.invite(org, body),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.invitations(org) }),
+  });
+}
+
+export function useInvitations(org: string) {
+  return useQuery({ queryKey: qk.invitations(org), queryFn: () => api.listInvitations(org) });
+}
+
+export function useRevokeInvitation(org: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.revokeInvitation(org, id),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.invitations(org) }),
+  });
+}
+
+export function useChangeMemberRole(org: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: { userId: string; role: Role }) =>
+      api.changeMemberRole(org, vars.userId, vars.role),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.members(org) }),
+  });
+}
+
+export function useRemoveMember(org: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (userId: string) => api.removeMember(org, userId),
     onSuccess: () => client.invalidateQueries({ queryKey: qk.members(org) }),
   });
 }

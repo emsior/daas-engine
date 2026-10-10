@@ -77,6 +77,8 @@ describe("kontrakt API (docs/openapi.json)", () => {
       paths.org("ORG"),
       paths.members("ORG"),
       paths.invitations("ORG"),
+      paths.invitation("ORG", "ID"),
+      paths.member("ORG", "ID"),
       paths.apiKeys("ORG"),
       paths.apiKey("ORG", "ID"),
       paths.uploads("ORG"),

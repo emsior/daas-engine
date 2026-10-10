@@ -132,6 +132,88 @@ describe("client API", () => {
     expect(me.org).toBeNull();
   });
 
+  it("verifyMagicLink: bez confirm wysyła sam token, z confirm: true dokłada flagę", async () => {
+    const me = jsonResponse({
+      principal: { type: "user", org_id: null, scopes: [] },
+      user: USER,
+      orgs: [],
+    });
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse({ user: USER, orgs: [], csrf_token: "c", expires_at: "x" }),
+      )
+      .mockResolvedValueOnce(me.clone())
+      .mockResolvedValueOnce(
+        jsonResponse({ user: USER, orgs: [], csrf_token: "c", expires_at: "x" }),
+      )
+      .mockResolvedValueOnce(me);
+    const token = "t".repeat(30);
+    await api.verifyMagicLink(token);
+    await api.verifyMagicLink(token, true);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({ token });
+    expect(JSON.parse(String(fetchMock.mock.calls[2]?.[1]?.body))).toEqual({
+      token,
+      confirm: true,
+    });
+  });
+
+  it("409 confirm_required niesie zamaskowany adres w emailHint", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        { title: "Conflict", status: 409, code: "confirm_required", email_hint: "j***@e***.test" },
+        { status: 409, problem: true },
+      ),
+    );
+    const error = (await api.verifyMagicLink("t".repeat(30)).catch((e: unknown) => e)) as ApiError;
+    expect(error.code).toBe("confirm_required");
+    expect(error.emailHint).toBe("j***@e***.test");
+  });
+
+  it("członkowie i zaproszenia: lista, cofnięcie, zmiana roli, usunięcie; zaproszenie bez ciała odpowiedzi", async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ status: "accepted" }, { status: 202 }))
+      .mockResolvedValueOnce(
+        jsonResponse([
+          { id: "i1", email: "a@example.test", role: "member", created_at: "x", expires_at: "y" },
+        ]),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          user_id: "u2",
+          email: "b@example.test",
+          name: null,
+          role: "admin",
+          created_at: "x",
+        }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    await api.invite("o1", { email: "a@example.test", role: "member" });
+    expect((await api.listInvitations("o1"))[0]?.id).toBe("i1");
+    await api.revokeInvitation("o1", "i1");
+    expect((await api.changeMemberRole("o1", "u2", "admin")).role).toBe("admin");
+    await api.removeMember("o1", "u2");
+    const calls = fetchMock.mock.calls.map(
+      ([url, init]) => `${init?.method ?? "GET"} ${String(url).replace(/.*\/api\/v1/, "")}`,
+    );
+    expect(calls).toEqual([
+      "POST /orgs/o1/invitations",
+      "GET /orgs/o1/invitations",
+      "DELETE /orgs/o1/invitations/i1",
+      "PATCH /orgs/o1/members/u2",
+      "DELETE /orgs/o1/members/u2",
+    ]);
+  });
+
+  it("reportStatus: 410 = expired, pozostałe odpowiedzi i błąd sieci = available", async () => {
+    fetchMock.mockResolvedValueOnce(new Response("{}", { status: 410 }));
+    expect(await api.reportStatus("o1", "r1")).toBe("expired");
+    fetchMock.mockResolvedValueOnce(new Response("<html>", { status: 200 }));
+    expect(await api.reportStatus("o1", "r1")).toBe("available");
+    fetchMock.mockRejectedValueOnce(new TypeError("x"));
+    expect(await api.reportStatus("o1", "r1")).toBe("available");
+  });
+
   it("listRuns czyta stronę {items} i mapuje skróty (bez null)", async () => {
     fetchMock.mockResolvedValue(
       jsonResponse({
@@ -242,8 +324,14 @@ describe("client API", () => {
       runs_limit: 20,
       upload_bytes_limit: null,
     });
-    fetchMock.mockResolvedValueOnce(jsonResponse({ delivered: true, status: 204 }));
-    expect(await api.pingWebhook("o1", "w1")).toEqual({ ok: true, status_code: 204 });
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ delivered: true, status: null, status_class: "2xx" }),
+    );
+    expect(await api.pingWebhook("o1", "w1")).toEqual({ ok: true, status_class: "2xx" });
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse({ delivered: false, status: null, status_class: "error" }),
+    );
+    expect(await api.pingWebhook("o1", "w1")).toEqual({ ok: false, status_class: "error" });
   });
 
   it("błędy walidacji FastAPI ({loc, msg}) trafiają do fieldErrors", async () => {

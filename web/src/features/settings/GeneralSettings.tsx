@@ -211,8 +211,10 @@ function WebhooksCard({ orgId }: { orgId: string }) {
     ping.mutate(hook.id, {
       onSuccess: (result) => {
         const message = result.ok
-          ? t("settings.webhooks.pingOk", { code: result.status_code ?? 200 })
-          : t("settings.webhooks.pingFail");
+          ? t("settings.webhooks.pingOk", { class: result.status_class })
+          : result.status_class === "error"
+            ? t("settings.webhooks.pingNoAnswer")
+            : t("settings.webhooks.pingFailClass", { class: result.status_class });
         setPingMessage(message);
         announce(message);
       },

@@ -80,4 +80,15 @@ describe("connectJobEvents", () => {
     stop();
     expect(sources[0]?.closed).toBe(true);
   });
+
+  it("gdy strumień nigdy się nie otworzył (np. sse_limit), poddaje się po 2 próbach", () => {
+    const onGiveUp = vi.fn();
+    connectJobEvents("/x", { onGiveUp }, { factory, baseDelayMs: 10 });
+    for (let i = 0; i < 3; i += 1) {
+      sources[sources.length - 1]?.fail(2);
+      vi.advanceTimersByTime(100);
+    }
+    expect(onGiveUp).toHaveBeenCalledOnce();
+    expect(sources.length).toBeLessThanOrEqual(3);
+  });
 });

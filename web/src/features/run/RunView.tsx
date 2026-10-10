@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
+import { Alert } from "@/components/Alert";
 import { Badge } from "@/components/Badge";
 import { Card } from "@/components/Card";
 import { PageHeading } from "@/components/PageHeading";
@@ -10,7 +11,7 @@ import { Skeleton } from "@/components/Skeleton";
 import { useSession } from "@/components/shell/OrgGate";
 import { useT, useTDynamic } from "@/i18n/provider";
 import { reportUrl } from "@/lib/api/client";
-import { useRun } from "@/lib/api/hooks";
+import { useReportStatus, useRun } from "@/lib/api/hooks";
 import type { ReportFormat, Run } from "@/lib/api/types";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { runStatusToBadge } from "@/lib/status";
@@ -31,6 +32,8 @@ function RunDetails({ run, orgId }: { run: Run; orgId: string }) {
   const typeName = td(`pipeline.${run.pipeline}`, run.pipeline);
   const date = formatDate(run.created_at);
   const htmlUrl = reportUrl(orgId, run.run_id, "html");
+  const status = useReportStatus(orgId, run.run_id);
+  const expired = status.data === "expired";
 
   return (
     <>
@@ -50,35 +53,41 @@ function RunDetails({ run, orgId }: { run: Run; orgId: string }) {
         </dl>
       </Card>
 
-      <section className="stack-3" aria-labelledby="report-actions">
-        <h2 id="report-actions" className="sr-only">
-          {t("run.download.title")}
-        </h2>
-        <div className="cluster">
-          <a className="btn" href={htmlUrl} target="_blank" rel="noopener noreferrer">
-            {t("run.open")}
-          </a>
-          {DOWNLOADS.map(({ format, label }) => (
-            <a
-              key={format}
-              className="btn btn-secondary"
-              href={reportUrl(orgId, run.run_id, format)}
-              download
-            >
-              {t(label)}
+      {expired ? (
+        <Alert variant="warning" role="status">
+          <p>{t("error.report_expired")}</p>
+        </Alert>
+      ) : (
+        <section className="stack-3" aria-labelledby="report-actions">
+          <h2 id="report-actions" className="sr-only">
+            {t("run.download.title")}
+          </h2>
+          <div className="cluster">
+            <a className="btn" href={htmlUrl} target="_blank" rel="noopener noreferrer">
+              {t("run.open")}
             </a>
-          ))}
-        </div>
-        {/* sandbox="" bez allow-scripts i allow-same-origin: raport nie wykona skryptów */}
-        <iframe
-          className="iframe-report"
-          sandbox=""
-          title={t("run.iframe.title", { type: typeName, date })}
-          referrerPolicy="no-referrer"
-          loading="lazy"
-          src={htmlUrl}
-        />
-      </section>
+            {DOWNLOADS.map(({ format, label }) => (
+              <a
+                key={format}
+                className="btn btn-secondary"
+                href={reportUrl(orgId, run.run_id, format)}
+                download
+              >
+                {t(label)}
+              </a>
+            ))}
+          </div>
+          {/* sandbox="" bez allow-scripts i allow-same-origin: raport nie wykona skryptów */}
+          <iframe
+            className="iframe-report"
+            sandbox=""
+            title={t("run.iframe.title", { type: typeName, date })}
+            referrerPolicy="no-referrer"
+            loading="lazy"
+            src={htmlUrl}
+          />
+        </section>
+      )}
 
       <VerifyBlock hashes={run.report_sha256} />
     </>

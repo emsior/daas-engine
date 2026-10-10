@@ -13,7 +13,7 @@ import { Progress } from "@/components/Progress";
 import { Table, Tbody, Td, Th, Thead, Tr } from "@/components/Table";
 import { useSession } from "@/components/shell/OrgGate";
 import { useT, useTDynamic, type TDynamicFunction, type TFunction } from "@/i18n/provider";
-import { api, jobEventsUrl } from "@/lib/api/client";
+import { api, isApiError, jobEventsUrl } from "@/lib/api/client";
 import { useCreateJob, useJobPolling, useUpload } from "@/lib/api/hooks";
 import type { UploadPreview } from "@/lib/api/types";
 import { MAX_PACKAGE_UPLOAD_BYTES, MAX_TABLE_UPLOAD_BYTES } from "@/lib/env";
@@ -278,7 +278,14 @@ export function UploadWizard() {
       { pipeline, upload_id: state.preview.upload_id },
       {
         onSuccess: (job) => dispatch({ type: "job_created", jobId: job.id, status: job.status }),
-        onError: () => dispatch({ type: "job_start_fail" }),
+        onError: (error) => {
+          if (isApiError(error) && error.code === "upload_required") {
+            dispatch({ type: "back_to_choose" });
+            dispatch({ type: "reject", error: classifyUploadFailure(error, null) });
+          } else {
+            dispatch({ type: "job_start_fail" });
+          }
+        },
       },
     );
   };
@@ -403,11 +410,15 @@ export function UploadWizard() {
             {state.live === "polling" ? (
               <p className="text-muted">{t("upload.progress.polling")}</p>
             ) : null}
-            <div>
-              <Button variant="secondary" onClick={cancelJob}>
-                {t("upload.progress.cancel")}
-              </Button>
-            </div>
+            {state.progress.status === "running" ? (
+              <p className="text-muted">{t("upload.progress.noCancel")}</p>
+            ) : (
+              <div>
+                <Button variant="secondary" onClick={cancelJob}>
+                  {t("upload.progress.cancel")}
+                </Button>
+              </div>
+            )}
           </div>
         </Card>
       ) : null}
@@ -447,7 +458,11 @@ export function UploadWizard() {
               {state.phase === "failed" ? t("upload.failed.title") : t("upload.cancelled.title")}
             </strong>
             {state.phase === "failed" ? (
-              <p>{t("upload.failed.body", { code: state.failCode ?? "unknown" })}</p>
+              <p>
+                {state.failCode === "no_records"
+                  ? t("upload.failed.noRecords")
+                  : t("upload.failed.body", { code: state.failCode ?? "unknown" })}
+              </p>
             ) : null}
             <div className="cluster">
               <Button onClick={() => dispatch({ type: "back_to_choose" })}>{t("app.retry")}</Button>

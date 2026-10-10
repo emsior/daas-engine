@@ -218,11 +218,13 @@ export interface InviteRequest {
   role: Role;
 }
 
+/** Oczekujące zaproszenie (`GET /orgs/{id}/invitations`). */
 export interface Invitation {
-  id?: string;
+  id: string;
   email: string;
   role: Role;
-  expires_at?: string | null;
+  created_at: string;
+  expires_at: string;
 }
 
 export interface Webhook {
@@ -242,9 +244,12 @@ export interface CreateWebhookRequest {
   events: WebhookEvent[];
 }
 
+export type PingStatusClass = "2xx" | "3xx" | "4xx" | "5xx" | "error";
+
+/** Wynik testu webhooka: backend podaje klasę odpowiedzi, nie dokładny kod. */
 export interface WebhookPingResult {
   ok: boolean;
-  status_code?: number | null;
+  status_class: PingStatusClass;
 }
 
 export interface Usage {
@@ -273,6 +278,8 @@ export interface ProblemDetails {
   instance?: string;
   request_id?: string;
   code?: string;
+  /** `confirm_required`: zamaskowany adres, na który zamówiono link logowania. */
+  email_hint?: string;
   /** Błędy pól: `{loc, msg}` (walidacja FastAPI) albo `{field, message}`. */
   errors?: { loc?: string[]; msg?: string; field?: string; message?: string }[];
 }

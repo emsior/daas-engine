@@ -56,6 +56,8 @@ export interface paths {
         /**
          * Exchange a sign-in link for a session
          * @description Consumes the token (single use) and starts a session: sets `daas_session` (HttpOnly) and `daas_csrf`. The first sign-in creates the user. Pending invitations for the address are accepted.
+         *
+         *     Login-CSRF protection: `POST /auth/magic-link` sets an HttpOnly cookie (`__Host-daas_ml`) in the browser that asked for the link. If the cookie does not match the link (another browser, a cleared cookie, a link someone else planted), the answer is `409 confirm_required` with a masked `email_hint` and the token is NOT consumed; repeat the request with `confirm: true` after the user explicitly agrees to sign in as that address in this browser.
          */
         post: operations["verify_magic_link_api_v1_auth_magic_link_verify_post"];
         delete?: never;
@@ -240,14 +242,35 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        /** List pending invitations */
+        get: operations["list_invitations_api_v1_orgs__org_id__invitations_get"];
         put?: never;
         /**
          * Invite by e-mail
-         * @description Stores an invitation (valid 7 days) and e-mails the address. The invitation is accepted when the address signs in. Repeating it for the same address refreshes the existing invitation.
+         * @description Stores an invitation (valid 7 days) and e-mails the address; it is accepted when the address signs in. The answer is always `202 {"status": "accepted"}`: it does not reveal whether the address already has an account or is already a member (nothing is sent in that case). Repeating it for the same address refreshes the invitation. Limits: 20 per organization per 24 hours and 5 per minute per caller (`429 invitation_limit`). Use `GET /invitations` to list and `DELETE` to revoke.
          */
         post: operations["invite_api_v1_orgs__org_id__invitations_post"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/invitations/{invitation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke an invitation
+         * @description Deletes a pending invitation; an accepted one cannot be revoked (remove the member instead).
+         */
+        delete: operations["revoke_invitation_api_v1_orgs__org_id__invitations__invitation_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -320,7 +343,7 @@ export interface paths {
         };
         /**
          * Stream job events (SSE)
-         * @description `text/event-stream`. Events: `status` (job snapshot on every status change), `progress` (`{id, progress}`), `log` (`{id, message, ts}`) and a final `done` (job snapshot); the stream closes after `done`. A comment line `: heartbeat` is sent every 15 seconds of silence.
+         * @description `text/event-stream`. Events: `status` (job snapshot on every status change), `progress` (`{id, progress}`), `log` (`{id, message, ts}`) and a final `done` (job snapshot); the stream closes after `done`. A comment line `: heartbeat` is sent every 15 seconds of silence. Limits: 5 open streams per caller and 100 in total (`429 sse_limit`); a stream lives at most 30 minutes (reconnect; the first event of a stream is always a full `status` snapshot).
          */
         get: operations["job_events_api_v1_orgs__org_id__jobs__job_id__events_get"];
         put?: never;
@@ -341,15 +364,35 @@ export interface paths {
         /** List members */
         get: operations["list_members_api_v1_orgs__org_id__members_get"];
         put?: never;
-        /**
-         * Add an existing user
-         * @description Adds a user who already has an account. For a new address use `POST /orgs/{org_id}/invitations`.
-         */
-        post: operations["add_member_api_v1_orgs__org_id__members_post"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/members/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove a member
+         * @description Owners and admins (and keys with `members:manage`) can remove members; only an owner session can remove an owner. The last owner cannot be removed (`409 last_owner`). The member's sessions in this organization end and the API keys they created here are revoked.
+         */
+        delete: operations["remove_member_api_v1_orgs__org_id__members__user_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Change a member's role
+         * @description Owner sessions only. The last owner cannot be demoted (`409 last_owner`).
+         */
+        patch: operations["change_role_api_v1_orgs__org_id__members__user_id__patch"];
         trace?: never;
     };
     "/api/v1/orgs/{org_id}/runs": {
@@ -398,7 +441,7 @@ export interface paths {
         };
         /**
          * Download a report
-         * @description `fmt=html|md|json`. Sent with a restrictive `Content-Security-Policy`, `nosniff`, `ETag` = SHA-256 of the file and `Cache-Control: private, no-store`. Embed the HTML only in a sandboxed iframe.
+         * @description `fmt=html|md|json`. Sent with a restrictive `Content-Security-Policy`, `nosniff`, `ETag` = SHA-256 of the file and `Cache-Control: private, no-store`. Embed the HTML only in a sandboxed iframe. `410 report_expired` once the retention job removed the files (the run record and hashes stay).
          */
         get: operations["get_report_api_v1_orgs__org_id__runs__run_id__report_get"];
         put?: never;
@@ -521,7 +564,7 @@ export interface paths {
         put?: never;
         /**
          * Send a test event
-         * @description Sends one signed `ping` event (single attempt) and reports whether the endpoint answered 2xx.
+         * @description Sends one signed `ping` event (single attempt) and reports whether the endpoint answered 2xx and the class of its answer (`status_class`); the exact status code is not returned.
          */
         post: operations["ping_webhook_api_v1_orgs__org_id__webhooks__webhook_id__ping_post"];
         delete?: never;
@@ -792,6 +835,15 @@ export interface components {
             /** Version */
             version: string;
         };
+        /** InvitationAccepted */
+        InvitationAccepted: {
+            /**
+             * Status
+             * @default accepted
+             * @constant
+             */
+            status: "accepted";
+        };
         /** InvitationCreate */
         InvitationCreate: {
             /**
@@ -901,6 +953,20 @@ export interface components {
              */
             status: "sent";
         };
+        /** MagicLinkConfirm */
+        MagicLinkConfirm: {
+            /**
+             * Confirm
+             * @description jawne potwierdzenie logowania w tej przegladarce
+             * @default false
+             */
+            confirm: boolean;
+            /**
+             * Token
+             * @example Zm9v...token-z-maila
+             */
+            token: string;
+        };
         /** MagicLinkRequest */
         MagicLinkRequest: {
             /**
@@ -915,34 +981,12 @@ export interface components {
              */
             locale: "pl" | "en";
         };
-        /** MagicLinkVerify */
-        MagicLinkVerify: {
-            /**
-             * Token
-             * @example Zm9v...token-z-maila
-             */
-            token: string;
-        };
         /** MeOut */
         MeOut: {
             /** Orgs */
             orgs: components["schemas"]["MembershipOut"][];
             principal: components["schemas"]["PrincipalOut"];
             user?: components["schemas"]["UserOut"] | null;
-        };
-        /** MemberCreate */
-        MemberCreate: {
-            /**
-             * Email
-             * @example ola@example.test
-             */
-            email: string;
-            /**
-             * Role
-             * @default member
-             * @enum {string}
-             */
-            role: "owner" | "admin" | "member";
         };
         /** MemberOut */
         MemberOut: {
@@ -962,6 +1006,14 @@ export interface components {
             role: "owner" | "admin" | "member";
             /** User Id */
             user_id: string;
+        };
+        /** MemberRolePatch */
+        MemberRolePatch: {
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "admin" | "member";
         };
         /** MembershipOut */
         MembershipOut: {
@@ -1370,15 +1422,22 @@ export interface components {
             /** Url */
             url: string;
         };
-        /** WebhookPingResult */
-        WebhookPingResult: {
+        /** WebhookPingOut */
+        WebhookPingOut: {
             /** Delivered */
             delivered: boolean;
             /**
              * Status
-             * @description status HTTP odbiorcy; `null` przy bledzie sieci/adresu
+             * @deprecated
+             * @description DEPRECATED, always `null`: the exact status code of the receiver is no longer returned. Use `status_class`.
              */
-            status?: number | null;
+            status?: null;
+            /**
+             * Status Class
+             * @description class of the receiver's answer; `error` = no answer (network, DNS, address refused)
+             * @enum {string}
+             */
+            status_class: "2xx" | "3xx" | "4xx" | "5xx" | "error";
         };
     };
     responses: never;
@@ -1449,7 +1508,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MagicLinkVerify"];
+                "application/json": components["schemas"]["MagicLinkConfirm"];
             };
         };
         responses: {
@@ -1464,6 +1523,13 @@ export interface operations {
             };
             /** @description Token unknown, expired or already used */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `confirm_required`: link was requested from another browser */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1834,6 +1900,38 @@ export interface operations {
             };
         };
     };
+    list_invitations_api_v1_orgs__org_id__invitations_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     invite_api_v1_orgs__org_id__invitations_post: {
         parameters: {
             query?: never;
@@ -1851,16 +1949,54 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["InvitationOut"];
+                    "application/json": components["schemas"]["InvitationAccepted"];
                 };
             };
-            /** @description Already a member */
-            409: {
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+            /** @description Invitation limit reached */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    revoke_invitation_api_v1_orgs__org_id__invitations__invitation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitation_id: string;
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such pending invitation */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2099,11 +2235,64 @@ export interface operations {
             };
         };
     };
-    add_member_api_v1_orgs__org_id__members_post: {
+    remove_member_api_v1_orgs__org_id__members__user_id__delete: {
         parameters: {
             query?: never;
             header?: never;
             path: {
+                user_id: string;
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not allowed to remove an owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a member */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The last owner cannot be removed */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    change_role_api_v1_orgs__org_id__members__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
                 /** @description Identyfikator organizacji */
                 org_id: string;
             };
@@ -2111,12 +2300,12 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["MemberCreate"];
+                "application/json": components["schemas"]["MemberRolePatch"];
             };
         };
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2124,14 +2313,21 @@ export interface operations {
                     "application/json": components["schemas"]["MemberOut"];
                 };
             };
-            /** @description No user with this address */
+            /** @description Not an owner */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a member */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content?: never;
             };
-            /** @description Already a member */
+            /** @description The last owner cannot be demoted */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -2247,6 +2443,13 @@ export interface operations {
             };
             /** @description ETag matches */
             304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description report_expired: files removed by retention */
+            410: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2516,7 +2719,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["WebhookPingResult"];
+                    "application/json": components["schemas"]["WebhookPingOut"];
                 };
             };
             /** @description Webhook not found */

@@ -22,6 +22,7 @@ import type {
   Me,
   Org,
   ProblemDetails,
+  Role,
   ReportFormat,
   Run,
   UpdateOrgRequest,
@@ -64,6 +65,7 @@ export class ApiError extends Error {
   readonly detail: string | null;
   readonly requestId: string | null;
   readonly code: string | null;
+  readonly emailHint: string | null;
   readonly fieldErrors: { field?: string; message: string }[];
 
   constructor(init: {
@@ -72,6 +74,7 @@ export class ApiError extends Error {
     detail?: string | null;
     requestId?: string | null;
     code?: string | null;
+    emailHint?: string | null;
     fieldErrors?: { field?: string; message: string }[];
   }) {
     super(init.detail ? `${init.title}: ${init.detail}` : init.title);
@@ -81,6 +84,7 @@ export class ApiError extends Error {
     this.detail = init.detail ?? null;
     this.requestId = init.requestId ?? null;
     this.code = init.code ?? null;
+    this.emailHint = init.emailHint ?? null;
     this.fieldErrors = init.fieldErrors ?? [];
   }
 
@@ -109,6 +113,8 @@ export const paths = {
   org: (org: string) => `/orgs/${org}`,
   members: (org: string) => `/orgs/${org}/members`,
   invitations: (org: string) => `/orgs/${org}/invitations`,
+  invitation: (org: string, id: string) => `/orgs/${org}/invitations/${id}`,
+  member: (org: string, userId: string) => `/orgs/${org}/members/${userId}`,
   apiKeys: (org: string) => `/orgs/${org}/api-keys`,
   apiKey: (org: string, id: string) => `/orgs/${org}/api-keys/${id}`,
   uploads: (org: string) => `/orgs/${org}/uploads`,
@@ -173,6 +179,7 @@ async function toApiError(response: Response): Promise<ApiError> {
     detail: problem?.detail ?? null,
     requestId: problem?.request_id ?? headerId,
     code: problem?.code ?? null,
+    emailHint: problem?.email_hint ?? null,
     fieldErrors: (problem?.errors ?? []).map((entry) => ({
       field: entry.field ?? entry.loc?.filter((part) => part !== "body").join("."),
       message: entry.message ?? entry.msg ?? "",
@@ -249,8 +256,11 @@ export const api = {
       json: { email, ...(locale ? { locale } : {}) },
     }),
   /** Wymiana tokenu na sesję (cookie); odpowiedź backendu to sesja, więc profil pobieramy przez `me`. */
-  verifyMagicLink: async (token: string): Promise<Me> => {
-    await request<WireSession>(paths.magicLinkVerify(), { method: "POST", json: { token } });
+  verifyMagicLink: async (token: string, confirm = false): Promise<Me> => {
+    await request<WireSession>(paths.magicLinkVerify(), {
+      method: "POST",
+      json: confirm ? { token, confirm: true } : { token },
+    });
     return api.me();
   },
   logout: () => request<void>(paths.logout(), { method: "POST" }),
@@ -261,10 +271,17 @@ export const api = {
     request<Org>(paths.org(org), { method: "PATCH", json: body }),
 
   listMembers: (org: string) => request<Member[]>(paths.members(org)),
-  invite: async (org: string, body: InviteRequest): Promise<Invitation> =>
-    toInvitation(
-      await request<WireInvitation>(paths.invitations(org), { method: "POST", json: body }),
-    ),
+  /** Zaproszenie: backend zawsze odpowiada 202 `{status: "accepted"}` (nie zdradza, czy adres ma konto). */
+  invite: (org: string, body: InviteRequest) =>
+    request<void>(paths.invitations(org), { method: "POST", json: body }),
+  listInvitations: async (org: string): Promise<Invitation[]> =>
+    (await request<WireInvitation[]>(paths.invitations(org))).map(toInvitation),
+  revokeInvitation: (org: string, id: string) =>
+    request<void>(paths.invitation(org, id), { method: "DELETE" }),
+  changeMemberRole: (org: string, userId: string, role: Role) =>
+    request<Member>(paths.member(org, userId), { method: "PATCH", json: { role } }),
+  removeMember: (org: string, userId: string) =>
+    request<void>(paths.member(org, userId), { method: "DELETE" }),
 
   listApiKeys: (org: string) => request<ApiKey[]>(paths.apiKeys(org)),
   createApiKey: (org: string, body: CreateApiKeyRequest) =>
@@ -295,6 +312,28 @@ export const api = {
     toRun(await request<WireRunDetail>(paths.run(org, id))),
 
   /** Brak uruchomienia kolektora = 404 -> pusty raport (widok pokazuje stan pusty z CTA). */
+  /**
+   * Czy pliki raportu jeszcze istnieją: po okresie przechowywania API odpowiada 410 `report_expired`
+   * (rekord i skróty zostają). Inne błędy nie blokują widoku: ramka sama pokaże, co zwróciło API.
+   */
+  reportStatus: async (
+    org: string,
+    runId: string,
+    signal?: AbortSignal,
+  ): Promise<"available" | "expired"> => {
+    try {
+      const response = await fetch(reportUrl(org, runId, "html"), {
+        credentials: "include",
+        cache: "no-store",
+        signal,
+      });
+      // sam status wystarczy: nie pobieramy treści raportu (ramka pobierze ją osobno)
+      void response.body?.cancel().catch(() => undefined);
+      return response.status === 410 ? "expired" : "available";
+    } catch {
+      return "available";
+    }
+  },
   evidence: async (org: string): Promise<EvidenceReport> => {
     try {
       return toEvidence(await request<WireEvidence>(paths.evidence(org)));

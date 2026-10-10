@@ -16,7 +16,7 @@ test("ustawienia: zużycie, retencja i opt-in modelu językowego zapisują się 
   await expect(usage).toContainText("Uruchomienia raportów");
 
   // walidacja retencji: komunikat + fokus na podsumowaniu
-  const retention = page.getByLabel("Okres przechowywania wgranych plików (dni)");
+  const retention = page.getByLabel("Okres przechowywania danych (dni)");
   await retention.fill("0");
   await page.getByRole("button", { name: "Zapisz ustawienia" }).click();
   await expect(page.getByRole("group", { name: "Wystąpił problem" })).toBeFocused();
@@ -27,7 +27,7 @@ test("ustawienia: zużycie, retencja i opt-in modelu językowego zapisują się 
   await page.getByRole("button", { name: "Zapisz ustawienia" }).click();
   await expect(page.getByText("Ustawienia zapisane.").first()).toBeVisible();
   await page.reload();
-  await expect(page.getByLabel("Okres przechowywania wgranych plików (dni)")).toHaveValue("30");
+  await expect(page.getByLabel("Okres przechowywania danych (dni)")).toHaveValue("30");
   await expect(page.getByRole("switch", { name: /Pozwól na streszczenie/ })).toBeChecked();
 });
 
@@ -55,7 +55,11 @@ test("webhooki: dodanie (sekret pokazany raz), test, usunięcie", async ({ page 
 
   // test wysyłki do adresu, który nie istnieje: aplikacja pokazuje czytelny błąd, nie wyjątek
   await row.getByRole("button", { name: /Wyślij test/ }).click();
-  await expect(page.getByText(/Test (wysłany|nie powiódł się)/).first()).toBeVisible();
+  await expect(
+    page
+      .getByText(/Test (dostarczony \(2xx\)|nie powiódł się \((brak odpowiedzi|[345]xx)\))/)
+      .first(),
+  ).toBeVisible();
 
   await row.getByRole("button", { name: /Usuń/ }).click();
   await page.getByRole("alertdialog").getByRole("button", { name: "Usuń" }).click();

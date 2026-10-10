@@ -11,6 +11,8 @@ export function classifyUploadFailure(error: unknown, kind: UploadKind | null): 
   if (!isApiError(error)) return { code: "server", requestId: null };
   const limitBytes = kind === "package" ? MAX_PACKAGE_UPLOAD_BYTES : MAX_TABLE_UPLOAD_BYTES;
   switch (error.code) {
+    case "upload_required":
+      return { code: "none" };
     case "file_too_large":
       return { code: "size", limitBytes };
     case "quota_exceeded":

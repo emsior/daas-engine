@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useAnnounce } from "@/components/Announcer";
 import { Alert } from "@/components/Alert";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/Button";
 import { Card } from "@/components/Card";
 import { ErrorSummary } from "@/components/ErrorSummary";
@@ -13,8 +15,16 @@ import { Skeleton } from "@/components/Skeleton";
 import { Table, Tbody, Td, Th, Thead, Tr } from "@/components/Table";
 import { useSession } from "@/components/shell/OrgGate";
 import { useT } from "@/i18n/provider";
-import { useInvite, useMembers } from "@/lib/api/hooks";
-import type { Role } from "@/lib/api/types";
+import {
+  useChangeMemberRole,
+  useInvitations,
+  useInvite,
+  useMembers,
+  useRemoveMember,
+  useRevokeInvitation,
+} from "@/lib/api/hooks";
+import { formatDate } from "@/lib/format";
+import type { Member, Role } from "@/lib/api/types";
 import { describeError } from "@/lib/errors";
 import { toSummary, validateEmail } from "@/lib/validation";
 import { SettingsNav } from "./SettingsNav";
@@ -111,10 +121,132 @@ function InviteForm({ orgId }: { orgId: string }) {
   );
 }
 
+function RoleCell({
+  orgId,
+  member,
+  editable,
+}: {
+  orgId: string;
+  member: Member;
+  editable: boolean;
+}) {
+  const t = useT();
+  const announce = useAnnounce();
+  const change = useChangeMemberRole(orgId);
+  const [error, setError] = useState<string | null>(null);
+  if (!editable) return <>{t(`members.role.${member.role}`)}</>;
+  return (
+    <div className="stack-1">
+      <Select
+        aria-label={t("members.role.change", { email: member.email })}
+        value={member.role}
+        disabled={change.isPending}
+        onChange={(event) => {
+          setError(null);
+          change.mutate(
+            { userId: member.user_id, role: event.target.value as Role },
+            {
+              onSuccess: () => announce(t("members.role.changed", { email: member.email })),
+              onError: (err) => setError(describeError(err, t).message),
+            },
+          );
+        }}
+      >
+        {ROLES.map((option) => (
+          <option key={option} value={option}>
+            {t(`members.role.${option}`)}
+          </option>
+        ))}
+      </Select>
+      {error ? (
+        <p className="field-error" role="alert">
+          <span>{error}</span>
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function InvitationsCard({ orgId }: { orgId: string }) {
+  const t = useT();
+  const announce = useAnnounce();
+  const invitations = useInvitations(orgId);
+  const revoke = useRevokeInvitation(orgId);
+  const [error, setError] = useState<string | null>(null);
+
+  return (
+    <section className="stack-3" aria-labelledby="invitations-title">
+      <h2 id="invitations-title">{t("members.invitations.title")}</h2>
+      <QueryState
+        query={invitations}
+        loadingLabel={t("members.invitations.loading")}
+        errorTitle={t("members.invitations.error")}
+        skeleton={<Skeleton lines={2} />}
+        isEmpty={(data) => data.length === 0}
+        empty={<p className="text-muted">{t("members.invitations.empty")}</p>}
+      >
+        {(data) => (
+          <Table caption={t("members.invitations.caption")}>
+            <Thead>
+              <Tr>
+                <Th>{t("members.col.email")}</Th>
+                <Th>{t("members.col.role")}</Th>
+                <Th>{t("members.invitations.col.expires")}</Th>
+                <Th>{t("members.col.actions")}</Th>
+              </Tr>
+            </Thead>
+            <Tbody>
+              {data.map((invitation) => (
+                <Tr key={invitation.id}>
+                  <Td label={t("members.col.email")} className="break-all">
+                    {invitation.email}
+                  </Td>
+                  <Td label={t("members.col.role")}>{t(`members.role.${invitation.role}`)}</Td>
+                  <Td label={t("members.invitations.col.expires")} className="tabular">
+                    {formatDate(invitation.expires_at)}
+                  </Td>
+                  <Td label={t("members.col.actions")}>
+                    <Button
+                      variant="secondary"
+                      loading={revoke.isPending && revoke.variables === invitation.id}
+                      onClick={() => {
+                        setError(null);
+                        revoke.mutate(invitation.id, {
+                          onSuccess: () =>
+                            announce(t("members.invitations.revoked", { email: invitation.email })),
+                          onError: (err) => setError(describeError(err, t).message),
+                        });
+                      }}
+                    >
+                      {t("members.invitations.revoke")}
+                      <span className="sr-only"> {invitation.email}</span>
+                    </Button>
+                  </Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        )}
+      </QueryState>
+      {error ? (
+        <p className="field-error" role="alert">
+          <span>{error}</span>
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 export function MembersView() {
   const t = useT();
-  const { orgId } = useSession();
+  const announce = useAnnounce();
+  const { orgId, me } = useSession();
   const members = useMembers(orgId);
+  const remove = useRemoveMember(orgId);
+  const [target, setTarget] = useState<Member | null>(null);
+  const myRole = me.role;
+  const canManage = myRole === "owner" || myRole === "admin";
+  const isOwner = myRole === "owner";
 
   return (
     <div className="view">
@@ -135,23 +267,66 @@ export function MembersView() {
                 <Th>{t("members.col.email")}</Th>
                 <Th>{t("members.col.name")}</Th>
                 <Th>{t("members.col.role")}</Th>
+                {canManage ? <Th>{t("members.col.actions")}</Th> : null}
               </Tr>
             </Thead>
             <Tbody>
-              {data.map((member) => (
-                <Tr key={member.user_id}>
-                  <Td label={t("members.col.email")} className="break-all">
-                    {member.email}
-                  </Td>
-                  <Td label={t("members.col.name")}>{member.name ?? t("app.none")}</Td>
-                  <Td label={t("members.col.role")}>{t(`members.role.${member.role}`)}</Td>
-                </Tr>
-              ))}
+              {data.map((member) => {
+                const self = member.user_id === me.user.id;
+                const removable = canManage && !self && (member.role !== "owner" || isOwner);
+                return (
+                  <Tr key={member.user_id}>
+                    <Td label={t("members.col.email")} className="break-all">
+                      {member.email}
+                    </Td>
+                    <Td label={t("members.col.name")}>{member.name ?? t("app.none")}</Td>
+                    <Td label={t("members.col.role")}>
+                      <RoleCell orgId={orgId} member={member} editable={isOwner && !self} />
+                    </Td>
+                    {canManage ? (
+                      <Td label={t("members.col.actions")}>
+                        {removable ? (
+                          <Button variant="secondary" onClick={() => setTarget(member)}>
+                            {t("members.remove")}
+                            <span className="sr-only"> {member.email}</span>
+                          </Button>
+                        ) : (
+                          <span className="text-muted">{t("app.none")}</span>
+                        )}
+                      </Td>
+                    ) : null}
+                  </Tr>
+                );
+              })}
             </Tbody>
           </Table>
         )}
       </QueryState>
-      <InviteForm orgId={orgId} />
+
+      {canManage ? <InvitationsCard orgId={orgId} /> : null}
+      {canManage ? <InviteForm orgId={orgId} /> : null}
+
+      <ConfirmDialog
+        open={target !== null}
+        title={t("members.remove.title", { email: target?.email ?? "" })}
+        description={t("members.remove.body")}
+        confirmLabel={t("members.remove.confirm")}
+        pending={remove.isPending}
+        error={remove.isError ? describeError(remove.error, t).message : null}
+        onCancel={() => {
+          setTarget(null);
+          remove.reset();
+        }}
+        onConfirm={() => {
+          if (!target) return;
+          remove.mutate(target.user_id, {
+            onSuccess: () => {
+              announce(t("members.removed", { email: target.email }));
+              setTarget(null);
+            },
+          });
+        }}
+      />
     </div>
   );
 }

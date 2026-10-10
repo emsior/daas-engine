@@ -31,7 +31,7 @@ export type WireUpload = Schemas["UploadOut"];
 export type WireEvidence = Schemas["EvidenceOut"];
 export type WireUsage = Schemas["UsageReport"];
 export type WireWebhook = Schemas["WebhookOut"] | Schemas["WebhookCreated"];
-export type WireWebhookPing = Schemas["WebhookPingResult"];
+export type WireWebhookPing = Schemas["WebhookPingOut"];
 export type WireInvitation = Schemas["InvitationOut"];
 
 /** Polecenie kolektora (stałe, bo API nie zwraca go w statusie kontroli). */
@@ -160,9 +160,15 @@ export function toWebhook(wire: WireWebhook): Webhook {
 }
 
 export function toWebhookPing(wire: WireWebhookPing): WebhookPingResult {
-  return { ok: wire.delivered, status_code: wire.status ?? null };
+  return { ok: wire.delivered, status_class: wire.status_class };
 }
 
 export function toInvitation(wire: WireInvitation): Invitation {
-  return { id: wire.id, email: wire.email, role: wire.role, expires_at: wire.expires_at };
+  return {
+    id: wire.id,
+    email: wire.email,
+    role: wire.role,
+    created_at: wire.created_at,
+    expires_at: wire.expires_at,
+  };
 }

@@ -77,6 +77,9 @@ e2e/               Playwright (specy, helpers, proxy.mjs, stack.sh)
 - Raport jest w `<iframe sandbox="">` (bez `allow-scripts` i `allow-same-origin`).
 - „Sprawdź sam”: SHA-256 liczone w przeglądarce (Web Crypto), zero żądań sieciowych (test e2e `verify-local-hash`). Wymaga HTTPS lub `localhost`.
 - Fokus po zmianie trasy trafia na `h1`; jeden stały region `aria-live`; podsumowanie błędów z fokusem.
+- Logowanie linkiem: gdy link z maila otwarto w innej przeglądarce niż ta, w której podano adres, API odpowiada `409 confirm_required` (z zamaskowanym `email_hint`), a `/login` pokazuje ekran „Zaloguj w tej przeglądarce jako …?”. Przycisk ponawia `POST /auth/magic-link/verify` z `confirm: true`.
+- Postęp zadania: SSE; gdy strumień ani razu się nie otworzy (np. 429 `sse_limit`), kokpit po 2 próbach przechodzi na `GET /jobs/{id}` co 3 s. „Anuluj” jest dostępne tylko dla zadania w kolejce (`queued`).
+- Zarządzanie członkami (`/settings/members`): zaproszenia (lista, cofnięcie), zmiana roli (właściciel), usunięcie z potwierdzeniem; komunikat `last_owner`.
 
 ## Testy
 

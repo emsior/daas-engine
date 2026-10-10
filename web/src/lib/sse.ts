@@ -46,6 +46,8 @@ export type EventSourceFactory = (url: string) => EventSourceLike;
 
 export interface ConnectOptions {
   maxRetries?: number;
+  /** Limit prób, gdy strumień ani razu się nie otworzył (np. 429 `sse_limit`: EventSource nie ujawnia statusu). */
+  maxRetriesNeverOpened?: number;
   baseDelayMs?: number;
   factory?: EventSourceFactory;
 }
@@ -72,6 +74,8 @@ export function connectJobEvents(
   options: ConnectOptions = {},
 ): () => void {
   const maxRetries = options.maxRetries ?? 5;
+  const neverOpenedRetries = options.maxRetriesNeverOpened ?? 2;
+  let opened = false;
   const baseDelay = options.baseDelayMs ?? 1000;
   const factory = options.factory ?? defaultFactory;
 
@@ -94,6 +98,7 @@ export function connectJobEvents(
     source = es;
 
     es.onopen = () => {
+      opened = true;
       failures = 0;
       handlers.onOpen?.();
     };
@@ -119,7 +124,7 @@ export function connectJobEvents(
     es.onerror = () => {
       if (stopped) return;
       failures += 1;
-      if (failures > maxRetries) {
+      if (failures > (opened ? maxRetries : Math.min(maxRetries, neverOpenedRetries))) {
         stop();
         handlers.onGiveUp?.();
         return;

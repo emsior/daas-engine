@@ -11,6 +11,7 @@ import { PageHeading } from "@/components/PageHeading";
 import { useAnnounce } from "@/components/Announcer";
 import { useT } from "@/i18n/provider";
 import { useRequestMagicLink, useVerifyMagicLink } from "@/lib/api/hooks";
+import { isApiError } from "@/lib/api/client";
 import { describeError } from "@/lib/errors";
 import { extractToken, toSummary, validateEmail } from "@/lib/validation";
 import type { Me } from "@/lib/api/types";
@@ -33,6 +34,8 @@ function LoginView() {
   const [token, setToken] = useState("");
   const [tokenOpen, setTokenOpen] = useState(false);
   const autoVerified = useRef(false);
+  // link otwarty w innej przeglądarce niż ta, która go zamówiła: backend żąda jawnego potwierdzenia
+  const [pending, setPending] = useState<{ token: string; hint: string | null } | null>(null);
 
   const tokenFromUrl = params.get("token");
 
@@ -44,18 +47,41 @@ function LoginView() {
     setAttempt((n) => n + 1);
   };
 
+  const verifyToken = (value: string, confirm = false) => {
+    verify.mutate(
+      { token: value, confirm },
+      {
+        onSuccess: goAfterLogin,
+        onError: (error) => {
+          if (!confirm && isApiError(error) && error.code === "confirm_required") {
+            setPending({ token: value, hint: error.emailHint });
+            return;
+          }
+          setPending(null);
+          failVerify();
+        },
+      },
+    );
+  };
+
+  const cancelConfirm = () => {
+    setPending(null);
+    setErrors({});
+    router.replace("/login"); // zdejmuje token z adresu
+  };
+
   // link z wiadomości prowadzi na /login?token=... : weryfikujemy automatycznie (raz)
   useEffect(() => {
     if (!tokenFromUrl || autoVerified.current) return;
     autoVerified.current = true;
-    verify.mutate(tokenFromUrl, { onSuccess: goAfterLogin, onError: failVerify });
+    verifyToken(tokenFromUrl);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tokenFromUrl]);
 
   // po przejściu do „Sprawdź skrzynkę” przenosimy fokus na nowy nagłówek
   useEffect(() => {
-    if (sentTo) document.querySelector<HTMLElement>("main h1")?.focus();
-  }, [sentTo]);
+    if (sentTo || pending) document.querySelector<HTMLElement>("main h1")?.focus();
+  }, [sentTo, pending]);
 
   const send = (target: string, resend: boolean) => {
     requestLink.mutate(target, {
@@ -101,10 +127,29 @@ function LoginView() {
       return;
     }
     setErrors({});
-    verify.mutate(value, { onSuccess: goAfterLogin, onError: failVerify });
+    verifyToken(value);
   };
 
   const summary = toSummary([EMAIL_ID, TOKEN_ID], errors);
+
+  if (pending) {
+    const who = pending.hint ?? t("login.confirm.unknownAddress");
+    return (
+      <div className="view">
+        <PageHeading lead={t("login.confirm.body", { email: who })}>
+          {t("login.confirm.title")}
+        </PageHeading>
+        <div className="cluster">
+          <Button cta loading={verify.isPending} onClick={() => verifyToken(pending.token, true)}>
+            {t("login.confirm.submit", { email: who })}
+          </Button>
+          <Button variant="secondary" onClick={cancelConfirm}>
+            {t("login.confirm.cancel")}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="view">
