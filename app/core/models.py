@@ -162,8 +162,8 @@ class EcommerceOrder(BaseModel):
     date: date
     product: str
     category: str
-    revenue: float = Field(ge=0)
-    cost: float = Field(ge=0)
+    revenue: float   # ujemny przychod i koszt = korekta/zwrot (mapper przepuszcza je z ostrzezeniem)
+    cost: float
     profit: float
     discount: float = Field(ge=0, le=1, description="udział rabatu 0-1")
     status: Literal["completed", "refunded", "cancelled", "pending"]
