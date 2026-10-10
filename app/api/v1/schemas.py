@@ -290,19 +290,6 @@ class EvidenceOut(BaseModel):
     checks: list[EvidenceCheck]
 
 
-class UsageRow(BaseModel):
-    period: str
-    runs: int
-    upload_bytes: int
-
-
-class UsageOut(BaseModel):
-    org_id: str
-    plan: str
-    current: UsageRow
-    history: list[UsageRow]
-
-
 class AuditOut(BaseModel):
     id: str
     ts: datetime
@@ -340,12 +327,6 @@ class WebhookCreated(WebhookOut):
     secret: str = Field(..., description="sekret podpisu (HMAC-SHA256); pokazany TYLKO w tej odpowiedzi")
 
 
-class WebhookPing(BaseModel):
-    delivered: bool
-    status_code: int | None = None
-    error: str | None = None
-
-
 # ----------------------------------------------------------------------------- usage / limity planu (A1, 10.10)
 class UsagePeriod(BaseModel):
     period: str = Field(..., examples=["2026-10"], description="miesiac kalendarzowy UTC, `YYYY-MM`")
@@ -365,12 +346,6 @@ class UsageReport(BaseModel):
     current: UsagePeriod
     previous: UsagePeriod
     limits: PlanLimitsOut
-
-
-# ----------------------------------------------------------------------------- webhooki: ping (A1, 10.10)
-class WebhookPingResult(BaseModel):
-    delivered: bool
-    status: int | None = Field(default=None, description="status HTTP odbiorcy; `null` przy bledzie sieci/adresu")
 
 
 # ----------------------------------------------------------------------------- czlonkowie: zmiana roli (A1, 10.10)
