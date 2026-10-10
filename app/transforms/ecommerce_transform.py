@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from app.core.models import EcommerceMetrics
+from app.reporting.fmt import sanitize_floats
 
 # Statusy liczone do przychodu/zysku (refund/cancel wykluczone z P&L, ale raportowane).
 REVENUE_STATUSES = {"completed", "pending"}
@@ -122,7 +123,8 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
         .agg(orders=("order_id", "count"), revenue=("revenue", "sum"), profit=("profit", "sum"))
         .reset_index()
     )
-    by_cat["margin_pct"] = (100 * by_cat["profit"] / by_cat["revenue"]).round(1)
+    # przychod kategorii = 0 -> marza nieokreslona (None w wyniku), nigdy inf/nan
+    by_cat["margin_pct"] = (100 * by_cat["profit"] / by_cat["revenue"].where(by_cat["revenue"] != 0)).round(1)
     by_cat["revenue_share_pct"] = (100 * by_cat["revenue"] / revenue).round(1) if revenue else 0.0
     by_cat = by_cat.sort_values("revenue", ascending=False).round(2)
 
@@ -148,12 +150,12 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
         margin_pct=round(100 * profit / revenue, 2) if revenue else 0.0,
         avg_order_value=round(revenue / len(pnl), 2) if len(pnl) else 0.0,
         avg_discount_pct=round(100 * float(pnl["discount"].mean()), 2) if len(pnl) else 0.0,
-        loss_orders=loss_rows.to_dict(orient="records"),
+        loss_orders=sanitize_floats(loss_rows.to_dict(orient="records")),
         loss_orders_count=int(len(loss)),
         loss_orders_total=round(float(loss["profit"].sum()), 2),
-        top_categories=by_cat.to_dict(orient="records"),
-        top_products=by_prod.to_dict(orient="records"),
-        anomalies=detect_anomalies(pnl),
-        weekly=weekly,
-        wow=wow,
+        top_categories=sanitize_floats(by_cat.to_dict(orient="records")),
+        top_products=sanitize_floats(by_prod.to_dict(orient="records")),
+        anomalies=sanitize_floats(detect_anomalies(pnl)),
+        weekly=sanitize_floats(weekly),
+        wow=sanitize_floats(wow),
     )

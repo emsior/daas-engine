@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from app.core.models import CS2Metrics, DataStatus, EcommerceMetrics, UkscMetrics
+from app.reporting.fmt import pln, sanitize_floats
 from app.reporting.html import render_html
 from app.reporting.narrative import build_narrative, source_label
 from app.reporting.safe import md_text
@@ -52,9 +53,11 @@ class ReportGenerator:
             "generated_at": datetime.utcnow().strftime("%Y-%m-%d %H:%M UTC"),
             "narrative": narrative,
             "narrative_source": narrative_source,
-            "metrics": metrics.model_dump() if hasattr(metrics, "model_dump") else metrics,
+            "metrics": sanitize_floats(metrics.model_dump() if hasattr(metrics, "model_dump") else metrics),
         }
-        json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str), encoding="utf-8")
+        # allow_nan=False: gdyby NaN/inf przeszedl sanityzacje, zapis zawiedzie glosno zamiast wyprodukowac niepoprawny JSON
+        json_path.write_text(json.dumps(payload, indent=2, ensure_ascii=False, default=str, allow_nan=False),
+                             encoding="utf-8")
 
         if isinstance(metrics, CS2Metrics):
             md = render_cs2_markdown(payload, metrics)
@@ -67,7 +70,7 @@ class ReportGenerator:
             md = render_uksc_markdown(payload, metrics)
             title = "Dowód UKSC — raport zgodności technicznej stacji"
         else:
-            dump = json.dumps(payload, indent=2, default=str).replace("```", "'" * 3)
+            dump = json.dumps(payload, indent=2, default=str, allow_nan=False).replace("```", "'" * 3)
             md = f"# Report {pipeline}\n\n```json\n{dump}\n```\n"
             title = f"Report {pipeline}"
         md_path.write_text(md, encoding="utf-8")
@@ -103,10 +106,8 @@ def _header(payload: dict[str, Any], title: str) -> str:
 
 
 def _pln(x: float | int | None) -> str:
-    """Format PL: 7 255,95 (spacja tysięcy, przecinek dziesiętny)."""
-    if x is None:
-        return "—"
-    return f"{x:,.2f}".replace(",", " ").replace(".", ",")
+    """Format PL: 7 255,95 (spacja tysięcy, przecinek dziesiętny). Patrz `app.reporting.fmt.pln`."""
+    return pln(x)
 
 
 def _delta(pct: float | None, unit: str = "%") -> str:
@@ -190,7 +191,10 @@ def render_ecommerce_markdown(payload: dict[str, Any], m: EcommerceMetrics) -> s
         s += "\n## Tydzień do tygodnia\n\n" + _table(m.weekly, ["week", "week_start", "days", "orders", "revenue", "profit", "margin_pct", "aov"])
         if not m.wow:
             s += "\n_Jeden tydzień w danych — porównanie tydzień-do-tygodnia pojawi się od drugiego tygodnia._\n"
-    s += "\n## Top kategorie\n\n" + _table(m.top_categories, ["category", "orders", "revenue", "profit", "margin_pct", "revenue_share_pct"])
+    cats = [{**c, "margin_pct": "n/d" if c.get("margin_pct") is None else c["margin_pct"]} for c in m.top_categories]
+    s += "\n## Top kategorie\n\n" + _table(cats, ["category", "orders", "revenue", "profit", "margin_pct", "revenue_share_pct"])
+    if any(c.get("margin_pct") is None for c in m.top_categories):
+        s += "\n_n/d — kategoria bez przychodu (marża nieokreślona)._\n"
     s += "\n## Top produkty\n\n" + _table(m.top_products, ["product", "orders", "units", "revenue", "profit"])
     s += "\n## Zamówienia stratne\n\n" + _table(m.loss_orders, ["order_id", "date", "product", "category", "revenue", "cost", "profit", "discount"])
     s += "\n## Anomalie\n\n" + _table(m.anomalies, ["order_id", "type", "product", "revenue", "profit", "discount_pct", "note"])

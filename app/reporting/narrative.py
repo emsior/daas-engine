@@ -19,6 +19,7 @@ from typing import Any
 import httpx
 
 from app.core.models import CS2Metrics, EcommerceMetrics, UkscMetrics
+from app.reporting.fmt import pln
 
 log = logging.getLogger(__name__)
 
@@ -106,7 +107,7 @@ def _llm_narrative(api_key: str, pipeline: str, metrics: Any) -> str:
 
 # ----------------------------------------------------------------------
 def _pln(x: float) -> str:
-    return f"{x:,.2f}".replace(",", " ").replace(".", ",")
+    return pln(x)
 
 
 def template_narrative(pipeline: str, metrics: Any, client_name: str | None = None) -> str:
@@ -145,7 +146,8 @@ def template_narrative(pipeline: str, metrics: Any, client_name: str | None = No
                   f"{' (ostatni tydzień niepełny)' if w.get('partial_week') else ''}.")
         if m.top_categories:
             top = m.top_categories[0]
-            s += f" Największą kategorią jest {top['category']} ({top['revenue_share_pct']}% przychodu, marża {top['margin_pct']}%)."
+            margin = "n/d" if top["margin_pct"] is None else f"{top['margin_pct']}%"
+            s += f" Największą kategorią jest {top['category']} ({top['revenue_share_pct']}% przychodu, marża {margin})."
         rec = ("ograniczyć rabaty na produktach, które generują straty" if m.loss_orders_count
                else "utrzymać politykę cenową i monitorować marżę tydzień do tygodnia")
         s += f" Rekomendacja: {rec}."
