@@ -244,16 +244,22 @@ class JobExecutor:
         run_status = result.run_status.value
         failed = result.run_status == RunStatus.FAILED
         error_code = error_code_of(result.error) if failed else None
+        # C9: PARTIAL bez rekordow (zrodlo bez danych) to nie jest uslugowy sukces: nie zuzywa limitu planu,
+        # a job konczy sie `failed/no_records` (SSE i cockpit widza ten sam stan). RunRecord zostaje w historii.
+        no_records = not failed and not result.records_processed
+        job_failed = failed or no_records
+        if no_records:
+            error_code = "no_records"
         async with self.sessionmaker() as db:
             db.add(RunRecord(run_id=result.run_id, org_id=org_id, pipeline=job.pipeline, status=run_status,
                              job_id=job_id, sha256_html=hashes.get("html"), sha256_md=hashes.get("md"),
                              sha256_json=hashes.get("json"), period_from=period[0], period_to=period[1]))
-            if not failed:
+            if not job_failed:
                 await service.add_usage(db, org_id, runs=1)
             await db.execute(update(Job).where(Job.id == job_id).values(
-                status="failed" if failed else "succeeded", progress=100, run_id=result.run_id,
+                status="failed" if job_failed else "succeeded", progress=100, run_id=result.run_id,
                 error_code=error_code, finished_at=utcnow(),
-                message="run failed" if failed else ("done" if result.records_processed else "done (no records)")))
+                message="run failed" if failed else ("no records in the source" if no_records else "done")))
             await record_event(db, None, org_id=org_id, actor_type="system", actor_id=None, action="run.finished",
                                target=f"run:{result.run_id}", settings=self.settings,
                                meta={"pipeline": job.pipeline, "run_id": result.run_id, "job_id": job_id,
@@ -261,7 +267,7 @@ class JobExecutor:
             await db.commit()
         self.bus.publish(job_id)
         event = RunFinished(org_id=org_id, job_id=job_id, run_id=result.run_id, pipeline=job.pipeline,
-                            status="failed" if failed else "succeeded", run_status=run_status,
+                            status="failed" if job_failed else "succeeded", run_status=run_status,
                             finished_at_iso=utcnow().isoformat())
         for listener in self.listeners:
             try:
