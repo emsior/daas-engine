@@ -33,7 +33,7 @@ AUDIT_META_KEYS: frozenset[str] = frozenset({
 AUDIT_ACTIONS_V1: frozenset[str] = frozenset({
     "org.created", "org.updated", "org.deleted", "member.added", "member.invited", "key.created", "key.revoked",
     "upload.created", "job.created", "job.cancelled", "run.finished", "webhook.created", "webhook.deleted",
-    "webhook.delivery", "auth.login", "auth.logout", "auth_denied",
+    "webhook.delivery", "webhook.delivered", "webhook.failed", "auth.login", "auth.logout", "auth_denied",
 })
 
 _MAX_STR = 200

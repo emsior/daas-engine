@@ -363,3 +363,9 @@ class UsageReport(BaseModel):
     current: UsagePeriod
     previous: UsagePeriod
     limits: PlanLimitsOut
+
+
+# ----------------------------------------------------------------------------- webhooki: ping (A1, 10.10)
+class WebhookPingResult(BaseModel):
+    delivered: bool
+    status: int | None = Field(default=None, description="status HTTP odbiorcy; `null` przy bledzie sieci/adresu")

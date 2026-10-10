@@ -22,6 +22,7 @@ from app.control import service as control_service
 from app.control.executor import JobExecutor
 from app.control.mailer import build_mailer
 from app.control.tenancy import TenantRegistry
+from app.control.webhooks import WebhookDispatcher
 from app.core.auth import API_KEY_HEADER
 from app.core.config import Settings, get_settings, installed_version
 from app.core.observability import (
@@ -81,6 +82,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "use smtp in production")
         executor = JobExecutor(settings, app.state.db_sessionmaker, registry)
         app.state.executor = executor
+        # dostawa webhookow `run.finished`: listener executora, dostawy w tle (nie blokuja runu)
+        dispatcher = WebhookDispatcher(settings, app.state.db_sessionmaker)
+        app.state.webhooks = dispatcher
+        executor.listeners.append(dispatcher.on_run_finished)
         await executor.start()
         log.info(
             "DaaS Engine up · mode=%s · env=%s · api_key=%s", settings.daas_mode, settings.app_env,
@@ -90,6 +95,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             yield
         finally:
             await executor.stop()
+            await dispatcher.close()
             registry.close_all()
             await engine.dispose()
 
