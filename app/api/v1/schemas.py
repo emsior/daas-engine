@@ -371,3 +371,8 @@ class UsageReport(BaseModel):
 class WebhookPingResult(BaseModel):
     delivered: bool
     status: int | None = Field(default=None, description="status HTTP odbiorcy; `null` przy bledzie sieci/adresu")
+
+
+# ----------------------------------------------------------------------------- czlonkowie: zmiana roli (A1, 10.10)
+class MemberRolePatch(BaseModel):
+    role: RoleName

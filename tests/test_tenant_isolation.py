@@ -40,7 +40,7 @@ from tests.v1_helpers import (
 
 PLACEHOLDER = re.compile(r"\{([^}]+)\}")
 #: Parametry sciezki, ktore umiemy wypelnic identyfikatorami zasobow organizacji B. Nowy parametr = rozszerz mape.
-RESOURCE_PARAMS = {"job_id", "run_id", "key_id", "webhook_id"}
+RESOURCE_PARAMS = {"job_id", "run_id", "key_id", "webhook_id", "user_id", "invitation_id"}
 KNOWN_HASH = "ab" * 32
 
 
@@ -96,7 +96,7 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
         outsider = user_headers(settings, seed_member(settings, a.org_id, "outsider@example.test", "owner"))
         key_id, _ = seed_key(settings, b.org_id, scopes=list(sc.KEY_SCOPES), name="b-extra")
         ids = {"job_id": new_ulid(), "run_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "key_id": key_id,
-               "webhook_id": new_ulid()}
+               "webhook_id": new_ulid(), "user_id": b.user_id, "invitation_id": new_ulid()}
         upload_id = "b" * 32
 
         async def seed_b(db):
@@ -106,6 +106,9 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
                                     sha256_html=KNOWN_HASH, sha256_md="cd" * 32, sha256_json="ef" * 32))
             db.add(models.Webhook(id=ids["webhook_id"], org_id=b.org_id, url="https://b.example.test/hook",
                                   secret_hash="0" * 64, events=["run.finished"]))
+            db.add(models.Invitation(id=ids["invitation_id"], org_id=b.org_id, email="invited@example.test",
+                                     role="member", token_hash="2" * 64,
+                                     expires_at=utcnow() + timedelta(days=7)))
             db.add(models.Upload(id=upload_id, org_id=b.org_id, kind="csv", filename="b.csv", bytes=10,
                                  sha256="1" * 64, path=f"{upload_id}.csv",
                                  retention_until=utcnow() + timedelta(days=30)))
@@ -130,6 +133,8 @@ def _send(w: World, method: str, url: str, headers: dict[str, str]):
     kwargs: dict = {}
     if url.endswith("/uploads"):
         kwargs["files"] = {"file": ("dane.csv", b"a;b\n1;2\n", "text/csv")}
+    elif method == "PATCH" and "/members/" in url:
+        kwargs["json"] = {"role": "member"}      # poprawne cialo: sprawdzamy autoryzacje, nie walidacje
     elif method in ("POST", "PATCH"):
         kwargs["json"] = {}
     return w.client.request(method, url, headers=headers, **kwargs)
@@ -141,7 +146,7 @@ def _expected(template: str) -> int:
 
 def test_inventory_covers_the_whole_org_scoped_surface():
     templates = {path for _, path in ORG_ROUTES}
-    assert len(ORG_ROUTES) >= 26
+    assert len(ORG_ROUTES) >= 30
     for needed in ("/api/v1/orgs/{org_id}", "/api/v1/orgs/{org_id}/jobs/{job_id}/events",
                    "/api/v1/orgs/{org_id}/runs/{run_id}/report", "/api/v1/orgs/{org_id}/webhooks/{webhook_id}/ping",
                    "/api/v1/orgs/{org_id}/api-keys/{key_id}", "/api/v1/orgs/{org_id}/audit",
@@ -213,7 +218,8 @@ def test_nothing_of_b_changed_after_all_the_attempts(world: World):
     (job,) = get_rows(world.settings, models.Job, models.Job.id == world.b_ids["job_id"])
     assert job.status == "queued"
     assert len(get_rows(world.settings, models.Upload, models.Upload.org_id == world.b.org_id)) == 1
-    assert not get_rows(world.settings, models.Invitation, models.Invitation.org_id == world.b.org_id)
+    assert [i.id for i in get_rows(world.settings, models.Invitation,
+                                   models.Invitation.org_id == world.b.org_id)] == [world.b_ids["invitation_id"]]
     members = get_rows(world.settings, models.Membership, models.Membership.org_id == world.b.org_id)
     assert [m.role for m in members] == ["owner"]
     assert not get_rows(world.settings, models.Membership, models.Membership.user_id.in_(
