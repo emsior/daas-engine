@@ -171,6 +171,12 @@ class JobExecutor:
                 return
             source_path = str(candidate)
 
+        if self.settings.cloud and source_path is None and not job.force_mock:
+            # M-7: np. upload usuniety przez retencje (upload_id wyzerowane) — nigdy nie siegamy po zrodla z env
+            await self._finish(job_id, status="failed", error_code="SOURCE_UNAVAILABLE",
+                               message="no source file for this job")
+            return
+
         runner = await self.registry.aget(org_id, llm_narrative=effective_llm(self.settings, org))
         request = RunRequest(pipeline=job.pipeline, force_mock=job.force_mock, client_name=job.client_name,
                              source_path=source_path)

@@ -121,7 +121,7 @@ def test_job_fails_with_a_code_when_the_uploaded_file_disappeared(cloud_client, 
     ({"pipeline": "nope"}, 422, "validation_error"),
     ({}, 422, "validation_error"),
     ({"pipeline": "cs2_demo", "upload_id": "z" * 32}, 422, "validation_error"),
-    ({"pipeline": "cs2_demo", "upload_id": "0" * 32}, 422, "upload_not_applicable"),
+    ({"pipeline": "cs2_demo", "upload_id": "0" * 32, "force_mock": True}, 422, "upload_not_applicable"),
     ({"pipeline": "ecommerce_demo", "upload_id": "0" * 32}, 404, "not_found"),
 ])
 def test_job_request_validation(cloud_client, cloud_settings, org, body, status, code):

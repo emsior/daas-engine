@@ -62,6 +62,14 @@ async def create_job(body: JobCreate, request: Request, response: Response, ctx:
     state = request.app.state
     enforce(request, "v1_run", state.settings.daas_rate_limit_run_per_min)
     kinds = PIPELINE_UPLOAD_KINDS[body.pipeline]
+    if state.settings.cloud and not body.force_mock:
+        # M-7: w chmurze zrodlem jest wylacznie plik klienta (albo dane syntetyczne); nigdy zasoby operatora z env
+        if kinds is None:
+            raise ProblemError(422, "mock_required", f"pipeline {body.pipeline} runs on synthetic data only: "
+                               "set force_mock")
+        if not body.upload_id:
+            raise ProblemError(422, "upload_required", f"pipeline {body.pipeline} needs an upload_id "
+                               "(or force_mock for synthetic data)")
     if body.upload_id:
         if kinds is None:
             raise ProblemError(422, "upload_not_applicable", f"pipeline {body.pipeline} does not read uploads")

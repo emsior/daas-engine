@@ -149,3 +149,18 @@ def csrf_header(client: TestClient) -> dict[str, str]:
 
 def digest(value: str) -> str:
     return sha256_hex(value)
+
+
+def seed_job_row(settings: Settings, org_id: str, *, pipeline: str = "cs2_demo", status: str = "queued",
+                 upload_id: str | None = None, force_mock: bool = True) -> str:
+    """Wiersz `Job` wprost w bazie (bez zgloszenia do executora). Zwraca id."""
+    from app.control.ids import new_ulid
+
+    job_id = new_ulid()
+
+    async def go(db):
+        db.add(models.Job(id=job_id, org_id=org_id, pipeline=pipeline, status=status, upload_id=upload_id,
+                          force_mock=force_mock))
+
+    with_db(settings, go)
+    return job_id
