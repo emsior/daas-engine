@@ -292,3 +292,96 @@ def test_invitation_management_needs_the_scope(cloud_client, cloud_settings, org
     assert cloud_client.get(f"{API}/orgs/{org.org_id}/invitations", headers=member).status_code == 403
     assert cloud_client.delete(f"{API}/orgs/{org.org_id}/invitations/{inv.id}", headers=member).status_code == 403
     assert len(invitations(cloud_settings, org.org_id)) == 1
+
+
+# ================================================================ LOW-5: atomowy strzal `last_owner` (TOCTOU)
+def two_owners(settings: Settings, org) -> tuple[str, str]:
+    second = seed_member(settings, org.org_id, "owner2@example.test", "owner")
+    return org.user_id, second
+
+
+def test_guarded_delete_second_stale_request_removes_nothing(cloud_client, cloud_settings, org):
+    """Dwa rownolegle zadania widzialy 2 ownerow (nieaktualny stan); drugie musi zostac odrzucone przez SQL."""
+    from sqlalchemy import func, select
+
+    from app.control import service
+    from app.control.db import create_engine, make_sessionmaker
+
+    a, b = two_owners(cloud_settings, org)
+
+    async def scenario():
+        engine = create_engine(cloud_settings)
+        try:
+            maker = make_sessionmaker(engine)
+            async with maker() as s1, maker() as s2:
+                count = select(func.count()).select_from(models.Membership).where(
+                    models.Membership.org_id == org.org_id, models.Membership.role == "owner")
+                assert (await s1.execute(count)).scalar_one() == 2    # oba zadania przeszly "sprawdzenie"
+                assert (await s2.execute(count)).scalar_one() == 2
+                first = await service.delete_member_guarded(s1, org.org_id, a)
+                await s1.commit()
+                second = await service.delete_member_guarded(s2, org.org_id, b)
+                await s2.commit()
+                return first, second
+        finally:
+            await engine.dispose()
+
+    from tests.v1_helpers import run
+
+    assert run(scenario()) == (True, False)
+    assert memberships(cloud_settings, org.org_id) == {b: "owner"}
+
+
+def test_guarded_demotion_second_stale_request_changes_nothing(cloud_client, cloud_settings, org):
+    from app.control import service
+    from app.control.db import create_engine, make_sessionmaker
+    from tests.v1_helpers import run
+
+    a, b = two_owners(cloud_settings, org)
+
+    async def scenario():
+        engine = create_engine(cloud_settings)
+        try:
+            maker = make_sessionmaker(engine)
+            async with maker() as s1, maker() as s2:
+                first = await service.set_member_role_guarded(s1, org.org_id, a, "member")
+                await s1.commit()
+                second = await service.set_member_role_guarded(s2, org.org_id, b, "admin")
+                await s2.commit()
+                return first, second
+        finally:
+            await engine.dispose()
+
+    assert run(scenario()) == (True, False)
+    assert sorted(memberships(cloud_settings, org.org_id).values()) == ["member", "owner"]
+
+
+def test_guarded_helpers_allow_non_owners_and_promotions_regardless_of_owner_count(cloud_client, cloud_settings, org):
+    from app.control import service
+
+    uid = seed_member(cloud_settings, org.org_id, "ola@example.test", "member")
+
+    async def go(db):
+        assert await service.set_member_role_guarded(db, org.org_id, uid, "owner") is True    # awans
+        assert await service.set_member_role_guarded(db, org.org_id, uid, "admin") is True    # 2 ownerow: degradacja ok
+        assert await service.delete_member_guarded(db, org.org_id, uid) is True               # nie-owner
+        assert await service.delete_member_guarded(db, org.org_id, uid) is False              # juz nie istnieje
+        assert await service.set_member_role_guarded(db, org.org_id, "nope", "member") is False
+
+    with_db(cloud_settings, go)
+    assert memberships(cloud_settings, org.org_id) == {org.user_id: "owner"}
+
+
+def test_api_sequence_never_leaves_the_org_without_an_owner(cloud_client, cloud_settings, org):
+    a, b = two_owners(cloud_settings, org)
+    as_a = user_headers(cloud_settings, a)
+    first = cloud_client.delete(member_url(org.org_id, b), headers=as_a)
+    second = cloud_client.delete(member_url(org.org_id, a), headers=as_a)
+    assert first.status_code == 204
+    assert second.status_code == 409 and second.json()["code"] == "last_owner"
+    demote = cloud_client.patch(member_url(org.org_id, a), json={"role": "member"}, headers=as_a)
+    assert demote.status_code == 409 and demote.json()["code"] == "last_owner"
+    assert memberships(cloud_settings, org.org_id) == {a: "owner"}
+    unknown = cloud_client.delete(member_url(org.org_id, new_ulid()), headers=as_a)
+    assert unknown.status_code == 404                 # brak czlonka to 404, nie 409
+    assert [e.meta for e in audit(cloud_settings, "member.removed")] == [{"role": "owner", "count": 0}]

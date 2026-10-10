@@ -5,9 +5,10 @@ import re
 import unicodedata
 from datetime import datetime, timedelta
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.control import scopes as sc
 from app.control.models import ApiKey, Invitation, Membership, Org, UsageCounter, User
@@ -177,3 +178,37 @@ async def add_usage(db: AsyncSession, org_id: str, *, runs: int = 0, upload_byte
             await db.flush()
     except IntegrityError:
         await bump()
+
+
+# ----------------------------------------------------------------------------- czlonkowie: niezmiennik "min. 1 owner"
+def _other_owners_exist(org_id: str):
+    """Podzapytanie skalarne: czy w organizacji sa co najmniej DWIE role `owner` (alias, zeby nie korelowalo z celem)."""
+    m = aliased(Membership)
+    return select(func.count()).select_from(m).where(m.org_id == org_id, m.role == "owner").scalar_subquery() > 1
+
+
+async def _lock_owner_rows(db: AsyncSession, org_id: str) -> None:
+    """Postgres: blokuje wiersze ownerow, zeby rownolegle zmiany ownerow w tej organizacji szly po kolei
+    (READ COMMITTED widzialby inaczej ten sam stary stan). SQLite ignoruje FOR UPDATE (zapisy i tak sa szeregowane)."""
+    await db.execute(select(Membership.user_id).where(
+        Membership.org_id == org_id, Membership.role == "owner").with_for_update())
+
+
+async def delete_member_guarded(db: AsyncSession, org_id: str, user_id: str) -> bool:
+    """Usuwa czlonkostwo jednym warunkowym DELETE: owner znika tylko, gdy zostaje inny owner (atomowo, bez
+    osobnego liczenia). `False` = nic nie usunieto (brak czlonka albo to ostatni owner); rozroznia wolajacy."""
+    await _lock_owner_rows(db, org_id)
+    result = await db.execute(delete(Membership).where(
+        Membership.org_id == org_id, Membership.user_id == user_id,
+        or_(Membership.role != "owner", _other_owners_exist(org_id))).execution_options(synchronize_session=False))
+    return result.rowcount == 1
+
+
+async def set_member_role_guarded(db: AsyncSession, org_id: str, user_id: str, role: str) -> bool:
+    """Zmienia role jednym warunkowym UPDATE; degradacja ownera tylko, gdy zostaje inny owner. `False` jak wyzej."""
+    await _lock_owner_rows(db, org_id)
+    result = await db.execute(update(Membership).where(
+        Membership.org_id == org_id, Membership.user_id == user_id,
+        or_(Membership.role != "owner", _other_owners_exist(org_id))).values(role=role).execution_options(
+        synchronize_session=False))
+    return result.rowcount == 1

@@ -21,6 +21,7 @@ from app.api.v1.schemas import (
     MemberRolePatch,
 )
 from app.control import scopes as sc
+from app.control import service
 from app.control.audit import record_event
 from app.control.db import get_db
 from app.control.mailer import invitation_mail
@@ -107,9 +108,9 @@ async def invite(body: InvitationCreate, request: Request, ctx: OrgContext = Dep
 
 
 # ----------------------------------------------------------------------------- zarzadzanie czlonkami (H-2)
-async def _owner_count(db: AsyncSession, org_id: str) -> int:
-    return (await db.execute(select(func.count()).select_from(Membership).where(
-        Membership.org_id == org_id, Membership.role == "owner"))).scalar_one()
+async def _is_member(db: AsyncSession, org_id: str, user_id: str) -> bool:
+    return (await db.execute(select(Membership.user_id).where(
+        Membership.org_id == org_id, Membership.user_id == user_id))).first() is not None
 
 
 async def _member_of(db: AsyncSession, org_id: str, user_id: str) -> tuple[Membership, User]:
@@ -131,13 +132,14 @@ async def _member_of(db: AsyncSession, org_id: str, user_id: str) -> tuple[Membe
 async def remove_member(user_id: str, request: Request, ctx: OrgContext = Depends(_MANAGE),
                         db: AsyncSession = Depends(get_db)) -> Response:
     membership, _user = await _member_of(db, ctx.org_id, user_id)
-    if membership.role == "owner":
-        if ctx.role != "owner":
-            raise ProblemError(403, "forbidden", "only an owner can remove an owner")
-        if await _owner_count(db, ctx.org_id) <= 1:
-            raise ProblemError(409, "last_owner", "the organization must keep at least one owner")
+    if membership.role == "owner" and ctx.role != "owner":
+        raise ProblemError(403, "forbidden", "only an owner can remove an owner")
     actor = ctx.principal
-    await db.delete(membership)
+    # jeden warunkowy DELETE w tej transakcji (bez osobnego liczenia ownerow: brak wyscigu TOCTOU)
+    if not await service.delete_member_guarded(db, ctx.org_id, user_id):
+        if not await _is_member(db, ctx.org_id, user_id):
+            raise ProblemError(404, "not_found", "member not found")
+        raise ProblemError(409, "last_owner", "the organization must keep at least one owner")
     await db.execute(delete(Session).where(Session.user_id == user_id, Session.org_id == ctx.org_id))
     keys = (await db.execute(select(ApiKey).where(
         ApiKey.org_id == ctx.org_id, ApiKey.created_by == user_id, ApiKey.revoked_at.is_(None)))).scalars().all()
@@ -166,14 +168,15 @@ async def change_role(user_id: str, body: MemberRolePatch, request: Request, ctx
     if ctx.role != "owner":
         raise ProblemError(403, "forbidden", "only an owner can change roles")
     if membership.role != body.role:
-        if membership.role == "owner" and await _owner_count(db, ctx.org_id) <= 1:
+        if not await service.set_member_role_guarded(db, ctx.org_id, user_id, body.role):
+            if not await _is_member(db, ctx.org_id, user_id):
+                raise ProblemError(404, "not_found", "member not found")
             raise ProblemError(409, "last_owner", "the organization must keep at least one owner")
-        membership.role = body.role
         await record_event(db, request, org_id=ctx.org_id, actor_type=ctx.principal.actor_type,
                            actor_id=ctx.principal.actor_id, action="member.role_changed", target=f"user:{user_id}",
                            meta={"role": body.role})
         await db.commit()
-    return MemberOut(user_id=user.id, email=user.email, name=user.name, role=membership.role,
+    return MemberOut(user_id=user.id, email=user.email, name=user.name, role=body.role,
                      created_at=membership.created_at)
 
 
