@@ -7,8 +7,8 @@ Kontekst projektu (stack, stan, pułapki środowiska) jest w `CLAUDE.md`.
 
 1. **Słownictwo.** Projekt dotyczy analityki danych. Tematyka CS2 występuje wyłącznie
    jako *esports statistics*. Słownictwo z domeny hazardowej jest zakazane
-   w kodzie, komentarzach, commitach, README i dokumentacji (powód prawny:
-   art. 110a k.k.s.). Pełna lista zakazanych fraz jest w agencie `opsec-guard`,
+   w kodzie, komentarzach, commitach, README i dokumentacji (ze względów prawnych).
+   Pełna lista zakazanych fraz jest w agencie `opsec-guard`,
    trzymanym lokalnie poza repozytorium.
 2. **Zero danych osobowych właściciela.** Żadnego nazwiska, żadnego prywatnego adresu
    e-mail w plikach, commitach ani metadanych. Marka: **PPC / prochpc.pl**.
