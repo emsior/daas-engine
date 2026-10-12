@@ -90,12 +90,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.webhooks = dispatcher
         executor.listeners.append(dispatcher.on_run_finished)
         await executor.start()
-        # retencja (kasowanie po terminie): tylko cloud, cykliczne zadanie w tle
-        app.state.retention_task = None
+        # retencja (kasowanie po terminie): tylko cloud, cykliczne zadanie w tle. Lifespan trzyma WLASNA referencje:
+        # drugi lifespan tej samej aplikacji (drugi TestClient) nadpisuje app.state, a zadanie nalezy do jego petli.
+        retention_task: asyncio.Task[None] | None = None
         if settings.cloud and settings.daas_retention_interval_min > 0:
-            app.state.retention_task = asyncio.create_task(
+            retention_task = asyncio.create_task(
                 retention_loop(app.state.db_sessionmaker, registry, settings,
                                interval_sec=settings.daas_retention_interval_min * 60), name="retention")
+        app.state.retention_task = retention_task
         log.info(
             "DaaS Engine up · mode=%s · env=%s · api_key=%s", settings.daas_mode, settings.app_env,
             "set" if auth.configured else ("n/a" if settings.cloud else "MISSING"),
@@ -103,9 +105,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             yield
         finally:
-            if app.state.retention_task is not None:
-                app.state.retention_task.cancel()
-                await asyncio.gather(app.state.retention_task, return_exceptions=True)
+            if retention_task is not None:
+                retention_task.cancel()
+                await asyncio.gather(retention_task, return_exceptions=True)
+                if app.state.retention_task is retention_task:
+                    app.state.retention_task = None
             await executor.stop()
             await dispatcher.close()
             registry.close_all()

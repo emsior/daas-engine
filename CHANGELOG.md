@@ -40,6 +40,9 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   `XLSX_CANCEL_GRACE_SEC` for the worker to release the file, and temporary upload files that are still open are
   removed with retries instead of failing the response (sharing violations). The test suite is green on Windows
   (Python 3.12) as well as Linux.
+- Shutdown in `cloud` mode cancels the retention loop that the same lifespan started. With two lifespans on one
+  application (two test clients) the second one replaced the shared reference, so the first never cancelled its own
+  loop and, on Python 3.11, failed with `Event loop is closed` while waiting for a task from the other event loop.
 
 ### Cloud
 
