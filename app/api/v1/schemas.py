@@ -197,6 +197,9 @@ class UploadOut(BaseModel):
     warnings: list[str] | None = None
     confidence: float | None = None
     ready: bool | None = None
+    auto_job_id: str | None = Field(
+        default=None, description="zadanie zakolejkowane automatycznie po uploadzie (harmonogram: "
+                                  "`auto_run_on_upload`); `null` = brak auto-uruchomienia albo pominiete")
 
 
 # ----------------------------------------------------------------------------- zadania i runy
@@ -372,3 +375,44 @@ class WebhookPingOut(BaseModel):
                                      "returned. Use `status_class`.")
     status_class: Literal["2xx", "3xx", "4xx", "5xx", "error"] = Field(
         ..., description="class of the receiver's answer; `error` = no answer (network, DNS, address refused)")
+
+
+# ----------------------------------------------------------------------------- harmonogram i powiadomienia (12.10)
+class ScheduleIn(BaseModel):
+    """Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna)."""
+
+    reminder_enabled: bool = Field(default=False, description="cotygodniowe przypomnienie e-mail o eksporcie")
+    reminder_weekday: int = Field(default=0, ge=0, le=6, description="dzien tygodnia: 0 = poniedzialek, 6 = niedziela")
+    reminder_hour: int = Field(default=8, ge=0, le=23, description="godzina (czas lokalny w `timezone`)")
+    timezone: str = Field(default="Europe/Warsaw", min_length=1, max_length=64,
+                          description="strefa czasowa IANA, np. `Europe/Warsaw`")
+    reminder_skip_if_recent_upload: bool = Field(
+        default=True, description="nie przypominaj, jesli w ostatnich 6 dniach byl upload")
+    auto_run_on_upload: bool = Field(default=False, description="po uploadzie zakolejkuj zadanie dla "
+                                                                "`suggested_pipeline`")
+    notify_on_finish: bool = Field(default=False, description="e-mail do czlonkow po zakonczeniu runu "
+                                                              "(sukces i blad)")
+
+    @field_validator("timezone")
+    @classmethod
+    def _known_tz(cls, value: str) -> str:
+        from app.control.schedule import is_valid_timezone
+
+        value = value.strip()
+        if not is_valid_timezone(value):
+            raise ValueError("unknown IANA time zone")
+        return value
+
+
+class ScheduleOut(BaseModel):
+    reminder_enabled: bool
+    reminder_weekday: int = Field(..., ge=0, le=6)
+    reminder_hour: int = Field(..., ge=0, le=23)
+    timezone: str
+    reminder_skip_if_recent_upload: bool
+    auto_run_on_upload: bool
+    notify_on_finish: bool
+    next_reminder_at: datetime | None = Field(default=None, description="najblizsze przypomnienie (UTC); "
+                                                                        "`null` = przypomnienie wylaczone")
+    last_reminder_at: datetime | None = Field(default=None, description="ostatnia proba przypomnienia (UTC)")
+    updated_at: datetime | None = Field(default=None, description="`null` = ustawienia domyslne, nigdy nie zapisane")

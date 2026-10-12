@@ -136,7 +136,9 @@ def _send(w: World, method: str, url: str, headers: dict[str, str]):
         kwargs["files"] = {"file": ("dane.csv", b"a;b\n1;2\n", "text/csv")}
     elif method == "PATCH" and "/members/" in url:
         kwargs["json"] = {"role": "member"}      # poprawne cialo: sprawdzamy autoryzacje, nie walidacje
-    elif method in ("POST", "PATCH"):
+    elif method == "PUT" and url.endswith("/schedule"):
+        kwargs["json"] = {"reminder_enabled": True, "auto_run_on_upload": True}  # poprawne cialo: test autoryzacji
+    elif method in ("POST", "PATCH", "PUT"):
         kwargs["json"] = {}
     return w.client.request(method, url, headers=headers, **kwargs)
 
@@ -147,11 +149,13 @@ def _expected(template: str) -> int:
 
 def test_inventory_covers_the_whole_org_scoped_surface():
     templates = {path for _, path in ORG_ROUTES}
-    assert len(ORG_ROUTES) >= 29
+    assert len(ORG_ROUTES) >= 31
+    assert ("GET", "/api/v1/orgs/{org_id}/schedule") in ORG_ROUTES
+    assert ("PUT", "/api/v1/orgs/{org_id}/schedule") in ORG_ROUTES
     for needed in ("/api/v1/orgs/{org_id}", "/api/v1/orgs/{org_id}/jobs/{job_id}/events",
                    "/api/v1/orgs/{org_id}/runs/{run_id}/report", "/api/v1/orgs/{org_id}/webhooks/{webhook_id}/ping",
                    "/api/v1/orgs/{org_id}/api-keys/{key_id}", "/api/v1/orgs/{org_id}/audit",
-                   "/api/v1/orgs/{org_id}/verify", "/api/v1/orgs/{org_id}/uploads"):
+                   "/api/v1/orgs/{org_id}/verify", "/api/v1/orgs/{org_id}/uploads", "/api/v1/orgs/{org_id}/schedule"):
         assert needed in templates, needed
 
 
@@ -221,6 +225,7 @@ def test_nothing_of_b_changed_after_all_the_attempts(world: World):
     assert len(get_rows(world.settings, models.Upload, models.Upload.org_id == world.b.org_id)) == 1
     assert [i.id for i in get_rows(world.settings, models.Invitation,
                                    models.Invitation.org_id == world.b.org_id)] == [world.b_ids["invitation_id"]]
+    assert get_rows(world.settings, models.OrgSchedule, models.OrgSchedule.org_id == world.b.org_id) == []
     members = get_rows(world.settings, models.Membership, models.Membership.org_id == world.b.org_id)
     assert [m.role for m in members] == ["owner"]
     assert not get_rows(world.settings, models.Membership, models.Membership.user_id.in_(

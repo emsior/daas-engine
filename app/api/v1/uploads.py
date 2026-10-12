@@ -14,13 +14,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.problems import ProblemError
 from app.api.routes import _enforce_policy_on_path
 from app.api.v1.deps import OrgContext, org_access
-from app.api.v1.schemas import UploadOut
+from app.api.v1.jobs import queue_job
+from app.api.v1.plan_guard import runs_limit_reached
+from app.api.v1.schemas import JobCreate, UploadOut
 from app.control import scopes as sc
 from app.control import service
 from app.control.audit import record_event
 from app.control.db import get_db
 from app.control.ids import new_upload_id
-from app.control.models import Upload
+from app.control.models import OrgSchedule, Upload
 from app.control.types import utcnow
 from app.core import xlsx_import
 from app.core.models import UkscPackage
@@ -87,6 +89,43 @@ def _validate_package(raw: bytes) -> None:
     except Exception as exc:  # noqa: BLE001
         log.info("package rejected: %s", type(exc).__name__)
         raise UploadRejected(ReasonCode.SCHEMA_MISMATCH, 422, "paczka nie spelnia schematu kolektora") from None
+
+
+async def _auto_run(request: Request, db: AsyncSession, ctx: OrgContext, upload: Upload) -> str | None:
+    """Harmonogram `auto_run_on_upload`: zadanie dla `suggested_pipeline` ta sama droga co `POST /jobs`
+    (`queue_job`). Limit planu, pelna kolejka ani zaden inny blad NIE psuja uploadu (ten jest juz zapisany):
+    wynik to None i audyt `schedule.auto_run_skipped` z kodem w `reason`."""
+    schedule = await db.get(OrgSchedule, ctx.org_id)
+    pipeline = SUGGESTED_PIPELINE.get(upload.kind)
+    if schedule is None or not schedule.auto_run_on_upload or pipeline is None:
+        return None
+    state = request.app.state
+    actor = ctx.principal
+    org_id, upload_id = ctx.org_id, upload.id  # po rollbacku obiekty ORM sa wygaszone: identyfikatory z gory
+    actor_type, actor_id = actor.actor_type, actor.actor_id
+    reason: str
+    try:
+        reached = await runs_limit_reached(db, ctx.org)
+        if reached is not None:
+            reason = "plan_limit"
+        else:
+            job = await queue_job(db, state, org_id, actor, JobCreate(pipeline=pipeline, upload_id=upload_id),
+                                  request=request, audit_reason="auto_run")
+            return job.id
+    except ProblemError as problem:
+        reason = problem.code
+    except Exception:  # noqa: BLE001
+        log.exception("auto-run after upload failed upload_id=%s", upload_id)
+        reason = "internal_error"
+    try:
+        await db.rollback()
+        await record_event(db, request, org_id=org_id, actor_type=actor_type, actor_id=actor_id,
+                           action="schedule.auto_run_skipped", target=f"upload:{upload_id}",
+                           meta={"upload_id": upload_id, "pipeline": pipeline, "reason": reason})
+        await db.commit()
+    except Exception:  # noqa: BLE001
+        log.exception("auto-run skip audit failed upload_id=%s", upload_id)
+    return None
 
 
 @router.post(
@@ -172,10 +211,12 @@ async def create_upload(request: Request, file: UploadFile = File(...),
                            meta={"upload_id": upload_id, "kind": kind, "bytes": size, "sha256": received_sha})
         await db.commit()
         await db.refresh(row)
-        return UploadOut(
+        out = UploadOut(
             id=row.id, kind=kind, filename=row.filename, bytes=row.bytes, sha256=row.sha256,
             created_at=row.created_at, retention_until=row.retention_until,
             suggested_pipeline=SUGGESTED_PIPELINE[kind], **mapping)
+        out.auto_job_id = await _auto_run(request, db, ctx, row)
+        return out
 
     except UploadRejected as rejected:
         if final_path is not None:
