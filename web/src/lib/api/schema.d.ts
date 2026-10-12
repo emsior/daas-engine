@@ -452,6 +452,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orgs/{org_id}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get the schedule and notifications
+         * @description Weekly export reminder, auto-run after upload and the e-mail when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`).
+         */
+        get: operations["get_schedule_api_v1_orgs__org_id__schedule_get"];
+        /**
+         * Save the schedule and notifications
+         * @description Replaces the whole schedule (an omitted field takes its default). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.
+         */
+        put: operations["put_schedule_api_v1_orgs__org_id__schedule_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orgs/{org_id}/uploads": {
         parameters: {
             query?: never;
@@ -1242,6 +1266,86 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /**
+         * ScheduleIn
+         * @description Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna).
+         */
+        ScheduleIn: {
+            /**
+             * Auto Run On Upload
+             * @description po uploadzie zakolejkuj zadanie dla `suggested_pipeline`
+             * @default false
+             */
+            auto_run_on_upload: boolean;
+            /**
+             * Notify On Finish
+             * @description e-mail do czlonkow po zakonczeniu runu (sukces i blad)
+             * @default false
+             */
+            notify_on_finish: boolean;
+            /**
+             * Reminder Enabled
+             * @description cotygodniowe przypomnienie e-mail o eksporcie
+             * @default false
+             */
+            reminder_enabled: boolean;
+            /**
+             * Reminder Hour
+             * @description godzina (czas lokalny w `timezone`)
+             * @default 8
+             */
+            reminder_hour: number;
+            /**
+             * Reminder Skip If Recent Upload
+             * @description nie przypominaj, jesli w ostatnich 6 dniach byl upload
+             * @default true
+             */
+            reminder_skip_if_recent_upload: boolean;
+            /**
+             * Reminder Weekday
+             * @description dzien tygodnia: 0 = poniedzialek, 6 = niedziela
+             * @default 0
+             */
+            reminder_weekday: number;
+            /**
+             * Timezone
+             * @description strefa czasowa IANA, np. `Europe/Warsaw`
+             * @default Europe/Warsaw
+             */
+            timezone: string;
+        };
+        /** ScheduleOut */
+        ScheduleOut: {
+            /** Auto Run On Upload */
+            auto_run_on_upload: boolean;
+            /**
+             * Last Reminder At
+             * @description ostatnia proba przypomnienia (UTC)
+             */
+            last_reminder_at?: string | null;
+            /**
+             * Next Reminder At
+             * @description najblizsze przypomnienie (UTC); `null` = przypomnienie wylaczone
+             */
+            next_reminder_at?: string | null;
+            /** Notify On Finish */
+            notify_on_finish: boolean;
+            /** Reminder Enabled */
+            reminder_enabled: boolean;
+            /** Reminder Hour */
+            reminder_hour: number;
+            /** Reminder Skip If Recent Upload */
+            reminder_skip_if_recent_upload: boolean;
+            /** Reminder Weekday */
+            reminder_weekday: number;
+            /** Timezone */
+            timezone: string;
+            /**
+             * Updated At
+             * @description `null` = ustawienia domyslne, nigdy nie zapisane
+             */
+            updated_at?: string | null;
+        };
         /** SessionOut */
         SessionOut: {
             /**
@@ -1260,6 +1364,11 @@ export interface components {
         };
         /** UploadOut */
         UploadOut: {
+            /**
+             * Auto Job Id
+             * @description zadanie zakolejkowane automatycznie po uploadzie (harmonogram: `auto_run_on_upload`); `null` = brak auto-uruchomienia albo pominiete
+             */
+            auto_job_id?: string | null;
             /** Bytes */
             bytes: number;
             /** Columns */
@@ -2469,6 +2578,72 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
                 };
+            };
+        };
+    };
+    get_schedule_api_v1_orgs__org_id__schedule_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOut"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    put_schedule_api_v1_orgs__org_id__schedule_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduleOut"];
+                };
+            };
+            /** @description Invalid weekday, hour or time zone */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

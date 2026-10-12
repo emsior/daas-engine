@@ -65,3 +65,36 @@ test("webhooki: dodanie (sekret pokazany raz), test, usunięcie", async ({ page 
   await page.getByRole("alertdialog").getByRole("button", { name: "Usuń" }).click();
   await expect(page.getByText("Nie dodano jeszcze webhooków.")).toBeVisible();
 });
+
+test("harmonogram: przypomnienie, walidacja strefy z API (422), zapis i trwałość po przeładowaniu", async ({
+  page,
+}) => {
+  await signUp(page, "schedule");
+  await page.goto("/settings");
+  const card = page.getByRole("region", { name: "Harmonogram i powiadomienia" });
+  await expect(card.getByText("Przypomnienie jest wyłączone.")).toBeVisible();
+
+  await card.getByRole("switch", { name: /Przypominaj e-mailem/ }).check();
+  await card.getByLabel("Dzień tygodnia").selectOption("1");
+  await card.getByLabel("Godzina").selectOption("9");
+  await card.getByRole("switch", { name: /Wyślij e-mail, gdy raport/ }).check();
+
+  // strefa spoza bazy IANA: API odpowiada 422, komunikat przy polu i podsumowanie z fokusem
+  const tz = card.getByLabel(/Strefa czasowa/);
+  await tz.fill("Mars/Olympus");
+  await card.getByRole("button", { name: "Zapisz harmonogram" }).click();
+  await expect(page.getByRole("group", { name: "Wystąpił problem" })).toBeFocused();
+  await expect(tz).toHaveAttribute("aria-invalid", "true");
+
+  await tz.fill("Europe/Warsaw");
+  await card.getByRole("button", { name: "Zapisz harmonogram" }).click();
+  await expect(card.getByText("Harmonogram zapisany.")).toBeVisible();
+  await expect(card.getByText(/Następne przypomnienie: .* 09:00 \(Europe\/Warsaw\)/)).toBeVisible();
+
+  await page.reload();
+  const reloaded = page.getByRole("region", { name: "Harmonogram i powiadomienia" });
+  await expect(reloaded.getByRole("switch", { name: /Przypominaj e-mailem/ })).toBeChecked();
+  await expect(reloaded.getByLabel("Dzień tygodnia")).toHaveValue("1");
+  await expect(reloaded.getByLabel("Godzina")).toHaveValue("9");
+  await expect(reloaded.getByRole("switch", { name: /Wyślij e-mail, gdy raport/ })).toBeChecked();
+});

@@ -274,6 +274,12 @@ export function UploadWizard() {
     const kind = kindOfFile(state.file?.name ?? state.preview.filename);
     const pipeline = state.preview.suggested_pipeline ?? defaultPipelineFor(kind ?? "csv");
     dispatch({ type: "job_start" });
+    const autoJobId = state.preview.auto_job_id;
+    if (autoJobId) {
+      // harmonogram: API zakolejkowało zadanie zaraz po uploadzie - śledzimy je zamiast tworzyć drugie
+      dispatch({ type: "job_created", jobId: autoJobId, status: "queued" });
+      return;
+    }
     createJob.mutate(
       { pipeline, upload_id: state.preview.upload_id },
       {

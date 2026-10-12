@@ -10,6 +10,7 @@ import type {
   CreateWebhookRequest,
   InviteRequest,
   Role,
+  ScheduleSettings,
   UpdateOrgRequest,
 } from "./types";
 
@@ -24,6 +25,7 @@ export const qk = {
   org: (org: string) => ["orgs", org] as const,
   usage: (org: string) => ["orgs", org, "usage"] as const,
   webhooks: (org: string) => ["orgs", org, "webhooks"] as const,
+  schedule: (org: string) => ["orgs", org, "schedule"] as const,
   job: (org: string, id: string) => ["orgs", org, "jobs", id] as const,
 };
 
@@ -224,4 +226,18 @@ export function useDeleteWebhook(org: string) {
 
 export function usePingWebhook(org: string) {
   return useMutation({ mutationFn: (id: string) => api.pingWebhook(org, id) });
+}
+
+/* --- harmonogram i powiadomienia --- */
+
+export function useSchedule(org: string) {
+  return useQuery({ queryKey: qk.schedule(org), queryFn: () => api.getSchedule(org) });
+}
+
+export function useUpdateSchedule(org: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ScheduleSettings) => api.updateSchedule(org, body),
+    onSuccess: (saved) => client.setQueryData(qk.schedule(org), saved),
+  });
 }

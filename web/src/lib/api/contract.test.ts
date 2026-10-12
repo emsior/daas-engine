@@ -18,6 +18,8 @@ import type {
   Job,
   Member,
   Org,
+  Schedule,
+  ScheduleSettings,
   UpdateOrgRequest,
   VerifyResult,
 } from "./types";
@@ -35,7 +37,8 @@ const requests: [
   Sendable<CreateJobRequest, S["JobCreate"]>,
   Sendable<InviteRequest, S["InvitationCreate"]>,
   Sendable<CreateWebhookRequest, S["WebhookCreate"]>,
-] = [true, true, true, true, true, true];
+  Sendable<ScheduleSettings, S["ScheduleIn"]>,
+] = [true, true, true, true, true, true, true];
 
 /* --- typy odpowiedzi czytane bez adaptera: backend -> kokpit (pola z domyślną wartością są zawsze obecne) --- */
 const responses = {
@@ -44,6 +47,7 @@ const responses = {
   member: {} as Required<S["MemberOut"]> satisfies Omit<Member, never>,
   org: {} as Required<S["OrgOut"]> satisfies Org,
   verify: {} as Required<S["VerifyOut"]> satisfies VerifyResult & { known: boolean },
+  schedule: {} as Required<S["ScheduleOut"]> satisfies Schedule,
 };
 
 function openapiPaths(): Set<string> {
@@ -62,8 +66,8 @@ function openapiPaths(): Set<string> {
 
 describe("kontrakt API (docs/openapi.json)", () => {
   it("typy żądań i odpowiedzi kompilują się względem schematów backendu", () => {
-    expect(requests).toHaveLength(6);
-    expect(Object.keys(responses)).toHaveLength(5);
+    expect(requests).toHaveLength(7);
+    expect(Object.keys(responses)).toHaveLength(6);
   });
 
   it("każda ścieżka z client.ts istnieje w OpenAPI backendu", () => {
@@ -92,6 +96,7 @@ describe("kontrakt API (docs/openapi.json)", () => {
       paths.verify("ORG"),
       paths.evidence("ORG"),
       paths.usage("ORG"),
+      paths.schedule("ORG"),
       paths.webhooks("ORG"),
       paths.webhook("ORG", "ID"),
       paths.webhookPing("ORG", "ID"),

@@ -81,6 +81,8 @@ export interface UploadPreview {
   /** Pola brakujące wymaganego mappingu (jeśli backend je zwraca). */
   missing_columns?: string[];
   suggested_pipeline?: KnownPipeline;
+  /** Zadanie zakolejkowane przez API zaraz po uploadzie (harmonogram: auto-uruchamianie); null = brak. */
+  auto_job_id?: string | null;
 }
 
 export interface CreateJobRequest {
@@ -252,6 +254,28 @@ export type PingStatusClass = "2xx" | "3xx" | "4xx" | "5xx" | "error";
 export interface WebhookPingResult {
   ok: boolean;
   status_class: PingStatusClass;
+}
+
+/** Harmonogram i powiadomienia organizacji (`GET/PUT /orgs/{id}/schedule`). Godzina jest lokalna w `timezone`. */
+export interface ScheduleSettings {
+  reminder_enabled: boolean;
+  /** 0 = poniedziałek ... 6 = niedziela. */
+  reminder_weekday: number;
+  /** 0-23. */
+  reminder_hour: number;
+  /** Strefa IANA, np. `Europe/Warsaw` (walidacja po stronie API). */
+  timezone: string;
+  reminder_skip_if_recent_upload: boolean;
+  auto_run_on_upload: boolean;
+  notify_on_finish: boolean;
+}
+
+export interface Schedule extends ScheduleSettings {
+  /** Najbliższe przypomnienie (UTC, ISO); null = przypomnienie wyłączone. */
+  next_reminder_at: string | null;
+  last_reminder_at: string | null;
+  /** null = wartości domyślne, nigdy niezapisane. */
+  updated_at: string | null;
 }
 
 export interface Usage {
