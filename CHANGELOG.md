@@ -29,6 +29,15 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - A startup check that refuses more than one worker.
 - `requirements.lock` and `requirements-dev.lock` with SHA-256 hashes; Docker and CI install with `--require-hashes`.
 - Tests: an auth matrix over all routes, endpoint-level isolation, redaction, report output, limits, XLSX and consumers.
+- Agent access over the Model Context Protocol: a built-in MCP server at `POST /mcp` (official Python SDK `mcp` 2.3,
+  Streamable HTTP, stateless, JSON responses) with 12 tools (`whoami`, `list_pipelines`, `list_uploads`, `upload_csv`,
+  `start_run`, `get_job`, `list_runs`, `get_run`, `get_report`, `verify_report`, `get_evidence`, `get_usage`). Same
+  organization API keys and scopes as `/api/v1` (`Authorization: Bearer` or `X-API-Key`, no session cookie), same
+  service functions, limits and audit (`mcp.tool` per call, without arguments); tenant isolation tested for every tool.
+  Settings `DAAS_MCP_ENABLED`, `DAAS_MCP_MAX_BODY_BYTES` (3 MiB), `DAAS_MCP_MAX_UPLOAD_BYTES` (2 MiB); `/mcp` routed
+  by the bundled Caddyfile. Not in `openapi.json`. Guide: `docs/MCP.md`.
+- `tools/lock_windows_pins.py` re-adds platform-specific lock entries (`uvloop`, `tzdata`, `pywin32`, `colorama`) with
+  the hashes of every release file after `pip-compile`.
 
 ### Fixed
 

@@ -24,6 +24,7 @@ The mode changes which routes and credentials exist; pipelines, reports and the 
    │ /api/*               │   middleware: request id, security headers, metrics                               │
    └──────────────────────┼──► api/v1 routers ──► auth: key or session ──► org_access(scope) ──┐              │
  API client ──X-API-Key───┼──►                                                                  │              │
+ AI agent ──POST /mcp─────┼──► mcp_server: gateway (Bearer key) ─► tools ───────────────────────┤              │
                           │                                                                    ▼              │
                           │   CONTROL PLANE  app/control/ (SQLAlchemy async, Alembic)      DATA PLANE         │
                           │   control.db (SQLite; Postgres optional)                       app/control/tenancy│
@@ -86,6 +87,16 @@ request ─► RequestIdMiddleware ─► SecurityHeadersMiddleware ─► (CORS
         ─► org_access(scope)  organization from the credential; foreign org → 404; missing scope → 403 + audit
         ─► handler            plan_guard on POST jobs/uploads (429 plan_limit)
         ─► problem+json on errors (code, request_id)
+```
+
+MCP (`app/mcp_server/`, [`MCP.md`](MCP.md)) is a plain route `/mcp` under the same middleware:
+
+```
+POST /mcp ─► RequestIdMiddleware ─► SecurityHeadersMiddleware ─► MetricsMiddleware
+        ─► McpGateway   limit_ip ─► API key (Bearer | X-API-Key; no cookie) ─► POST only ─► body limit
+        ─► SDK transport (Streamable HTTP, stateless, JSON) ─► tool_gate (audit mcp.tool)
+        ─► tool         scope check ─► v1 service function (list_run_page, read_report_file, ingest_upload,
+                        submit_job, check_plan_limit, ...) in the key's organization
 ```
 
 ## Pipelines

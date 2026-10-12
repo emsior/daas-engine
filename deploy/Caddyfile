@@ -3,6 +3,7 @@
 # Rekordy DNS A/AAAA domeny musza wskazywac na VPS, a porty 80 i 443 byc otwarte.
 #
 #   /api/*   -> api:8000   (API v1, SSE, raporty)
+#   /mcp     -> api:8000   (serwer MCP dla agentow AI, docs/MCP.md)
 #   reszta   -> web:3000   (kokpit Next.js)
 {
 	# Dziennik domyslny (m.in. bledy proxy, np. 502 przy restarcie API) niesie to samo zapytanie co dziennik dostepu,
@@ -72,6 +73,18 @@
 			# naglowkowi (FORWARDED_ALLOW_IPS), wiec wpis podstawiony przez klienta dawalby falszywy adres w limitach i audycie.
 			header_up X-Forwarded-For {remote_host}
 			# SSE (/api/v1/orgs/*/jobs/*/events): bez buforowania, zdarzenia ida od razu.
+			flush_interval -1
+		}
+	}
+
+	# Serwer MCP (Streamable HTTP, odpowiedzi JSON): limit ciala nad DAAS_MCP_MAX_BODY_BYTES (3 MiB), bez buforowania.
+	@mcp path /mcp /mcp/*
+	handle @mcp {
+		request_body {
+			max_size 4MiB
+		}
+		reverse_proxy api:8000 {
+			header_up X-Forwarded-For {remote_host}
 			flush_interval -1
 		}
 	}

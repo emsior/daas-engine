@@ -24,7 +24,7 @@ from typing import Any
 from starlette.datastructures import MutableHeaders
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from app.api.problems import PROBLEM_MEDIA_TYPE, is_v1_path, problem_body
+from app.api.problems import PROBLEM_MEDIA_TYPE, is_problem_path, is_v1_path, problem_body
 
 _request_id: contextvars.ContextVar[str | None] = contextvars.ContextVar("daas_request_id", default=None)
 _VALID_REQUEST_ID = re.compile(r"^[A-Za-z0-9._-]{8,64}$")
@@ -134,7 +134,7 @@ class RequestIdMiddleware:
                 if response_started:
                     raise
                 path = scope.get("path", "")
-                if is_v1_path(path):
+                if is_problem_path(path):
                     payload = problem_body(500, "internal_error", "internal server error", path, rid)
                     media = PROBLEM_MEDIA_TYPE
                 else:

@@ -156,6 +156,18 @@ Mapper (`app/sources/csv_mapper.py`): aliasy PL/EN dla `order_id, date, product,
 
 ---
 
+## Dostęp dla agentów (MCP)
+
+Asystenci AI (Claude, ChatGPT, Codex, Gemini) mogą używać DaaS Engine jak narzędzia: API ma wbudowany serwer MCP pod `POST /mcp` (Streamable HTTP, bezstanowy, odpowiedzi JSON). Łączysz go kluczem API organizacji w nagłówku `Authorization: Bearer <klucz>` i prosisz zwykłym językiem: „wgraj ten eksport, policz raport i powiedz, co spadło". 12 narzędzi obejmuje upload (tekst CSV), runy, raporty, weryfikację hasha, status artefaktów i zużycie — zawsze w organizacji klucza.
+
+```bash
+claude mcp add --transport http daas https://raporty.example.com/mcp --header "Authorization: Bearer $KEY"
+```
+
+Treść raportu pochodzi z plików klienta: dla agenta to dane, nie polecenia. Konfiguracja innych klientów, limity i bezpieczeństwo: [`docs/MCP.md`](docs/MCP.md).
+
+---
+
 ## Architektura
 
 Jeden proces FastAPI, control plane (konta, klucze, zadania, audyt; SQLite + Alembic) i data plane (katalog `runtime/tenants/<org_id>/` z własnym plikiem DuckDB, uploadami i raportami). Diagram, tryby, wykonawca zadań: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
@@ -271,7 +283,7 @@ Szczegółowa lista kontrolna: [VALIDATION.md](VALIDATION.md). Historia zmian: [
 
 ## Dokumentacja
 
-[`docs/API.md`](docs/API.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/DEPLOY.md`](docs/DEPLOY.md) · [`deploy/README.md`](deploy/README.md) · [`docs/SECURITY.md`](docs/SECURITY.md) · [`docs/DPA_v1_PL.md`](docs/DPA_v1_PL.md) · materiały pilota: [`docs/pilot/`](docs/pilot)
+[`docs/API.md`](docs/API.md) · [`docs/MCP.md`](docs/MCP.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/DEPLOY.md`](docs/DEPLOY.md) · [`deploy/README.md`](deploy/README.md) · [`docs/SECURITY.md`](docs/SECURITY.md) · [`docs/DPA_v1_PL.md`](docs/DPA_v1_PL.md) · materiały pilota: [`docs/pilot/`](docs/pilot)
 
 ---
 

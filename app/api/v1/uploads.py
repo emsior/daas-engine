@@ -100,6 +100,15 @@ def _validate_package(raw: bytes) -> None:
 async def create_upload(request: Request, file: UploadFile = File(...),
                         sheet: str | None = Form(default=None, max_length=xlsx_import.MAX_SHEET_NAME_LEN),
                         ctx: OrgContext = Depends(_WRITE), db: AsyncSession = Depends(get_db)) -> UploadOut:
+    return await ingest_upload(request, db, ctx, file, sheet)
+
+
+async def ingest_upload(request: Request, db: AsyncSession, ctx: OrgContext, file: UploadFile,
+                        sheet: str | None = None) -> UploadOut:
+    """Walidacja i zapis uploadu (logika wspolna v1 i /mcp): limit `v1_upload`, nazwa pliku, `upload_guard`,
+    import XLSX, schemat paczki, policy, mapper kolumn, kwota katalogu, licznik zuzycia, audyt `upload.created`.
+    Odrzucenie -> `ProblemError` z kodem powodu (`extra.reason_code`) i audytem `auth_denied`. Limit planu
+    sprawdza wolajacy (`plan_guard` / `check_plan_limit`)."""
     from app.sources.csv_mapper import map_dataframe, read_client_csv
 
     state = request.app.state

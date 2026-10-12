@@ -7,6 +7,8 @@ Kolejnosc wobec autoryzacji trasy: wolajacy bez dostepu do organizacji albo bez 
 """
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import Depends, Path, Request
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -47,25 +49,38 @@ async def plan_guard(request: Request, org_id: str = Path(...), principal: Princ
     org = await db.get(Org, org_id) if scopes is not None else None
     if org is None or required not in scopes:
         return  # trasa sama odpowie 404/403
+    if request.url.path.endswith("/jobs"):
+        await check_plan_limit(db, request, principal=principal, org=org, resource="runs")
+    elif request.url.path.endswith("/uploads"):
+        await check_plan_limit(db, request, principal=principal, org=org, resource="upload_bytes",
+                               declared_bytes=_content_length(request))
+
+
+async def check_plan_limit(db: AsyncSession, request: Request, *, principal: Principal, org: Org,
+                           resource: Literal["runs", "upload_bytes"], declared_bytes: int = 0,
+                           target: str | None = None) -> None:
+    """429 `plan_limit` (z audytem `auth_denied`), gdy miesieczny limit planu jest wyczerpany — wspolne dla v1 i /mcp.
+
+    `runs`: zuzyte runy + zadania w toku >= limit. `upload_bytes`: zuzyte bajty + `declared_bytes` >= limit."""
+    org_id = org.id
     limits = limits_for(org.plan)
     counter = await db.get(UsageCounter, (org_id, service.current_period()))
     runs, uploaded = (counter.runs, counter.upload_bytes) if counter else (0, 0)
 
-    resource, limit, used = None, None, 0
-    if request.method == "POST" and request.url.path.endswith("/jobs") and limits.runs_per_month is not None:
+    limit, used = None, 0
+    if resource == "runs" and limits.runs_per_month is not None:
         # zadania w toku tez zajmuja miejsce w limicie: licznik rosnie dopiero po zakonczeniu runu
         pending = (await db.execute(select(func.count()).select_from(Job).where(
             Job.org_id == org_id, Job.status.in_(("queued", "running"))))).scalar_one()
         if runs + pending >= limits.runs_per_month:
-            resource, limit, used = "runs", limits.runs_per_month, runs + pending
-    elif request.url.path.endswith("/uploads") and limits.upload_bytes_per_month is not None:
-        declared = _content_length(request)
-        if uploaded + declared >= limits.upload_bytes_per_month:
-            resource, limit, used = "upload_bytes", limits.upload_bytes_per_month, uploaded
-    if resource is None:
+            limit, used = limits.runs_per_month, runs + pending
+    elif resource == "upload_bytes" and limits.upload_bytes_per_month is not None:
+        if uploaded + declared_bytes >= limits.upload_bytes_per_month:
+            limit, used = limits.upload_bytes_per_month, uploaded
+    if limit is None:
         return
     await record_event(db, request, org_id=org_id, actor_type=principal.actor_type, actor_id=principal.actor_id,
-                       action="auth_denied", target=request.url.path[:80],
+                       action="auth_denied", target=(target or request.url.path)[:80],
                        meta={"reason": "plan_limit", "plan": org.plan})
     await db.commit()
     raise ProblemError(429, "plan_limit", f"monthly {resource} limit of the {org.plan} plan reached",
