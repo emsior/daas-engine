@@ -56,6 +56,11 @@ python -m app.main                        # API na 127.0.0.1:8000; selfhost wyma
 python -m app.cli migrate | migrate-runtime | create-org --name ... --owner-email ...
 python tools/export_openapi.py            # odświeża docs/openapi.json (test pilnuje aktualności)
 
+# locki po zmianie zależności (pip-tools w venv na Pythonie 3.11 = minimum projektu, jak w nagłówku locków)
+pip-compile --all-build-deps --allow-unsafe --generate-hashes --output-file=requirements.lock --strip-extras pyproject.toml
+pip-compile --all-build-deps --allow-unsafe --extra=dev --generate-hashes --output-file=requirements-dev.lock --strip-extras pyproject.toml
+python tools/lock_windows_pins.py         # wpisy z markerem sys_platform (uvloop, tzdata, pywin32, colorama) + hashe z PyPI; --check w CI/review
+
 # kokpit
 cd web && npm ci
 npm run typecheck && npm run lint && npm test
