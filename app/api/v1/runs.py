@@ -55,7 +55,9 @@ def run_out(record: RunRecord) -> RunOut:
                   period_from=record.period_from, period_to=record.period_to)
 
 
-async def _load_record(db: AsyncSession, org_id: str, run_id: str) -> RunRecord:
+# ----------------------------------------------------------------------------- logika wspolna (v1 i /mcp)
+async def load_run_record(db: AsyncSession, org_id: str, run_id: str) -> RunRecord:
+    """Rekord runu organizacji albo 404 `not_found` (run innej organizacji wyglada jak nieistniejacy)."""
     record = (await db.execute(select(RunRecord).where(
         RunRecord.run_id == run_id, RunRecord.org_id == org_id))).scalar_one_or_none()
     if record is None:
@@ -63,13 +65,10 @@ async def _load_record(db: AsyncSession, org_id: str, run_id: str) -> RunRecord:
     return record
 
 
-@router.get("/orgs/{org_id}/runs", response_model=RunPage, summary="List runs (newest first)")
-async def list_runs(pipeline: str | None = Query(default=None, max_length=40),
-                    limit: int = Query(default=20, ge=1, le=100),
-                    cursor: str | None = Query(default=None, max_length=80,
-                                               description="`next_cursor` z poprzedniej strony"),
-                    ctx: OrgContext = Depends(_READ), db: AsyncSession = Depends(get_db)) -> RunPage:
-    query = select(RunRecord).where(RunRecord.org_id == ctx.org_id)
+async def list_run_page(db: AsyncSession, org_id: str, *, pipeline: str | None, limit: int,
+                        cursor: str | None = None) -> RunPage:
+    """Strona runow organizacji (najnowsze najpierw); `cursor` = `next_cursor` poprzedniej strony."""
+    query = select(RunRecord).where(RunRecord.org_id == org_id)
     if pipeline:
         query = query.where(RunRecord.pipeline == pipeline)
     if cursor:
@@ -86,6 +85,15 @@ async def list_runs(pipeline: str | None = Query(default=None, max_length=40),
     return RunPage(items=[run_out(r) for r in page], next_cursor=nxt)
 
 
+@router.get("/orgs/{org_id}/runs", response_model=RunPage, summary="List runs (newest first)")
+async def list_runs(pipeline: str | None = Query(default=None, max_length=40),
+                    limit: int = Query(default=20, ge=1, le=100),
+                    cursor: str | None = Query(default=None, max_length=80,
+                                               description="`next_cursor` z poprzedniej strony"),
+                    ctx: OrgContext = Depends(_READ), db: AsyncSession = Depends(get_db)) -> RunPage:
+    return await list_run_page(db, ctx.org_id, pipeline=pipeline, limit=limit, cursor=cursor)
+
+
 def _tenant_run(state, org_id: str, run_id: str) -> dict | None:
     return state.tenants.get(org_id).db.get_run(run_id)
 
@@ -95,8 +103,13 @@ def _tenant_run(state, org_id: str, run_id: str) -> dict | None:
                         "are never returned.")
 async def get_run(run_id: str, request: Request, ctx: OrgContext = Depends(_READ),
                   db: AsyncSession = Depends(get_db)) -> RunDetail:
-    record = await _load_record(db, ctx.org_id, run_id)
-    row = await asyncio.to_thread(_tenant_run, request.app.state, ctx.org_id, run_id)
+    return await run_detail(request.app.state, db, ctx.org_id, run_id)
+
+
+async def run_detail(state, db: AsyncSession, org_id: str, run_id: str) -> RunDetail:
+    """`RunDetail` runu organizacji (bez sciezek raportow i surowego tekstu bledu); 404 gdy nie ma."""
+    record = await load_run_record(db, org_id, run_id)
+    row = await asyncio.to_thread(_tenant_run, state, org_id, run_id)
     extra: dict = {}
     if row:
         result = RunResult.model_validate(row)
@@ -121,6 +134,30 @@ def _purged(record: RunRecord) -> bool:
 
 
 _resolve_report = resolve_report   # wspolny resolver (retencja uzywa tego samego)
+
+
+async def read_report_file(state, db: AsyncSession, org_id: str, run_id: str,
+                           fmt: str) -> tuple[RunRecord, bytes, str]:
+    """`(rekord, bajty pliku raportu, sha256)` po kontroli integralnosci (hash z odczytanych bajtow == zapisany).
+
+    410 `report_expired` (pliki usunela retencja), 404 (run, format albo plik), 500 `report_integrity_error`."""
+    record = await load_run_record(db, org_id, run_id)
+    if _purged(record):
+        raise ProblemError(410, "report_expired", "the report files were removed by the retention policy")
+    expected = record.report_sha256.get(fmt)
+    if not expected:
+        raise not_found("report")
+    row = await asyncio.to_thread(_tenant_run, state, org_id, run_id)
+    paths = state.tenants.paths(org_id)
+    # sciezka pochodzi z bazy najemcy (nie od klienta); plik musi lezec w katalogu raportow tej organizacji
+    path = _resolve_report(paths.reports, (row or {}).get(PATH_KEYS[fmt]))
+    if path is None:
+        raise not_found("report file")
+    body, actual = await asyncio.to_thread(_read_report, path)
+    if actual != expected:
+        log.error("report integrity mismatch run_id=%s fmt=%s", run_id, fmt)
+        raise ProblemError(500, "report_integrity_error", "the stored report does not match its recorded hash")
+    return record, body, expected
 
 
 def _etag_matches(header: str, digest: str) -> bool:
@@ -148,22 +185,7 @@ def _etag_matches(header: str, digest: str) -> bool:
 )
 async def get_report(run_id: str, request: Request, fmt: Literal["html", "md", "json"] = Query(default="html"),
                      ctx: OrgContext = Depends(_REPORTS), db: AsyncSession = Depends(get_db)) -> Response:
-    record = await _load_record(db, ctx.org_id, run_id)
-    if _purged(record):
-        raise ProblemError(410, "report_expired", "the report files were removed by the retention policy")
-    expected = record.report_sha256.get(fmt)
-    if not expected:
-        raise not_found("report")
-    row = await asyncio.to_thread(_tenant_run, request.app.state, ctx.org_id, run_id)
-    paths = request.app.state.tenants.paths(ctx.org_id)
-    # sciezka pochodzi z bazy najemcy (nie od klienta); plik musi lezec w katalogu raportow tej organizacji
-    path = _resolve_report(paths.reports, (row or {}).get(PATH_KEYS[fmt]))
-    if path is None:
-        raise not_found("report file")
-    body, actual = await asyncio.to_thread(_read_report, path)
-    if actual != expected:
-        log.error("report integrity mismatch run_id=%s fmt=%s", run_id, fmt)
-        raise ProblemError(500, "report_integrity_error", "the stored report does not match its recorded hash")
+    record, body, expected = await read_report_file(request.app.state, db, ctx.org_id, run_id, fmt)
     headers = {**REPORT_HEADERS, "ETag": f'"{expected}"', "Cache-Control": "private, no-store"}
     if _etag_matches(request.headers.get("if-none-match", ""), expected):
         return Response(status_code=304, headers=headers)
@@ -228,7 +250,12 @@ async def evidence(request: Request, ctx: OrgContext = Depends(_REPORTS),
     ).order_by(RunRecord.created_at.desc(), RunRecord.run_id.desc()).limit(1))).scalar_one_or_none()
     if record is None:
         raise not_found("collector run")
-    head, rows = await asyncio.to_thread(_evidence_rows, request.app.state, ctx.org_id, record.run_id)
+    return await evidence_of_run(request.app.state, ctx.org_id, record)
+
+
+async def evidence_of_run(state, org_id: str, record: RunRecord) -> EvidenceOut:
+    """Status artefaktow runu `uksc_evidence` (kontrola -> wymog -> status -> artefakt); bez tresci artefaktow."""
+    head, rows = await asyncio.to_thread(_evidence_rows, state, org_id, record.run_id)
     head = head or {}
     return EvidenceOut(
         run_id=record.run_id, run_status=record.status, host=head.get("host"), collected_at=_aware(head.get("collected_at")),

@@ -44,7 +44,8 @@ def job_out(job: Job) -> JobOut:
     return JobOut.model_validate(job, from_attributes=True)
 
 
-async def _load_job(db: AsyncSession, org_id: str, job_id: str) -> Job:
+async def load_job(db: AsyncSession, org_id: str, job_id: str) -> Job:
+    """Zadanie organizacji albo 404 `not_found` (zadanie innej organizacji wyglada jak nieistniejace)."""
     job = (await db.execute(select(Job).where(Job.id == job_id, Job.org_id == org_id))).scalar_one_or_none()
     if job is None:
         raise not_found("job")
@@ -60,6 +61,15 @@ async def _load_job(db: AsyncSession, org_id: str, job_id: str) -> Job:
 )
 async def create_job(body: JobCreate, request: Request, response: Response, ctx: OrgContext = Depends(_WRITE),
                      db: AsyncSession = Depends(get_db)) -> JobOut:
+    job = await submit_job(request, db, ctx, body)
+    response.headers["Location"] = f"/api/v1/orgs/{ctx.org_id}/jobs/{job.id}"
+    return job_out(job)
+
+
+async def submit_job(request: Request, db: AsyncSession, ctx: OrgContext, body: JobCreate) -> Job:
+    """Kolejkuje run (logika wspolna v1 i /mcp): limit `v1_run` per podmiot, zgodnosc pipeline'u z uploadem,
+    upload tylko tej organizacji (404), kolejka <= `MAX_PENDING_JOBS` (409), audyt `job.created`, zgloszenie
+    do executora. Limit planu sprawdza wolajacy (`plan_guard` / `check_plan_limit`)."""
     state = request.app.state
     enforce(request, "v1_run", state.settings.daas_rate_limit_run_per_min)
     kinds = PIPELINE_UPLOAD_KINDS[body.pipeline]
@@ -94,8 +104,7 @@ async def create_job(body: JobCreate, request: Request, response: Response, ctx:
                        meta={"job_id": job.id, "pipeline": body.pipeline, "upload_id": body.upload_id})
     await db.commit()
     state.executor.submit(job.id, ctx.org_id)
-    response.headers["Location"] = f"/api/v1/orgs/{ctx.org_id}/jobs/{job.id}"
-    return job_out(job)
+    return job
 
 
 @router.get("/orgs/{org_id}/jobs", response_model=JobPage, summary="List jobs (newest first)")
@@ -114,7 +123,7 @@ async def list_jobs(status: JobStatus | None = None, limit: int = Query(default=
 
 @router.get("/orgs/{org_id}/jobs/{job_id}", response_model=JobOut, summary="Get a job")
 async def get_job(job_id: str, ctx: OrgContext = Depends(_READ), db: AsyncSession = Depends(get_db)) -> JobOut:
-    return job_out(await _load_job(db, ctx.org_id, job_id))
+    return job_out(await load_job(db, ctx.org_id, job_id))
 
 
 @router.post("/orgs/{org_id}/jobs/{job_id}/cancel", response_model=JobOut, summary="Cancel a queued job",
@@ -122,7 +131,7 @@ async def get_job(job_id: str, ctx: OrgContext = Depends(_READ), db: AsyncSessio
              responses={409: {"description": "The job already started or finished"}})
 async def cancel_job(job_id: str, request: Request, ctx: OrgContext = Depends(_WRITE),
                      db: AsyncSession = Depends(get_db)) -> JobOut:
-    job = await _load_job(db, ctx.org_id, job_id)
+    job = await load_job(db, ctx.org_id, job_id)
     changed = await db.execute(update(Job).where(Job.id == job.id, Job.status == "queued").values(
         status="cancelled", finished_at=utcnow(), message="cancelled", progress=0))
     if changed.rowcount != 1:
@@ -215,7 +224,7 @@ async def _event_stream(request: Request, org_id: str, job_id: str, slot: Stream
 )
 async def job_events(job_id: str, request: Request, ctx: OrgContext = Depends(_READ),
                      db: AsyncSession = Depends(get_db)) -> StreamingResponse:
-    await _load_job(db, ctx.org_id, job_id)  # 404 zanim zaczniemy strumien
+    await load_job(db, ctx.org_id, job_id)  # 404 zanim zaczniemy strumien
     await db.close()  # sesja zadania nie ma trzymac polaczenia przez caly strumien
     state = request.app.state
     bus = state.executor.bus
