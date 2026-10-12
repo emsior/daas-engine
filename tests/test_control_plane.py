@@ -23,7 +23,7 @@ from tests.support import minimal_subprocess_env
 
 EXPECTED_TABLES = {
     "orgs", "users", "memberships", "api_keys", "magic_links", "sessions", "invitations", "jobs",
-    "uploads", "run_records", "audit_events", "usage_counters", "webhooks",
+    "uploads", "run_records", "audit_events", "usage_counters", "webhooks", "org_schedules",
 }
 
 
@@ -66,7 +66,7 @@ def test_migration_from_scratch_creates_all_tables(tmp_path: Path):
 
 
 def test_migration_matches_models_exactly(migrated: Settings):
-    """Autogeneracja po migracji nie moze znalezc roznic: model i migracje do 0003 sa zgodne."""
+    """Autogeneracja po migracji nie moze znalezc roznic: model i migracje do 0004 sa zgodne."""
     from alembic.autogenerate import compare_metadata
     from alembic.migration import MigrationContext
 
@@ -87,7 +87,7 @@ def test_migration_is_idempotent(migrated: Settings):
     async def version(db):
         return (await db.execute(text("SELECT version_num FROM alembic_version"))).scalars().all()
 
-    assert run(_with_session(migrated, version)) == ["0003"]
+    assert run(_with_session(migrated, version)) == ["0004"]
 
 
 def test_migration_downgrade_removes_everything(tmp_path: Path):

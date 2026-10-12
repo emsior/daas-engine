@@ -241,3 +241,24 @@ class Webhook(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     __table_args__ = (UniqueConstraint("org_id", "url", name="uq_webhooks_org_url"), Index("ix_webhooks_org_id", "org_id"))
+
+
+class OrgSchedule(Base):
+    """Harmonogram i powiadomienia organizacji (1:1 z `orgs`). Wiersz powstaje leniwie przy pierwszym `PUT`;
+    brak wiersza = wartosci domyslne. Godzina przypomnienia jest lokalna w `timezone` (IANA)."""
+
+    __tablename__ = "org_schedules"
+
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE), primary_key=True)
+    reminder_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminder_weekday: Mapped[int] = mapped_column(Integer, default=0)  # 0 = poniedzialek ... 6 = niedziela
+    reminder_hour: Mapped[int] = mapped_column(Integer, default=8)  # 0-23, czas lokalny w `timezone`
+    timezone: Mapped[str] = mapped_column(String(64), default="Europe/Warsaw")
+    reminder_skip_if_recent_upload: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_run_on_upload: Mapped[bool] = mapped_column(Boolean, default=False)
+    notify_on_finish: Mapped[bool] = mapped_column(Boolean, default=False)
+    next_reminder_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    last_reminder_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    __table_args__ = (Index("ix_org_schedules_due", "reminder_enabled", "next_reminder_at"),)
