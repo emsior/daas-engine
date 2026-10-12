@@ -2,6 +2,8 @@
 
 The cloud API lives under `/api/v1`. The machine-readable contract is [`openapi.json`](openapi.json) (generated from the application; regenerate with `python tools/export_openapi.py`). The interactive `/docs` and `/openapi.json` endpoints of a running server exist only with `APP_ENV=dev`.
 
+AI assistants use the same keys and the same logic through the MCP server at `POST /mcp` (not part of `openapi.json`): see [`MCP.md`](MCP.md).
+
 Examples below use these shell variables:
 
 ```bash
@@ -281,7 +283,7 @@ When a limit is used up, `POST .../jobs` and `POST .../uploads` answer `429` wit
 
 ## Audit log
 
-`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (scope `audit:read`; `limit` 1-200, default 50). Ordered by `(ts, id)` descending. The response is `{"items": [...], "next_cursor": "..." | null}`; the cursor is an opaque base64url value (an encoded `[ts, id]` pair): pass it back unchanged. A malformed cursor answers `422 invalid_cursor`. Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `auth.login`, `auth.logout`, `auth_denied`. `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
+`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (scope `audit:read`; `limit` 1-200, default 50). Ordered by `(ts, id)` descending. The response is `{"items": [...], "next_cursor": "..." | null}`; the cursor is an opaque base64url value (an encoded `[ts, id]` pair): pass it back unchanged. A malformed cursor answers `422 invalid_cursor`. Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `auth.login`, `auth.logout`, `auth_denied`, `mcp.tool` (one per MCP tool call: `tool`, `ok`, `duration_ms`, `key_id`; never the arguments). `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
 
 ## Metrics
 

@@ -113,6 +113,18 @@ Selfhost legacy routes (same engine, one organization): `POST /upload` → `POST
 
 ---
 
+## Agent access (MCP)
+
+AI assistants (Claude, ChatGPT, Codex, Gemini) can use DaaS Engine as a tool: the API has a built-in MCP server at `POST /mcp` (Streamable HTTP, stateless, JSON). Connect it with an organization API key in `Authorization: Bearer <key>` and ask for the flow in plain language; 12 tools cover upload (CSV text), runs, reports, hash verification, artifact status and usage, always inside the key's organization.
+
+```bash
+claude mcp add --transport http daas https://reports.example.com/mcp --header "Authorization: Bearer $KEY"
+```
+
+Report text comes from customer files: for the agent it is data, not instructions. Setup for other clients, limits and security: [`docs/MCP.md`](docs/MCP.md).
+
+---
+
 ## Architecture
 
 ```
@@ -176,6 +188,7 @@ Network failures (timeouts, `401`, upstream schema changes) trigger the same fal
 | Document | Contents |
 |---|---|
 | [`docs/API.md`](docs/API.md) | routes, scopes, errors, `curl` examples, SSE, webhook signature |
+| [`docs/MCP.md`](docs/MCP.md) | MCP server for AI agents: tools, client setup, limits, prompt-injection note |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | control plane, data plane, modes, job executor |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md), [`deploy/README.md`](deploy/README.md) | install on a VPS, update, rollback, backups, all environment variables |
 | [`docs/SECURITY.md`](docs/SECURITY.md) | threat model, controls, known limitations, how to report |

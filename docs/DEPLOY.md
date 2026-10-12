@@ -101,6 +101,9 @@ Kolumna „Tryb": `c` = istotne w `cloud`, `s` = w `selfhost`, `cs` = w obu.
 | `DAAS_SSE_MAX_PER_PRINCIPAL` | `5` | otwarte strumienie SSE na klucz lub sesję (1-100); powyżej: `429 sse_limit` |
 | `DAAS_SSE_MAX_TOTAL` | `100` | otwarte strumienie SSE w całym procesie (1-10000) |
 | `DAAS_SSE_MAX_SECONDS` | `1800` | maksymalny czas życia jednego strumienia (1-86400 s); klient łączy się ponownie |
+| `DAAS_MCP_ENABLED` | `true` | serwer MCP dla agentów AI pod `POST /mcp` ([`MCP.md`](MCP.md)); `false` = trasy nie ma (`404`) |
+| `DAAS_MCP_MAX_BODY_BYTES` | `3145728` | limit ciała żądania `/mcp` (3 MiB); większe: `413` (Caddy przepuszcza do 4 MiB) |
+| `DAAS_MCP_MAX_UPLOAD_BYTES` | `2097152` | limit treści CSV narzędzia `upload_csv` (2 MiB); mniejszy niż limit ciała |
 
 Liczniki limitów są w pamięci procesu; aplikacja działa w jednym procesie roboczym (`WEB_CONCURRENCY` lub `UVICORN_WORKERS` powyżej 1 blokuje start).
 
