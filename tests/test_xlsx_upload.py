@@ -578,7 +578,9 @@ def test_fast_conversion_returns_normally_within_the_timeout():
     wb = numbered_workbook(50)
     buf = io.BytesIO()
     wb.save(buf)
-    p = Path(__import__("tempfile").mkstemp(suffix=".xlsx")[1])
+    fd, name = __import__("tempfile").mkstemp(suffix=".xlsx")
+    __import__("os").close(fd)  # otwarty deskryptor blokowalby unlink na Windows
+    p = Path(name)
     try:
         p.write_bytes(buf.getvalue())
         data, rows = xi.xlsx_to_csv_bytes(p)
@@ -591,3 +593,86 @@ def test_openpyxl_parses_through_defusedxml():
     import openpyxl.xml as ox
 
     assert ox.DEFUSEDXML is True
+
+
+def test_timeout_waits_for_the_worker_to_release_the_file(monkeypatch: pytest.MonkeyPatch):
+    """Po timeoucie `run_bounded` daje watkowi chwile na zamkniecie pliku (Windows: inaczej unlink = WinError 32)."""
+    import threading
+    import time
+
+    monkeypatch.setattr(xi, "XLSX_PARSE_TIMEOUT_SEC", 0.1)
+    monkeypatch.setattr(xi, "XLSX_CANCEL_GRACE_SEC", 2.0)
+    finished = threading.Event()
+
+    def worker(cancel: threading.Event):
+        try:
+            for _ in range(200):
+                if cancel.is_set():
+                    return "cancelled"
+                time.sleep(0.02)
+            return "done"
+        finally:
+            finished.set()
+
+    started = time.monotonic()
+    with pytest.raises(xi.UploadRejected) as info:
+        xi.run_bounded(worker)
+    assert info.value.reason == "xlsx_timeout"
+    assert finished.is_set()  # watek zakonczyl sie ZANIM wywolujacy dostal 422
+    assert time.monotonic() - started < 1.5
+
+
+def test_timeout_does_not_hang_on_a_worker_that_ignores_cancel(monkeypatch: pytest.MonkeyPatch):
+    import threading
+    import time
+
+    monkeypatch.setattr(xi, "XLSX_PARSE_TIMEOUT_SEC", 0.05)
+    monkeypatch.setattr(xi, "XLSX_CANCEL_GRACE_SEC", 0.1)
+    release = threading.Event()
+
+    def stubborn(cancel: threading.Event):
+        release.wait(5)
+        return "late"
+
+    started = time.monotonic()
+    try:
+        with pytest.raises(xi.UploadRejected):
+            xi.run_bounded(stubborn)
+        assert time.monotonic() - started < 1.0  # laska jest ograniczona, odpowiedz nie czeka na uparty watek
+    finally:
+        release.set()
+
+
+def test_remove_quietly_retries_a_locked_file_and_gives_up_quietly(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from app.core import upload_guard as ug
+
+    target = tmp_path / "locked.tmp"
+    target.write_bytes(b"x")
+    denials: list[int] = []
+    pauses: list[float] = []
+    real_unlink = Path.unlink
+
+    def flaky_unlink(self: Path, missing_ok: bool = False):
+        if self == target and len(denials) < 2:
+            denials.append(1)
+            raise PermissionError(32, "sharing violation")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", flaky_unlink)
+    assert ug.remove_quietly(target, sleep=pauses.append) is True
+    assert not target.exists() and len(denials) == 2 and pauses == list(ug._REMOVE_BACKOFF_SEC[:2])
+
+    always_locked = tmp_path / "forever.tmp"
+    always_locked.write_bytes(b"x")
+
+    def locked_unlink(self: Path, missing_ok: bool = False):
+        if self == always_locked:
+            raise PermissionError(32, "sharing violation")
+        return real_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", locked_unlink)
+    pauses.clear()
+    assert ug.remove_quietly(always_locked, sleep=pauses.append) is False  # bez wyjatku, plik zostaje dla sweepa
+    assert len(pauses) == len(ug._REMOVE_BACKOFF_SEC) and always_locked.exists()
+    monkeypatch.undo()
+    assert ug.remove_quietly(tmp_path / "missing.tmp") is True

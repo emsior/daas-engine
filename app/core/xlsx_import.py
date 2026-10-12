@@ -52,6 +52,7 @@ MAX_SHEET_NAME_LEN = 64
 MAX_SHARED_STRINGS = 200_000                     # wpisow <si> w xl/sharedStrings.xml
 MAX_SHARED_STRINGS_BYTES = 24 * 1024 * 1024      # rozmiar rozpakowanego xl/sharedStrings.xml
 XLSX_PARSE_TIMEOUT_SEC = 30.0                    # caly czas konwersji (kontener + odczyt arkusza)
+XLSX_CANCEL_GRACE_SEC = 2.0                      # po timeoucie: ile czekamy, az watek zwolni uchwyt pliku
 _SCAN_CHUNK_BYTES = 256 * 1024
 _CANCEL_CHECK_EVERY_ROWS = 500
 _MAX_CONTENT_TYPES_BYTES = 1024 * 1024
@@ -201,7 +202,8 @@ def xlsx_to_csv_bytes(path: Path, sheet: str | None = None) -> tuple[bytes, int]
 
     Cala praca (kontener + odczyt arkusza) idzie w osobnym watku, na ktory czekamy co najwyzej
     `XLSX_PARSE_TIMEOUT_SEC`; po przekroczeniu: 422 `xlsx_timeout`. Watku nie da sie zabic, wiec dostaje
-    flage `cancel` sprawdzana w petlach skanu i odczytu wierszy i konczy sie sam (nie blokujemy na nim zamkniecia).
+    flage `cancel` sprawdzana w petlach skanu i odczytu wierszy i konczy sie sam; czekamy na to najwyzej
+    `XLSX_CANCEL_GRACE_SEC`, zeby plik tymczasowy byl juz zamkniety, gdy handler go usuwa.
     """
     return run_bounded(_convert, path, sheet)
 
@@ -219,7 +221,11 @@ def run_bounded(func: Callable[..., T], *args: Any) -> T:
         done, _ = wait([future], timeout=XLSX_PARSE_TIMEOUT_SEC)
         if not done:
             cancel.set()
-            log.warning("xlsx parse timed out after %.1fs", XLSX_PARSE_TIMEOUT_SEC)
+            # Krotka laska: watek sprawdza `cancel` co porcje/500 wierszy i zamyka plik sam. Bez tego wywolujacy
+            # usuwalby plik tymczasowy, ktory jest jeszcze otwarty — na Windows to blad wspoldzielenia (WinError 32).
+            released, _ = wait([future], timeout=XLSX_CANCEL_GRACE_SEC)
+            log.warning("xlsx parse timed out after %.1fs (worker released: %s)", XLSX_PARSE_TIMEOUT_SEC,
+                        bool(released))
             raise _reject(ReasonCode.XLSX_TIMEOUT, 422, "odczyt skoroszytu trwal zbyt dlugo")
         return future.result()
     finally:

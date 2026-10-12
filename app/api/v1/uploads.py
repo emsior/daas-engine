@@ -36,6 +36,7 @@ from app.core.upload_guard import (
     dir_usage_bytes,
     ensure_inside_root,
     is_xlsx_name,
+    remove_quietly,
     validate_csv_bytes,
     validate_original_filename,
 )
@@ -178,17 +179,17 @@ async def create_upload(request: Request, file: UploadFile = File(...),
 
     except UploadRejected as rejected:
         if final_path is not None:
-            final_path.unlink(missing_ok=True)
+            remove_quietly(final_path)
         raise await denied(rejected.reason, rejected.http_status, rejected.message, size) from None
     except ProblemError:
         if final_path is not None:
-            final_path.unlink(missing_ok=True)
+            remove_quietly(final_path)
         raise
     except Exception as exc:  # noqa: BLE001
         # parser moze podniesc wyjatek niosacy tresc pliku: do klienta idzie tylko komunikat ogolny
         log.exception("v1 upload processing failed upload_id=%s", upload_id)
         if final_path is not None:
-            final_path.unlink(missing_ok=True)
+            remove_quietly(final_path)
         raise await denied(ReasonCode.PARSER_ERROR, 422, "nie udalo sie przetworzyc pliku", size) from exc
     finally:
-        tmp_path.unlink(missing_ok=True)
+        remove_quietly(tmp_path)

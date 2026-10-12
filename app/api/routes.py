@@ -43,6 +43,7 @@ from app.core.upload_guard import (
     final_path_for,
     is_xlsx_name,
     new_upload_id,
+    remove_quietly,
     temp_path_for,
     validate_csv_bytes,
     validate_original_filename,
@@ -301,14 +302,14 @@ async def upload(request: Request, file: UploadFile = File(...),
         # dlatego do odpowiedzi trafia wylacznie komunikat ogolny.
         log.exception("upload processing failed upload_id=%s", upload_id)
         if finalized:
-            final_path.unlink(missing_ok=True)
+            remove_quietly(final_path)
         audit.record(request, action="upload", allowed=False, reason=ReasonCode.PARSER_ERROR,
                      size_bytes=size_bytes)
         raise HTTPException(status_code=422, detail="nie udalo sie przetworzyc pliku") from exc
 
     finally:
         # Plik tymczasowy nie moze przetrwac zadnej sciezki wyjscia.
-        tmp_path.unlink(missing_ok=True)
+        remove_quietly(tmp_path)
 
 
 # ---------------------------------------------------------------------------

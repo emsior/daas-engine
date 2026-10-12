@@ -12,10 +12,11 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import logging
 import re
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,8 @@ MAX_CSV_FIELD_BYTES = 65_536           # 64 KiB na pojedyncze pole
 CHUNK_SIZE = 65_536                    # 64 KiB na iteracje odczytu
 ALLOWED_SUFFIX = ".csv"                # rozszerzenie pliku zapisanego na dysku (XLSX jest konwertowany do CSV)
 ALLOWED_UPLOAD_SUFFIXES = (".csv", ".xlsx")  # rozszerzenia przyjmowane od klienta
+
+log = logging.getLogger(__name__)
 
 #: Kolejnosc prob dekodowania. Bez heurystyk i bez errors="replace" —
 #: plik albo dekoduje sie jednym z tych trzech, albo jest odrzucany.
@@ -169,6 +172,31 @@ _TMP_NAME = re.compile(r"^[0-9a-f]{32}\.tmp$")
 
 #: Po tylu sekundach plik *.tmp po przerwanym uploadzie (np. zabity proces) uznajemy za porzucony.
 STALE_TMP_AGE_SEC = 900.0
+
+
+#: Proby usuniecia pliku, ktory inny uchwyt jeszcze trzyma (Windows: blad wspoldzielenia). Lacznie ok. 1 s.
+_REMOVE_BACKOFF_SEC = (0.05, 0.1, 0.2, 0.3, 0.4)
+
+
+def remove_quietly(path: Path, *, sleep: Callable[[float], None] = time.sleep) -> bool:
+    """Usuwa plik bez wyjatku: brak pliku = OK; `PermissionError` (plik jeszcze otwarty, Windows) = ponowienia.
+
+    Po wyczerpaniu prob plik zostaje i sprzata go `cleanup_stale_tmp` (nazwy `*.tmp`) albo retencja; zwraca False,
+    zeby wywolujacy mogl to zalogowac. Nigdy nie przerywa odpowiedzi HTTP.
+    """
+    for pause in (*_REMOVE_BACKOFF_SEC, None):
+        try:
+            path.unlink(missing_ok=True)
+            return True
+        except PermissionError:
+            if pause is None:
+                log.info("temp file still locked, left for the stale sweep: %s", path.name)
+                return False
+            sleep(pause)
+        except OSError as exc:
+            log.info("temp file not removed (%s): %s", type(exc).__name__, path.name)
+            return False
+    return False
 
 
 def cleanup_stale_tmp(root: Path, max_age_sec: float = STALE_TMP_AGE_SEC, now: float | None = None) -> int:
