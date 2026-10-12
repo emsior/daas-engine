@@ -114,6 +114,13 @@ class Settings(BaseSettings):
     daas_sse_max_per_principal: int = Field(default=5, ge=1, le=100)
     daas_sse_max_total: int = Field(default=100, ge=1, le=10000)
     daas_sse_max_seconds: int = Field(default=1800, ge=1, le=86400)
+    # --- serwer MCP pod /mcp (dostep agentow AI; docs/MCP.md) ---
+    #: `false` = trasy /mcp nie ma (404 jak nieznana trasa); sesja SDK nie startuje.
+    daas_mcp_enabled: bool = True
+    #: Limit ciala zadania POST /mcp (JSON-RPC); wieksze -> 413. Musi zmiescic `content` uploadu + escapowanie JSON.
+    daas_mcp_max_body_bytes: int = Field(default=3 * 1024 * 1024, ge=64 * 1024, le=64 * 1024 * 1024)
+    #: Limit tresci CSV narzedzia `upload_csv` (bajty UTF-8); wieksze -> blad narzedzia, bez zapisu na dysk.
+    daas_mcp_max_upload_bytes: int = Field(default=2 * 1024 * 1024, ge=1, le=10 * 1024 * 1024)
 
     # CORS domyslnie wylaczony: n8n i klienci API wolaja serwer-serwer, przegladarka niepotrzebna.
     # Wlaczenie: CORS_ORIGINS='["https://prochpc.pl"]' w .env

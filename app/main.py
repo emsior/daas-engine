@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 
 from fastapi import FastAPI, Request
 from fastapi.encoders import jsonable_encoder
@@ -14,8 +14,16 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.routing import Route
 
-from app.api.problems import PROBLEM_MEDIA_TYPE, code_for, is_v1_path, problem_body
+from app.api.problems import (
+    MCP_PATH,
+    PROBLEM_MEDIA_TYPE,
+    code_for,
+    is_problem_path,
+    is_v1_path,
+    problem_body,
+)
 from app.api.routes import LEGACY_PREFIXES, public_router, router
 from app.api.v1 import build_router as build_v1_router
 from app.api.v1.metrics import router as metrics_router
@@ -40,6 +48,7 @@ from app.core.observability import (
 from app.core.ratelimit import RateLimiter
 from app.core.startup import validate_startup
 from app.core.upload_guard import cleanup_stale_tmp
+from app.mcp_server import build_mcp
 
 DOCS_PATHS = ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect")
 
@@ -101,7 +110,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "set" if auth.configured else ("n/a" if settings.cloud else "MISSING"),
         )
         try:
-            yield
+            # serwer MCP (grupa zadan SDK) zyje dokladnie tyle co aplikacja; wylaczony = nic nie startuje
+            async with app.state.mcp.run() if app.state.mcp is not None else nullcontext():
+                yield
         finally:
             if app.state.retention_task is not None:
                 app.state.retention_task.cancel()
@@ -128,10 +139,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.mailer = build_mailer(settings)
     app.state.runner = None  # ustawiane w lifespan (selfhost); w cloud zostaje None
     app.state.retention_task = None
+    app.state.mcp = build_mcp(settings)  # None, gdy DAAS_MCP_ENABLED=false
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
-        if is_v1_path(request.url.path):
+        if is_problem_path(request.url.path):
             code = code_for(exc.status_code, exc)
             body = problem_body(exc.status_code, code, exc.detail if isinstance(exc.detail, str) else None,
                                 request.url.path, get_request_id(), getattr(exc, "extra", None))
@@ -180,6 +192,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(public_router)
     app.include_router(build_v1_router())
     app.include_router(metrics_router)  # GET /metrics: poza /api/v1, wlasny token (404 gdy nieustawiony)
+    if app.state.mcp is not None:
+        # POST /mcp (Streamable HTTP): zwykla trasa Starlette (endpoint ASGI), wiec poza OpenAPI, a pod middleware
+        # aplikacji (request-id, naglowki bezpieczenstwa, metryki, CORS z `cors_origins`); docs/MCP.md
+        app.router.routes.append(Route(MCP_PATH, endpoint=app.state.mcp.endpoint, include_in_schema=False))
     if not settings.cloud:
         app.include_router(router)  # trasy legacy: tylko selfhost; w cloud odpowiadaja 404
     return app

@@ -123,6 +123,19 @@ async def _authenticate_key(request: Request, db: AsyncSession, presented: str) 
     return Principal(kind="api_key", org_id=key.org_id, scopes=frozenset(key.scopes or ()), key=key)
 
 
+async def authenticate_api_key(request: Request, db: AsyncSession, presented: str) -> Principal:
+    """Weryfikacja klucza API (organizacji albo wdrozenia) poza zaleznoscia FastAPI — ta sama co dla `X-API-Key`.
+
+    Uzywa jej `/mcp` (`app.mcp_server.gateway`). Zly/cofniety/wygasly klucz -> `ProblemError(401)` (cofniety
+    i wygasly z audytem `auth_denied`), nadmiar nieudanych prob z adresu -> `HTTPException(429)`."""
+    return await _authenticate_key(request, db, presented)
+
+
+def unauthorized(request: Request, reason: str) -> ProblemError:
+    """Odmowa 401 z liczeniem nieudanych prob (`throttle_auth_failure`) — jak przy braku klucza w v1."""
+    return _unauthorized(request, reason)
+
+
 async def _audit_denied(db: AsyncSession, request: Request, key: ApiKey, reason: str) -> None:
     await record_event(db, request, org_id=key.org_id, actor_type="key", actor_id=key.id,
                        action="auth_denied", target=f"key:{key.prefix}", meta={"reason": reason})

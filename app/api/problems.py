@@ -63,6 +63,15 @@ def is_v1_path(path: str) -> bool:
     return path == API_V1_PREFIX or path.startswith(API_V1_PREFIX + "/")
 
 
+#: Endpoint serwera MCP (Streamable HTTP). Bledy HTTP tej sciezki tez sa w formacie problem+json.
+MCP_PATH = "/mcp"
+
+
+def is_problem_path(path: str) -> bool:
+    """Sciezki z bledami `application/problem+json`: API v1 oraz /mcp (takze gdy MCP jest wylaczone -> 404)."""
+    return is_v1_path(path) or path == MCP_PATH or path.startswith(MCP_PATH + "/")
+
+
 def not_found(what: str = "resource") -> ProblemError:
     return ProblemError(404, "not_found", f"{what} not found")
 
