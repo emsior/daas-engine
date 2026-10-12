@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.background import BackgroundTask
 
 from app.api.problems import ProblemError, not_found
-from app.api.v1.deps import OrgContext, org_access
+from app.api.v1.deps import OrgContext, Principal, org_access
 from app.api.v1.schemas import JobCreate, JobOut, JobPage, JobStatus
 from app.control import scopes as sc
 from app.control.audit import record_event
@@ -51,17 +51,11 @@ async def _load_job(db: AsyncSession, org_id: str, job_id: str) -> Job:
     return job
 
 
-@router.post(
-    "/orgs/{org_id}/jobs", status_code=202, response_model=JobOut, summary="Start a job",
-    description="Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with "
-                "`GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time.",
-    responses={404: {"description": "Upload not found"}, 409: {"description": "Queue full"},
-               422: {"description": "Pipeline and upload do not match"}},
-)
-async def create_job(body: JobCreate, request: Request, response: Response, ctx: OrgContext = Depends(_WRITE),
-                     db: AsyncSession = Depends(get_db)) -> JobOut:
-    state = request.app.state
-    enforce(request, "v1_run", state.settings.daas_rate_limit_run_per_min)
+async def queue_job(db: AsyncSession, state, org_id: str, principal: Principal, body: JobCreate, *,
+                    request: Request | None = None, audit_reason: str | None = None) -> Job:
+    """Walidacja, zapis i zgloszenie zadania do executora — wspolna droga `POST /jobs` i auto-uruchomienia po
+    uploadzie. Rzuca `ProblemError` (422/404/409) zanim cokolwiek zapisze; po sukcesie robi commit i `submit`.
+    Limity planu (429 `plan_limit`) i limit zadan na minute egzekwuje wolajacy (trasa: `plan_guard` i `enforce`)."""
     kinds = PIPELINE_UPLOAD_KINDS[body.pipeline]
     if state.settings.cloud and not body.force_mock:
         # M-7: w chmurze zrodlem jest wylacznie plik klienta (albo dane syntetyczne); nigdy zasoby operatora z env
@@ -75,25 +69,42 @@ async def create_job(body: JobCreate, request: Request, response: Response, ctx:
         if kinds is None:
             raise ProblemError(422, "upload_not_applicable", f"pipeline {body.pipeline} does not read uploads")
         upload = (await db.execute(select(Upload).where(
-            Upload.id == body.upload_id, Upload.org_id == ctx.org_id))).scalar_one_or_none()
+            Upload.id == body.upload_id, Upload.org_id == org_id))).scalar_one_or_none()
         if upload is None:
             raise not_found("upload")
         if upload.kind not in kinds:
             raise ProblemError(422, "upload_kind_mismatch",
                                f"pipeline {body.pipeline} needs an upload of kind {' or '.join(kinds)}")
     pending = (await db.execute(select(func.count()).select_from(Job).where(
-        Job.org_id == ctx.org_id, Job.status.in_(("queued", "running"))))).scalar_one()
+        Job.org_id == org_id, Job.status.in_(("queued", "running"))))).scalar_one()
     if pending >= MAX_PENDING_JOBS:
         raise ProblemError(409, "queue_full", f"at most {MAX_PENDING_JOBS} queued or running jobs per organization")
-    job = Job(org_id=ctx.org_id, pipeline=body.pipeline, upload_id=body.upload_id, force_mock=body.force_mock,
-              client_name=body.client_name, created_by=ctx.principal.actor_tag, message="queued")
+    job = Job(org_id=org_id, pipeline=body.pipeline, upload_id=body.upload_id, force_mock=body.force_mock,
+              client_name=body.client_name, created_by=principal.actor_tag, message="queued")
     db.add(job)
     await db.flush()
-    await record_event(db, request, org_id=ctx.org_id, actor_type=ctx.principal.actor_type,
-                       actor_id=ctx.principal.actor_id, action="job.created", target=f"job:{job.id}",
-                       meta={"job_id": job.id, "pipeline": body.pipeline, "upload_id": body.upload_id})
+    meta = {"job_id": job.id, "pipeline": body.pipeline, "upload_id": body.upload_id}
+    if audit_reason:
+        meta["reason"] = audit_reason
+    await record_event(db, request, org_id=org_id, actor_type=principal.actor_type, actor_id=principal.actor_id,
+                       action="job.created", target=f"job:{job.id}", settings=state.settings, meta=meta)
     await db.commit()
-    state.executor.submit(job.id, ctx.org_id)
+    state.executor.submit(job.id, org_id)
+    return job
+
+
+@router.post(
+    "/orgs/{org_id}/jobs", status_code=202, response_model=JobOut, summary="Start a job",
+    description="Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with "
+                "`GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time.",
+    responses={404: {"description": "Upload not found"}, 409: {"description": "Queue full"},
+               422: {"description": "Pipeline and upload do not match"}},
+)
+async def create_job(body: JobCreate, request: Request, response: Response, ctx: OrgContext = Depends(_WRITE),
+                     db: AsyncSession = Depends(get_db)) -> JobOut:
+    state = request.app.state
+    enforce(request, "v1_run", state.settings.daas_rate_limit_run_per_min)
+    job = await queue_job(db, state, ctx.org_id, ctx.principal, body, request=request)
     response.headers["Location"] = f"/api/v1/orgs/{ctx.org_id}/jobs/{job.id}"
     return job_out(job)
 

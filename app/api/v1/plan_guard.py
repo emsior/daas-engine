@@ -36,6 +36,22 @@ async def _scopes_in_org(db: AsyncSession, principal: Principal, org_id: str) ->
     return principal.scopes if principal.org_id == org_id else None
 
 
+async def runs_limit_reached(db: AsyncSession, org: Org) -> tuple[int, int] | None:
+    """`(limit, uzyte)`, gdy kolejne zadanie przekroczyloby miesieczny limit runow planu; None = jest miejsce.
+    Uzywane przez `plan_guard` (POST /jobs) i auto-uruchomienie po uploadzie (harmonogram)."""
+    limits = limits_for(org.plan)
+    if limits.runs_per_month is None:
+        return None
+    counter = await db.get(UsageCounter, (org.id, service.current_period()))
+    runs = counter.runs if counter else 0
+    # zadania w toku tez zajmuja miejsce w limicie: licznik rosnie dopiero po zakonczeniu runu
+    pending = (await db.execute(select(func.count()).select_from(Job).where(
+        Job.org_id == org.id, Job.status.in_(("queued", "running"))))).scalar_one()
+    if runs + pending >= limits.runs_per_month:
+        return limits.runs_per_month, runs + pending
+    return None
+
+
 async def plan_guard(request: Request, org_id: str = Path(...), principal: Principal = Depends(get_principal),
                      db: AsyncSession = Depends(get_db)) -> None:
     route = request.scope.get("route")
@@ -49,15 +65,13 @@ async def plan_guard(request: Request, org_id: str = Path(...), principal: Princ
         return  # trasa sama odpowie 404/403
     limits = limits_for(org.plan)
     counter = await db.get(UsageCounter, (org_id, service.current_period()))
-    runs, uploaded = (counter.runs, counter.upload_bytes) if counter else (0, 0)
+    uploaded = counter.upload_bytes if counter else 0
 
     resource, limit, used = None, None, 0
-    if request.method == "POST" and request.url.path.endswith("/jobs") and limits.runs_per_month is not None:
-        # zadania w toku tez zajmuja miejsce w limicie: licznik rosnie dopiero po zakonczeniu runu
-        pending = (await db.execute(select(func.count()).select_from(Job).where(
-            Job.org_id == org_id, Job.status.in_(("queued", "running"))))).scalar_one()
-        if runs + pending >= limits.runs_per_month:
-            resource, limit, used = "runs", limits.runs_per_month, runs + pending
+    if request.method == "POST" and request.url.path.endswith("/jobs"):
+        reached = await runs_limit_reached(db, org)
+        if reached is not None:
+            resource, (limit, used) = "runs", reached
     elif request.url.path.endswith("/uploads") and limits.upload_bytes_per_month is not None:
         declared = _content_length(request)
         if uploaded + declared >= limits.upload_bytes_per_month:
