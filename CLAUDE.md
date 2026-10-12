@@ -39,7 +39,7 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 | Kokpit `web/` | Next.js 16 (App Router), React 19, TypeScript strict, Tailwind 4, TanStack Query, zod; Vitest + Testing Library; Playwright (e2e) |
 | Wdrożenie | Docker Compose (`deploy/`), Caddy (TLS), obrazy `api` (korzeń repo) i `web` (`web/Dockerfile`) |
 | Zależności Pythona | `requirements.lock`, `requirements-dev.lock` (pip-tools, hashe SHA-256; `--require-hashes`) |
-| Testy | pytest — ok. 1070 przypadków (stan 10.10.2026, `pytest --collect-only`), pełny przebieg ~2 min; Vitest w `web/` |
+| Testy | pytest — 1627 przypadków (stan 12.10.2026), pełny przebieg 4–6 min; zielone na Linuksie (3.13) i Windows (3.12); Vitest w `web/` |
 | CI | GitHub Actions: `test` (3.11, 3.12, 3.13), `security` (gitleaks, semgrep, zizmor, pip-audit), `web`, `e2e`, `lighthouse`, `docker`; Dependabot (pip, actions, docker, npm); akcje przypięte do SHA |
 
 ⚠ **Od 2.0 w repo jest JavaScript**: `web/` ma własny `package.json` i `package-lock.json`. Reszta repo (poza `web/`) to Python.
@@ -102,6 +102,7 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
 | Next 16 przemianował `middleware.ts` na `proxy.ts` | CSP z nonce i przekierowanie na `/login` są w `web/src/proxy.ts` |
 | Obraz `api` nie widzi `docs/`, `web/`, `tests/` (`.dockerignore`) | `COPY` w `Dockerfile` bierze tylko `app/`, `data/`, `alembic/` i pliki projektu |
 | Przeglądarkowe testy `web/` i `next build` dzielą katalog `web/.next` | nie uruchamiaj ich równolegle |
+| Windows: otwartego pliku nie da się usunąć (błąd współdzielenia, WinError 32), a bity trybu 0600 nic nie znaczą | pliki tymczasowe uploadu usuwa `remove_quietly` (ponowienia, reszta dla `cleanup_stale_tmp`); po timeoucie XLSX wątek dostaje `XLSX_CANCEL_GRACE_SEC` na zamknięcie pliku; pliki z sekretami tworzy `app/core/private_files.open_private` (DACL przez `icacls`). Podproces w testach startuje ze środowiskiem z `tests/support.minimal_subprocess_env` (`SYSTEMROOT` itd.) |
 
 ## Co jest zrobione (nie buduj tego drugi raz)
 

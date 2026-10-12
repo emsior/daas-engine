@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import inspect, select, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from app.cli import main as cli_main
@@ -18,6 +19,7 @@ from app.control.ids import new_ulid
 from app.control.models import Base
 from app.control.types import utcnow
 from app.core.config import PROJECT_ROOT, Settings, reset_settings_cache
+from tests.support import minimal_subprocess_env
 
 EXPECTED_TABLES = {
     "orgs", "users", "memberships", "api_keys", "magic_links", "sessions", "invitations", "jobs",
@@ -115,8 +117,7 @@ def test_alembic_cli_entrypoint_uses_settings_url(tmp_path: Path, monkeypatch: p
     import subprocess
     import sys
 
-    env = {"DAAS_CONTROL_DB_URL": f"sqlite+aiosqlite:///{tmp_path / 'viacli.db'}",
-           "PATH": "/usr/bin:/bin", "HOME": str(tmp_path)}
+    env = minimal_subprocess_env(tmp_path, DAAS_CONTROL_DB_URL=f"sqlite+aiosqlite:///{(tmp_path / 'viacli.db').as_posix()}")
     done = subprocess.run(  # noqa: S603
         [sys.executable, "-m", "alembic", "upgrade", "head"], cwd=PROJECT_ROOT, env=env,
         capture_output=True, text=True, timeout=120, check=False)
@@ -126,7 +127,9 @@ def test_alembic_cli_entrypoint_uses_settings_url(tmp_path: Path, monkeypatch: p
 
 def test_relative_sqlite_url_is_resolved_against_project_root():
     s = Settings(_env_file=None, daas_control_db_url="sqlite+aiosqlite:///runtime/control.db")
-    assert resolve_db_url(s) == f"sqlite+aiosqlite:///{PROJECT_ROOT / 'runtime' / 'control.db'}"
+    url = make_url(resolve_db_url(s))  # render koduje `:` i `\\` ze sciezek Windows, wiec porownujemy skladniki
+    assert url.get_backend_name() == "sqlite" and url.database is not None
+    assert Path(url.database) == PROJECT_ROOT / "runtime" / "control.db"
 
 
 def test_default_control_db_url(monkeypatch: pytest.MonkeyPatch):

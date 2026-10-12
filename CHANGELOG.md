@@ -35,6 +35,11 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - Client-supplied values are escaped before they reach HTML reports in all three report builders; the HTML renderer drops raw HTML, links and images.
 - n8n workflows, the CI smoke test, the container health check and the PowerShell launcher send the API key.
 - Docker Compose pins `n8nio/n8n` to `2.43.1` instead of `latest`.
+- Windows hosts: the `console` mail outbox is owner-only through an NTFS DACL (`icacls`), not only the POSIX mode bits;
+  files that cannot be restricted are not left on disk. After an XLSX parse timeout the request waits up to
+  `XLSX_CANCEL_GRACE_SEC` for the worker to release the file, and temporary upload files that are still open are
+  removed with retries instead of failing the response (sharing violations). The test suite is green on Windows
+  (Python 3.12) as well as Linux.
 
 ### Cloud
 
