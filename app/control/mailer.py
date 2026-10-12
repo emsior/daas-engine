@@ -1,6 +1,6 @@
 """Wysylka e-maili: adapter `console` (dev/e2e) i `smtp` (stdlib `smtplib`, STARTTLS).
 
-`console` zapisuje wiadomosc do `runtime/outbox/*.json` (plik 0600); poza APP_ENV=prod loguje tez link — przeznaczony
+`console` zapisuje wiadomosc do `runtime/outbox/*.json` (plik tylko dla wlasciciela: 0600 / DACL); poza APP_ENV=prod loguje tez link — przeznaczony
 wylacznie do rozwoju i testow e2e (cloud + prod wymaga DAAS_ALLOW_CONSOLE_MAIL=true).
 Produkcja: `DAAS_EMAIL_BACKEND=smtp`. Wysylka jest blokujaca; wolac przez `run_in_threadpool`.
 """
@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Protocol
 
 from app.core.config import Settings
+from app.core.private_files import open_private
 
 log = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ class ConsoleMailer:
         path = self.outbox_dir / name
         payload = {"to": mail.to, "subject": mail.subject, "body": mail.body, "link": mail.link,
                    "created_at": time.time()}
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = open_private(path)  # 0600 na POSIX, DACL tylko wlasciciel na Windows
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(payload, fh, ensure_ascii=False)
         if self.log_link:

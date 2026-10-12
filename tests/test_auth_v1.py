@@ -16,6 +16,7 @@ from app.control.types import utcnow
 from app.core.config import Settings, reset_settings_cache
 from app.main import create_app
 from tests.conftest import TEST_API_KEY, TEST_SECRET_KEY
+from tests.support import assert_private_file
 from tests.v1_helpers import (
     API,
     csrf_header,
@@ -204,7 +205,7 @@ def test_magic_link_request_writes_outbox_and_stores_only_the_hash(cloud_client:
 def test_outbox_file_is_private(cloud_client: TestClient, cloud_settings: Settings):
     cloud_client.post(f"{API}/auth/magic-link", json={"email": "p@example.test"})
     (path,) = cloud_settings.outbox_dir.glob("*.json")
-    assert path.stat().st_mode & 0o777 == 0o600
+    assert_private_file(path)
 
 
 def test_token_has_at_least_32_bytes_of_entropy(cloud_client: TestClient, cloud_settings: Settings):

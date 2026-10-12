@@ -9,6 +9,7 @@ import pytest
 from app.control.mailer import ConsoleMailer, OutgoingMail, build_mailer
 from app.core.config import Settings
 from app.core.startup import validate_startup
+from tests.support import assert_private_file
 
 SECRET = "s" * 40
 
@@ -80,7 +81,7 @@ def test_prod_console_mailer_writes_outbox_but_does_not_log_the_link(tmp_path: P
     assert "SECRETTOKEN" in f.read_text()  # outbox zawiera link
     assert "SECRETTOKEN" not in caplog.text and "token=" not in caplog.text
     assert "jan@example.test" not in caplog.text
-    assert oct(f.stat().st_mode & 0o777) == "0o600"
+    assert_private_file(f)
 
 
 def test_dev_console_mailer_still_logs_the_link(tmp_path: Path, caplog: pytest.LogCaptureFixture):
