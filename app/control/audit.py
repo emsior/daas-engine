@@ -27,6 +27,7 @@ AUDIT_META_KEYS: frozenset[str] = frozenset({
     "pipeline", "run_id", "job_id", "upload_id", "kind", "bytes", "sha256", "role", "scope", "scopes",
     "reason", "status", "status_code", "attempt", "delivery_id", "event", "webhook_id", "key_prefix",
     "plan", "retention_days", "llm_narrative", "fmt", "ok", "error_type", "email_hash", "active", "count",
+    "sent", "recipients", "skipped_reason", "fields",
 })
 
 #: Akcje zapisywane przez API v1 (stabilne nazwy; sa czescia kontraktu audytu).
@@ -34,6 +35,7 @@ AUDIT_ACTIONS_V1: frozenset[str] = frozenset({
     "org.created", "org.updated", "org.deleted", "member.added", "member.invited", "member.removed", "member.role_changed", "invitation.revoked", "key.created", "key.revoked",
     "upload.created", "job.created", "job.cancelled", "run.finished", "webhook.created", "webhook.deleted",
     "upload.purged", "report.purged", "webhook.delivery", "webhook.delivered", "webhook.failed", "auth.login", "auth.logout", "auth_denied",
+    "schedule.updated", "schedule.reminder", "schedule.auto_run_skipped", "schedule.notified",
 })
 
 _MAX_STR = 200
