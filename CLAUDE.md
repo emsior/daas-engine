@@ -39,7 +39,7 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 | Kokpit `web/` | Next.js 16 (App Router), React 19, TypeScript strict, Tailwind 4, TanStack Query, zod; Vitest + Testing Library; Playwright (e2e) |
 | Wdrożenie | Docker Compose (`deploy/`), Caddy (TLS), obrazy `api` (korzeń repo) i `web` (`web/Dockerfile`) |
 | Zależności Pythona | `requirements.lock`, `requirements-dev.lock` (pip-tools, hashe SHA-256; `--require-hashes`) |
-| Testy | pytest — 1627 przypadków (stan 12.10.2026), pełny przebieg 4–6 min; zielone na Linuksie (3.13) i Windows (3.12); Vitest w `web/` |
+| Testy | pytest — 1703 przypadki (stan 12.10.2026, po harmonogramie), pełny przebieg 4–7 min; Linux (3.13) zielone, Windows (3.12) zielone na stanie 1627 z 12.10 rano — nowe testy czekają na przebieg Windows; Vitest w `web/` |
 | CI | GitHub Actions: `test` (3.11, 3.12, 3.13), `security` (gitleaks, semgrep, zizmor, pip-audit), `web`, `e2e`, `lighthouse`, `docker`; Dependabot (pip, actions, docker, npm); akcje przypięte do SHA |
 
 ⚠ **Od 2.0 w repo jest JavaScript**: `web/` ma własny `package.json` i `package-lock.json`. Reszta repo (poza `web/`) to Python.
@@ -102,6 +102,7 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
 | Next 16 przemianował `middleware.ts` na `proxy.ts` | CSP z nonce i przekierowanie na `/login` są w `web/src/proxy.ts` |
 | Obraz `api` nie widzi `docs/`, `web/`, `tests/` (`.dockerignore`) | `COPY` w `Dockerfile` bierze tylko `app/`, `data/`, `alembic/` i pliki projektu |
 | Przeglądarkowe testy `web/` i `next build` dzielą katalog `web/.next` | nie uruchamiaj ich równolegle |
+| Strefy czasowe harmonogramu (`zoneinfo`) | Linux bierze bazę IANA z systemu (`/usr/share/zoneinfo`; obraz `python:3.12-slim` ma pakiet `tzdata`), Windows z pakietu `tzdata` w locku (marker `sys_platform == "win32"`). Bez bazy `available_timezones()` jest puste i każdy `PUT .../schedule` dostaje `422` na `timezone` — test `test_timezone_validation_uses_the_iana_database` to wykrywa. Nie usuwaj `tzdata` z obrazu ani z locka |
 | Windows: otwartego pliku nie da się usunąć (błąd współdzielenia, WinError 32), a bity trybu 0600 nic nie znaczą | pliki tymczasowe uploadu usuwa `remove_quietly` (ponowienia, reszta dla `cleanup_stale_tmp`); po timeoucie XLSX wątek dostaje `XLSX_CANCEL_GRACE_SEC` na zamknięcie pliku; pliki z sekretami tworzy `app/core/private_files.open_private` (DACL przez `icacls`). Podproces w testach startuje ze środowiskiem z `tests/support.minimal_subprocess_env` (`SYSTEMROOT` itd.) |
 
 ## Co jest zrobione (nie buduj tego drugi raz)
@@ -110,6 +111,10 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
 - Pipeline `uksc_evidence` z kolektorem `tools/uksc-collector.ps1` i schematem `schemas/uksc_collector_v1.json`.
 - Hardening 2.0: klucz API, bind na loopback, policy domyślnie włączona, limity, escapowanie raportów, narracja LLM opt-in, lockfile z hashami.
 - Control plane, tenancy, API v1 (organizacje, członkowie, klucze, uploady, zadania, SSE, raporty, verify, evidence, usage, audit, webhooki, metrics).
+- Harmonogram i powiadomienia (12.10.2026): `GET/PUT /orgs/{id}/schedule`, tabela `org_schedules` (Alembic `0004`), cotygodniowe
+  przypomnienie o eksporcie (`app/control/schedule.py`, pętla `SchedulerLoop` w lifespanie, tylko cloud, `DAAS_SCHEDULER_*`),
+  auto-uruchomienie po uploadzie (`queue_job` wspólne z `POST /jobs`, pole `auto_job_id`), e-mail po runie
+  (`app/control/notifications.py`, listener `run.finished`), sekcja w Ustawieniach kokpitu.
 - Kokpit `web/` (8 ekranów, PL/EN, jasny/ciemny motyw), `deploy/` (compose, Caddy, backup, restore, smoke), `docs/API.md`, `docs/SECURITY.md`.
 - DevSecOps: ruff, gitleaks, semgrep, zizmor, pip-audit, Dependabot, pre-commit, kontenery bez roota.
 - README ze screenshotem i wideo demo `docs/daas_demo.mp4`; materiały pilota w `docs/pilot/`.

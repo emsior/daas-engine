@@ -113,7 +113,7 @@ Rate limits are per client address and per key and are kept in process memory; r
 | GET | `/api/v1/orgs/{org_id}/api-keys` | `keys:manage` | 200 | 403, 404 | list keys (metadata only) |
 | POST | `/api/v1/orgs/{org_id}/api-keys` | `keys:manage` | 201 | 403, 409, 422 | create a key; the full key appears once |
 | DELETE | `/api/v1/orgs/{org_id}/api-keys/{key_id}` | `keys:manage` | 204 | 403, 404 | revoke a key (immediate) |
-| POST | `/api/v1/orgs/{org_id}/uploads` | `uploads:write` | 201 | 413, 415, 422, 429 | upload CSV, XLSX or a collector package (`.json`) |
+| POST | `/api/v1/orgs/{org_id}/uploads` | `uploads:write` | 201 | 413, 415, 422, 429 | upload CSV, XLSX or a collector package (`.json`); `auto_job_id` when the schedule auto-runs it |
 | POST | `/api/v1/orgs/{org_id}/jobs` | `runs:write` | 202 | 404, 409, 422, 429 | start a pipeline run (`Location` header) |
 | GET | `/api/v1/orgs/{org_id}/jobs` | `runs:read` | 200 | 404 | list jobs; filter `status` |
 | GET | `/api/v1/orgs/{org_id}/jobs/{job_id}` | `runs:read` | 200 | 404 | job state and progress |
@@ -126,6 +126,8 @@ Rate limits are per client address and per key and are kept in process memory; r
 | GET | `/api/v1/orgs/{org_id}/evidence` | `reports:read` | 200 | 404 | artifact status of the latest collector run |
 | GET | `/api/v1/orgs/{org_id}/usage` | `usage:read` | 200 | 404 | monthly usage and plan limits |
 | GET | `/api/v1/orgs/{org_id}/audit` | `audit:read` | 200 | 422 | audit log, newest first |
+| GET | `/api/v1/orgs/{org_id}/schedule` | `org:read` | 200 | 404 | schedule and notifications (defaults when never saved) |
+| PUT | `/api/v1/orgs/{org_id}/schedule` | `org:manage` | 200 | 403, 404, 422 | save the schedule; recomputes `next_reminder_at` |
 | GET | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 200 | 403 | list webhooks |
 | POST | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 201 | 409, 422, 503 | register an HTTPS endpoint; the signing secret appears once |
 | DELETE | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}` | `webhooks:manage` | 204 | 404 | delete |
@@ -249,6 +251,39 @@ Registration rules:
 
 Test call: `POST .../webhooks/{webhook_id}/ping` sends one signed `ping` event (single attempt, body `{"event":"ping","org_id":"..."}`) and answers `{"delivered": true, "status_class": "2xx"}`. `status_class` is `2xx`, `3xx`, `4xx`, `5xx` or `error` (no answer: network, DNS, address refused); the receiver's exact status code is not returned. The old `status` field is still present but always `null` (deprecated). Creating a webhook with an empty `events` list answers `422 events_required`.
 
+## Schedule and notifications
+
+"The Monday report" without manual clicks. One schedule per organization:
+
+```bash
+curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/schedule"
+# {"reminder_enabled":false,"reminder_weekday":0,"reminder_hour":8,"timezone":"Europe/Warsaw",
+#  "reminder_skip_if_recent_upload":true,"auto_run_on_upload":false,"notify_on_finish":false,
+#  "next_reminder_at":null,"last_reminder_at":null,"updated_at":null}
+
+curl -s -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" "$DAAS/api/v1/orgs/$ORG/schedule" \
+  -d '{"reminder_enabled":true,"reminder_weekday":0,"reminder_hour":8,"timezone":"Europe/Warsaw",
+       "reminder_skip_if_recent_upload":true,"auto_run_on_upload":true,"notify_on_finish":true}'
+# {..., "next_reminder_at":"2026-10-19T06:00:00Z", "updated_at":"..."}
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `reminder_enabled` | `false` | weekly e-mail "time for the export" to every member of the organization |
+| `reminder_weekday` | `0` | 0 = Monday ... 6 = Sunday |
+| `reminder_hour` | `8` | full hour 0-23, local time in `timezone` |
+| `timezone` | `Europe/Warsaw` | IANA name; clock changes are handled (an hour that does not exist that day fires right after the jump, a repeated hour fires once) |
+| `reminder_skip_if_recent_upload` | `true` | no reminder when the organization uploaded a file in the last 6 days (the date still moves one week) |
+| `auto_run_on_upload` | `false` | after `POST .../uploads` a job for `suggested_pipeline` is queued the same way as `POST .../jobs` |
+| `notify_on_finish` | `false` | e-mail to the members when a run finishes, success or failure |
+| `next_reminder_at`, `last_reminder_at` | `null` | read only, UTC; `next_reminder_at` is `null` while the reminder is off |
+| `updated_at` | `null` | read only; `null` = defaults, never saved |
+
+- `GET` needs `org:read` (every role), `PUT` needs `org:manage` (owner, admin). `PUT` replaces the whole schedule: an omitted field takes its default. A weekday outside 0-6, an hour outside 0-23 or an unknown zone answers `422 validation_error` with the field in `errors[].loc` (the value sent is not echoed). Every save is audited as `schedule.updated` with the names of the changed fields.
+- Auto-run: the upload answer carries `auto_job_id` (the queued job; follow it like any job). When the plan run limit is used up or the queue is full the upload still succeeds (`201`), `auto_job_id` is `null` and the audit log gets `schedule.auto_run_skipped` with the code in `meta.reason` (`plan_limit`, `queue_full`, ...). Start the job by hand later. The job is created on behalf of the uploader (`created_by`, audit actor), also for a key that has `uploads:write` but not `runs:write`: turning auto-run on is the organization's decision (`org:manage`).
+- Reminder e-mail: a fixed text and a link to the upload screen of the cockpit (no token; the member signs in as usual). Run e-mail: pipeline, status, data period, SHA-256 of the HTML report, error code on failure and a link to the run in the cockpit; never report content or customer data. Jobs that fail before the run starts (for example `SOURCE_UNAVAILABLE`) do not send it. Audit: `schedule.reminder` (`meta`: `sent`, `recipients`, `skipped_reason`), `schedule.notified`.
+- Reminders are sent by a loop inside the API process (cloud mode only, see `docs/DEPLOY.md`); a reminder that fell due while the server was down goes out once after the start, the next one is computed from that moment.
+
 ## Usage and plan limits
 
 `GET /api/v1/orgs/{org_id}/usage` (scope `usage:read`):
@@ -281,7 +316,7 @@ When a limit is used up, `POST .../jobs` and `POST .../uploads` answer `429` wit
 
 ## Audit log
 
-`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (scope `audit:read`; `limit` 1-200, default 50). Ordered by `(ts, id)` descending. The response is `{"items": [...], "next_cursor": "..." | null}`; the cursor is an opaque base64url value (an encoded `[ts, id]` pair): pass it back unchanged. A malformed cursor answers `422 invalid_cursor`. Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `auth.login`, `auth.logout`, `auth_denied`. `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
+`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (scope `audit:read`; `limit` 1-200, default 50). Ordered by `(ts, id)` descending. The response is `{"items": [...], "next_cursor": "..." | null}`; the cursor is an opaque base64url value (an encoded `[ts, id]` pair): pass it back unchanged. A malformed cursor answers `422 invalid_cursor`. Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `schedule.updated`, `schedule.reminder`, `schedule.auto_run_skipped`, `schedule.notified`, `auth.login`, `auth.logout`, `auth_denied`. `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
 
 ## Metrics
 

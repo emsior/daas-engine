@@ -29,6 +29,14 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - A startup check that refuses more than one worker.
 - `requirements.lock` and `requirements-dev.lock` with SHA-256 hashes; Docker and CI install with `--require-hashes`.
 - Tests: an auth matrix over all routes, endpoint-level isolation, redaction, report output, limits, XLSX and consumers.
+- **Schedule and notifications** ("the Monday report" without manual clicks, cloud): `GET`/`PUT /api/v1/orgs/{org_id}/schedule`
+  (`org:read` / `org:manage`) with a weekly e-mail reminder to export (weekday, hour, IANA time zone, DST-safe; skipped
+  after an upload in the last 6 days), automatic run of the suggested pipeline after an upload (`auto_job_id` in the
+  upload answer; a plan limit or a full queue keep the upload and are audited as `schedule.auto_run_skipped`) and an
+  e-mail to the members when a run finishes (metadata, SHA-256 and a link only; no report content, no token).
+  Reminders come from an in-process loop (`DAAS_SCHEDULER_ENABLED`, `DAAS_SCHEDULER_TICK_SEC`; one worker) that claims
+  each slot before sending, so a reminder is never sent twice. Migration `0004` adds `org_schedules`; the cockpit has a
+  "Schedule and notifications" section in Settings (read only for members).
 
 ### Fixed
 

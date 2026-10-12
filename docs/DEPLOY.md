@@ -96,6 +96,8 @@ Kolumna „Tryb": `c` = istotne w `cloud`, `s` = w `selfhost`, `cs` = w obu.
 | `DAAS_MAX_ACTIVE_TENANTS` | `16` | ile organizacji ma jednocześnie otwarty runner DuckDB (LRU); 1-1024. To limit **liczby** otwartych tenantów, nie pamięci: RAM ogranicza `mem_limit` kontenera |
 | `DAAS_RETENTION_DAYS` | `90` | domyślna retencja nowej organizacji (dni; 1-3650), zmienna per organizacja (`PATCH /api/v1/orgs/{id}`). Uploady kasuje się po `retention_until` (wyliczonym przy wgraniu), pliki raportów i wiersze DuckDB runów starszych niż `retention_days` |
 | `DAAS_RETENTION_INTERVAL_MIN` | `60` | co ile minut zadanie w tle kasuje dane po terminie (tylko `cloud`); `0` = wyłączone, 0-10080. Ręcznie: `python -m app.cli purge [--dry-run] [--org ID]`. Kopii zapasowych nie dotyczy |
+| `DAAS_SCHEDULER_ENABLED` | `true` | pętla harmonogramu (cotygodniowe przypomnienia o eksporcie) w procesie API; tylko `cloud`. `false` wyłącza wysyłkę przypomnień w tym wdrożeniu (auto-uruchamianie po uploadzie i e-mail po runie działają dalej, jeśli organizacja je włączyła) |
+| `DAAS_SCHEDULER_TICK_SEC` | `60` | co ile sekund pętla sprawdza terminy przypomnień (5-3600). Pętla działa w jednym procesie roboczym, jak reszta 2.0; zaległe przypomnienie po restarcie wychodzi raz |
 | `DAAS_WEBHOOK_BACKOFF_SEC` | `1,5,25` | pauzy między ponowieniami dostawy webhooka (sekundy, po jednej próbie początkowej) |
 | `DAAS_SSE_HEARTBEAT_SEC` | `15` | odstęp komentarza `: heartbeat` w strumieniu SSE |
 | `DAAS_SSE_MAX_PER_PRINCIPAL` | `5` | otwarte strumienie SSE na klucz lub sesję (1-100); powyżej: `429 sse_limit` |
