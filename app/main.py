@@ -105,17 +105,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.notifier = notifier
         executor.listeners.append(notifier.on_run_finished)
         await executor.start()
-        # przypomnienia o eksporcie: tylko cloud, jeden proces (workers=1), wylaczane DAAS_SCHEDULER_ENABLED=false
-        app.state.scheduler = None
+        # przypomnienia o eksporcie: tylko cloud, jeden proces (workers=1), wylaczane DAAS_SCHEDULER_ENABLED=false.
+        # Jak nizej przy retencji: lifespan trzyma WLASNA referencje (drugi lifespan tej samej aplikacji nadpisuje
+        # app.state, a petla nalezy do jego event loopu).
+        scheduler: SchedulerLoop | None = None
         if settings.cloud and settings.daas_scheduler_enabled:
-            app.state.scheduler = SchedulerLoop(settings, app.state.db_sessionmaker, app.state.mailer)
-            app.state.scheduler.start()
-        # retencja (kasowanie po terminie): tylko cloud, cykliczne zadanie w tle
-        app.state.retention_task = None
+            scheduler = SchedulerLoop(settings, app.state.db_sessionmaker, app.state.mailer)
+            scheduler.start()
+        app.state.scheduler = scheduler
+        # retencja (kasowanie po terminie): tylko cloud, cykliczne zadanie w tle. Lifespan trzyma WLASNA referencje:
+        # drugi lifespan tej samej aplikacji (drugi TestClient) nadpisuje app.state, a zadanie nalezy do jego petli.
+        retention_task: asyncio.Task[None] | None = None
         if settings.cloud and settings.daas_retention_interval_min > 0:
-            app.state.retention_task = asyncio.create_task(
+            retention_task = asyncio.create_task(
                 retention_loop(app.state.db_sessionmaker, registry, settings,
                                interval_sec=settings.daas_retention_interval_min * 60), name="retention")
+        app.state.retention_task = retention_task
         log.info(
             "DaaS Engine up · mode=%s · env=%s · api_key=%s", settings.daas_mode, settings.app_env,
             "set" if auth.configured else ("n/a" if settings.cloud else "MISSING"),
@@ -125,11 +130,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             async with app.state.mcp.run() if app.state.mcp is not None else nullcontext():
                 yield
         finally:
-            if app.state.retention_task is not None:
-                app.state.retention_task.cancel()
-                await asyncio.gather(app.state.retention_task, return_exceptions=True)
-            if app.state.scheduler is not None:
-                await app.state.scheduler.stop()
+            if retention_task is not None:
+                retention_task.cancel()
+                await asyncio.gather(retention_task, return_exceptions=True)
+                if app.state.retention_task is retention_task:
+                    app.state.retention_task = None
+            if scheduler is not None:
+                await scheduler.stop()
+                if app.state.scheduler is scheduler:
+                    app.state.scheduler = None
             await executor.stop()
             await dispatcher.close()
             await notifier.close()

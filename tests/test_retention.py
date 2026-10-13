@@ -353,6 +353,36 @@ def test_selfhost_has_no_retention_loop(client):
     assert client.app.state.retention_task is None
 
 
+def test_each_lifespan_stops_its_own_retention_loop(cloud_settings, monkeypatch):
+    """Dwa klienty jednej aplikacji = dwa lifespany (np. `second_browser`): kazdy zatrzymuje WLASNA petle retencji.
+
+    Regresja z CI: zamkniecie zewnetrznego klienta siegalo po zadanie wewnetrznego (z jego zamknietej juz petli
+    zdarzen) - Python 3.11 rzucal `RuntimeError: Event loop is closed`, nowsze wersje zostawialy zywa petle
+    retencji zewnetrznego klienta do konca zamykania. Lifespan anuluje swoja petle PRZED zatrzymaniem executora.
+    """
+    from app.control.executor import JobExecutor
+    from app.main import create_app
+
+    alive_at_stop: list[int] = []
+    original_stop = JobExecutor.stop
+
+    async def stop(self) -> None:
+        alive_at_stop.append(sum(1 for t in asyncio.all_tasks() if t.get_name() == "retention"))
+        await original_stop(self)
+
+    monkeypatch.setattr(JobExecutor, "stop", stop)
+    app = create_app(cloud_settings)
+    with TestClient(app, base_url="https://testserver"):
+        outer = app.state.retention_task
+        with TestClient(app, base_url="https://testserver"):
+            inner = app.state.retention_task
+            assert outer is not None and inner is not None and inner is not outer
+        assert inner.done()
+        assert not outer.done()             # zewnetrzny klient dziala dalej
+    assert outer.done()
+    assert alive_at_stop == [0, 0]          # wewnetrzny, potem zewnetrzny: zadna petla retencji nie przezyla
+
+
 def test_the_loop_runs_a_cycle_and_survives_errors(cloud_client, cloud_settings, org):
     import app.control.retention as retention
 
