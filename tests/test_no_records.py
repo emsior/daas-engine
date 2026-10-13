@@ -1,6 +1,8 @@
 """C9: run PARTIAL bez rekordow nie zuzywa limitu planu, a job konczy sie `failed` z `error_code=no_records`."""
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -72,6 +74,10 @@ def test_run_finished_audit_and_webhook_event_report_failed(cloud_client, cloud_
 
     cloud_client.app.state.executor.listeners.append(listener)
     job = start(cloud_client, org, upload_id=upload(cloud_client, org, "d.csv", CSV_BYTES))
+    # job jest terminalny od commitu, a nasluchujacy (webhooki, powiadomienia, ten test) sa wolani PO nim: krotka chwila
+    deadline = time.monotonic() + 10
+    while not any(e.job_id == job["id"] for e in events) and time.monotonic() < deadline:
+        time.sleep(0.02)
     deadline_events = [e for e in events if e.job_id == job["id"]]
     assert deadline_events and deadline_events[0].status == "failed" and deadline_events[0].run_status == "PARTIAL"
     audit = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "run.finished")
