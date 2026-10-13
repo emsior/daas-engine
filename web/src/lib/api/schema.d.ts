@@ -481,12 +481,12 @@ export interface paths {
         };
         /**
          * Get the schedule and notifications
-         * @description Weekly export reminder, auto-run after upload and the e-mail when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`).
+         * @description Weekly export reminder, auto-run after upload, the e-mail and the chat message when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`). The chat webhook address is never returned: `notify_webhook_set` and the masked `notify_webhook_hint` say whether and which one is saved.
          */
         get: operations["get_schedule_api_v1_orgs__org_id__schedule_get"];
         /**
          * Save the schedule and notifications
-         * @description Replaces the whole schedule (an omitted field takes its default). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.
+         * @description Replaces the whole schedule (an omitted field takes its default), except `notify_webhook_url`: omitted = unchanged, `null` = remove, text = set (https, public address, no credentials). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.
          */
         put: operations["put_schedule_api_v1_orgs__org_id__schedule_put"];
         post?: never;
@@ -1403,7 +1403,8 @@ export interface components {
         };
         /**
          * ScheduleIn
-         * @description Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna).
+         * @description Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: adres webhooka
+         *     czatu jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres).
          */
         ScheduleIn: {
             /**
@@ -1418,6 +1419,19 @@ export interface components {
              * @default false
              */
             notify_on_finish: boolean;
+            /**
+             * Notify Webhook Kind
+             * @description format of the chat message after a run: `slack` (Incoming Webhook), `teams` (Workflows webhook trigger) or `generic` (plain JSON); send it with every PUT
+             * @default slack
+             * @enum {string}
+             */
+            notify_webhook_kind: "slack" | "teams" | "generic";
+            /**
+             * Notify Webhook Url
+             * @description chat webhook address (write-only secret, never returned). Omitted = unchanged, `null` = remove the address, text = set it: `https` and a public address (outside dev), no credentials; an invalid address answers `422 validation_error` naming this field
+             * @example https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX
+             */
+            notify_webhook_url?: string | null;
             /**
              * Reminder Enabled
              * @description cotygodniowe przypomnienie e-mail o eksporcie
@@ -1465,6 +1479,23 @@ export interface components {
             next_reminder_at?: string | null;
             /** Notify On Finish */
             notify_on_finish: boolean;
+            /**
+             * Notify Webhook Hint
+             * @description masked saved address: host and the last 4 characters of a long path (no query); `null` = none
+             * @example hooks.slack.com/…XyZ9
+             */
+            notify_webhook_hint?: string | null;
+            /**
+             * Notify Webhook Kind
+             * @description format of the chat message after a run
+             * @enum {string}
+             */
+            notify_webhook_kind: "slack" | "teams" | "generic";
+            /**
+             * Notify Webhook Set
+             * @description a chat webhook address is saved (the address itself is never returned)
+             */
+            notify_webhook_set: boolean;
             /** Reminder Enabled */
             reminder_enabled: boolean;
             /** Reminder Hour */
@@ -2855,7 +2886,7 @@ export interface operations {
                     "application/json": components["schemas"]["ScheduleOut"];
                 };
             };
-            /** @description Invalid weekday, hour or time zone */
+            /** @description Invalid weekday, hour, time zone or chat webhook address */
             422: {
                 headers: {
                     [name: string]: unknown;

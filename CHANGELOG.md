@@ -59,6 +59,13 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   with cockpit links, most severe first (`last_run_failed`, `plan_limit_reached`, `stale_upload`, `plan_limit_near`,
   `partial_reports`, `no_uploads_yet`, `reminder_off`, `auto_run_off`). Computed on the fly, read-only, not audited;
   new cockpit screen *Data health* (`/health`) with the verdict, key figures and an 8/12/26-week table with bars.
+- **Chat notification after a run** (cloud): the schedule takes a Slack Incoming Webhook, Microsoft Teams (Workflows)
+  or generic JSON address (`notify_webhook_kind`, `notify_webhook_url`; write-only secret — `GET` shows only
+  `notify_webhook_set` and a mask such as `hooks.slack.com/…XyZ9`, an omitted address stays unchanged, `null` removes
+  it). Each run then posts one message (status incl. partial, data period, report SHA-256, link to the run; no report
+  content) with the SSRF rules and IP pinning of the signed webhooks, a single attempt with
+  `DAAS_NOTIFY_WEBHOOK_TIMEOUT_SEC`, independent of the run e-mail, audited as `schedule.webhook_notified`; the
+  cockpit section "Chat notification" sets it.
 
 ### Fixed
 

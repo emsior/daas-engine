@@ -22,6 +22,7 @@ import logging
 import socket
 import time
 from collections.abc import Awaitable, Callable
+from contextvars import ContextVar
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -173,6 +174,62 @@ def pinned_targets(url: str, host: str, addresses: list[str]) -> list[Target]:
             for ip in addresses[:MAX_PINNED_ADDRESSES]]
 
 
+#: Ustawiane przez `post_json` na czas wysylki: log klienta httpx traci wtedy sciezke i zapytanie adresu.
+_REDACT_REQUEST_URL: ContextVar[bool] = ContextVar("daas_redact_request_url", default=False)
+
+
+class _RedactRequestUrl(logging.Filter):
+    """Linia `HTTP Request: POST <url> ...` loggera `httpx` bez sciezki i zapytania dla wysylek `post_json`: adres
+    webhooka moze byc sekretem (Slack: sciezka, Teams: parametr `sig`, n8n: sciezka). Zostaje metoda, host i status."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if _REDACT_REQUEST_URL.get() and isinstance(args, tuple) and len(args) >= 2 and isinstance(args[1], httpx.URL):
+            record.args = (args[0], f"{args[1].scheme}://{args[1].host}/...", *args[2:])
+        return True
+
+
+_HTTPX_LOG = logging.getLogger("httpx")
+if not any(isinstance(f, _RedactRequestUrl) for f in _HTTPX_LOG.filters):
+    _HTTPX_LOG.addFilter(_RedactRequestUrl())
+
+
+async def post_json(url: str, body: bytes, *, headers: dict[str, str], dev: bool, timeout: float,
+                    transport: httpx.AsyncBaseTransport | None, resolver: Resolver) -> tuple[int | None, str | None]:
+    """Jedna proba `POST url` z ochrona SSRF; wspolna dla webhookow HMAC i powiadomien na czacie.
+
+    Zwraca `(status HTTP | None, typ bledu | None)`. Poza `dev`: walidacja adresu, nazwa rozwiazywana raz, wszystkie
+    adresy musza byc publiczne, a polaczenie idzie na sprawdzony adres IP (nastepny adres z listy tylko po bledzie
+    polaczenia). Przekierowania nie sa sledzone, tresc odpowiedzi nie jest czytana; sciezka i zapytanie adresu nie
+    trafiaja do logow (`_RedactRequestUrl`)."""
+    try:
+        host, port = validate_url(url, dev=dev)
+        if dev:
+            targets = [Target(url, {}, {})]
+        else:
+            targets = pinned_targets(url, host, await resolve_public(host, port, resolver))
+    except UnsafeDestination as exc:
+        return None, exc.reason
+    error: str | None = None
+    redact = _REDACT_REQUEST_URL.set(True)
+    try:
+        for target in targets:
+            try:
+                async with httpx.AsyncClient(timeout=timeout, follow_redirects=False, transport=transport) as client:
+                    # strumien: tresc odpowiedzi odbiorcy nie jest czytana ani zapisywana
+                    async with client.stream("POST", target.url, content=body,
+                                             headers={**headers, **target.headers},
+                                             extensions=target.extensions) as response:
+                        return response.status_code, None
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                error = type(exc).__name__      # nastepny sprawdzony adres, jesli jest
+            except httpx.HTTPError as exc:
+                return None, type(exc).__name__
+        return None, error
+    finally:
+        _REDACT_REQUEST_URL.reset(redact)
+
+
 @dataclass(frozen=True)
 class DeliveryResult:
     delivered: bool
@@ -295,35 +352,11 @@ class WebhookDispatcher:
 
     async def _attempt(self, hook: Webhook, event_name: str, body: bytes, delivery_id: str,
                        signature: str) -> tuple[int | None, str | None]:
-        """Jedna proba. Zwraca `(status HTTP | None, typ bledu | None)`; adres nie trafia do logow.
-
-        Poza `dev`: nazwa jest rozwiazywana raz, wszystkie adresy musza byc publiczne, a polaczenie idzie na
-        sprawdzony adres IP (nastepny adres z listy tylko po bledzie polaczenia)."""
-        dev = is_dev(self.settings)
-        try:
-            host, port = validate_url(hook.url, dev=dev)
-            if dev:
-                targets = [Target(hook.url, {}, {})]
-            else:
-                targets = pinned_targets(hook.url, host, await resolve_public(host, port, self.resolver))
-        except UnsafeDestination as exc:
-            return None, exc.reason
+        """Jedna proba (`post_json`). Zwraca `(status HTTP | None, typ bledu | None)`; adres nie trafia do logow."""
         headers = {
             "Content-Type": "application/json", "User-Agent": USER_AGENT, "X-DaaS-Event": event_name,
             "X-DaaS-Delivery": delivery_id, "X-DaaS-Timestamp": str(int(time.time())),
             "X-DaaS-Signature": signature,
         }
-        error: str | None = None
-        for target in targets:
-            try:
-                async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT_SEC, follow_redirects=False,
-                                             transport=self.transport) as client:
-                    # strumien: tresc odpowiedzi odbiorcy nie jest czytana ani zapisywana
-                    async with client.stream("POST", target.url, content=body, headers={**headers, **target.headers},
-                                             extensions=target.extensions) as response:
-                        return response.status_code, None
-            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
-                error = type(exc).__name__      # nastepny sprawdzony adres, jesli jest
-            except httpx.HTTPError as exc:
-                return None, type(exc).__name__
-        return None, error
+        return await post_json(hook.url, body, headers=headers, dev=is_dev(self.settings),
+                               timeout=REQUEST_TIMEOUT_SEC, transport=self.transport, resolver=self.resolver)

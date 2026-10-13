@@ -129,8 +129,8 @@ Rate limits are per client address and per key and are kept in process memory; r
 | GET | `/api/v1/orgs/{org_id}/usage` | `usage:read` | 200 | 404 | monthly usage and plan limits |
 | GET | `/api/v1/orgs/{org_id}/data-health?weeks=12` | `runs:read` | 200 | 404, 422 | weekly rhythm (uploads, reports, failures), summary and issues to fix |
 | GET | `/api/v1/orgs/{org_id}/audit` | `audit:read` | 200 | 422 | audit log, newest first |
-| GET | `/api/v1/orgs/{org_id}/schedule` | `org:read` | 200 | 404 | schedule and notifications (defaults when never saved) |
-| PUT | `/api/v1/orgs/{org_id}/schedule` | `org:manage` | 200 | 403, 404, 422 | save the schedule; recomputes `next_reminder_at` |
+| GET | `/api/v1/orgs/{org_id}/schedule` | `org:read` | 200 | 404 | schedule and notifications (defaults when never saved; the chat webhook address only masked) |
+| PUT | `/api/v1/orgs/{org_id}/schedule` | `org:manage` | 200 | 403, 404, 422 | save the schedule; recomputes `next_reminder_at`; an omitted `notify_webhook_url` stays unchanged |
 | GET | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 200 | 403 | list webhooks |
 | POST | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 201 | 409, 422, 503 | register an HTTPS endpoint; the signing secret appears once |
 | DELETE | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}` | `webhooks:manage` | 204 | 404 | delete |
@@ -262,12 +262,15 @@ Test call: `POST .../webhooks/{webhook_id}/ping` sends one signed `ping` event (
 curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/schedule"
 # {"reminder_enabled":false,"reminder_weekday":0,"reminder_hour":8,"timezone":"Europe/Warsaw",
 #  "reminder_skip_if_recent_upload":true,"auto_run_on_upload":false,"notify_on_finish":false,
+#  "notify_webhook_kind":"slack","notify_webhook_set":false,"notify_webhook_hint":null,
 #  "next_reminder_at":null,"last_reminder_at":null,"updated_at":null}
 
 curl -s -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" "$DAAS/api/v1/orgs/$ORG/schedule" \
   -d '{"reminder_enabled":true,"reminder_weekday":0,"reminder_hour":8,"timezone":"Europe/Warsaw",
-       "reminder_skip_if_recent_upload":true,"auto_run_on_upload":true,"notify_on_finish":true}'
-# {..., "next_reminder_at":"2026-10-19T06:00:00Z", "updated_at":"..."}
+       "reminder_skip_if_recent_upload":true,"auto_run_on_upload":true,"notify_on_finish":true,
+       "notify_webhook_kind":"slack","notify_webhook_url":"https://hooks.slack.com/services/T000/B000/XXXX"}'
+# {..., "notify_webhook_set":true, "notify_webhook_hint":"hooks.slack.com/…XXXX",
+#  "next_reminder_at":"2026-10-19T06:00:00Z", "updated_at":"..."}
 ```
 
 | Field | Default | Meaning |
@@ -279,12 +282,25 @@ curl -s -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" "$DAAS/a
 | `reminder_skip_if_recent_upload` | `true` | no reminder when the organization uploaded a file in the last 6 days (the date still moves one week) |
 | `auto_run_on_upload` | `false` | after `POST .../uploads` a job for `suggested_pipeline` is queued the same way as `POST .../jobs` |
 | `notify_on_finish` | `false` | e-mail to the members when a run finishes, success or failure |
+| `notify_webhook_kind` | `slack` | format of the chat message after a run: `slack` (Slack Incoming Webhook), `teams` (Microsoft Teams Workflows, trigger "When a Teams webhook request is received") or `generic` (plain JSON for any receiver, e.g. n8n); send it with every `PUT` |
+| `notify_webhook_url` | not set | write only (the address is a secret): omitted = unchanged, `null` = remove, text = set; at most 512 characters, `https`, a public address, no credentials (`http` and local addresses only with `APP_ENV=dev`); never returned |
+| `notify_webhook_set`, `notify_webhook_hint` | `false`, `null` | read only: an address is saved, and its mask — host plus the last 4 characters of a long path, never the query (`hooks.slack.com/…XyZ9`) |
 | `next_reminder_at`, `last_reminder_at` | `null` | read only, UTC; `next_reminder_at` is `null` while the reminder is off |
 | `updated_at` | `null` | read only; `null` = defaults, never saved |
 
-- `GET` needs `org:read` (every role), `PUT` needs `org:manage` (owner, admin). `PUT` replaces the whole schedule: an omitted field takes its default. A weekday outside 0-6, an hour outside 0-23 or an unknown zone answers `422 validation_error` with the field in `errors[].loc` (the value sent is not echoed). Every save is audited as `schedule.updated` with the names of the changed fields.
+- `GET` needs `org:read` (every role), `PUT` needs `org:manage` (owner, admin). `PUT` replaces the whole schedule: an omitted field takes its default — except `notify_webhook_url`, which stays as saved when omitted (the client cannot read it back to resend it). A weekday outside 0-6, an hour outside 0-23, an unknown zone or kind, or a chat webhook address that is too long, not `https`, points to a local or private address, or carries credentials answers `422 validation_error` with the field in `errors[].loc` (the value sent is not echoed; for the address `errors[].type` is `https_required`, `private_address`, `credentials_in_url`, `url_malformed` or `string_too_long`). Every save is audited as `schedule.updated` with the names of the changed fields only (never the address).
 - Auto-run: the upload answer carries `auto_job_id` (the queued job; follow it like any job). The job is created on behalf of the uploader (`created_by`, audit actor) under the same conditions as `POST .../jobs`: the uploader needs `runs:write` (a key with `uploads:write` only never starts runs), the plan run limit and the per-key run rate limit apply. When any of them stops the run, when the queue is full, or when the file has no recognised rows (`ready: false`), the upload still succeeds (`201`), `auto_job_id` is `null` and the audit log gets `schedule.auto_run_skipped` with the code in `meta.reason` (`insufficient_scope`, `plan_limit`, `rate_limited`, `queue_full`, `upload_not_ready`, ...). Start the job by hand later. Over MCP, `start_run` on an upload whose auto-run job is still queued or running returns that job (`reused: true`) instead of a second one.
 - Reminder e-mail: a fixed text and a link to the upload screen of the cockpit (no token; the member signs in as usual). Run e-mail: pipeline, status, data period, SHA-256 of the HTML report, error code on failure and a link to the run in the cockpit; never report content or customer data. Jobs that fail before the run starts (for example `SOURCE_UNAVAILABLE`) do not send it. Audit: `schedule.reminder` (`meta`: `sent`, `recipients`, `skipped_reason`), `schedule.notified`.
+- Chat message (when `notify_webhook_url` is set; independent of `notify_on_finish` — both can be on, and a failure of one does not stop the other or the run): the same facts as the run e-mail (organization name without links, pipeline, status — a `PARTIAL` run is called partial —, data period, SHA-256 of the HTML report, error code on failure, finish time) and a button / link to the run in the cockpit; never report content or customer data. Texts are Polish. Shapes: Slack `{"text": "<one line>", "blocks": [section (mrkdwn facts), actions (button "Otwórz run")]}`; Teams `{"type": "message", "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "content": <Adaptive Card 1.4: TextBlock, FactSet, Action.OpenUrl>}]}`; `generic`:
+
+  ```json
+  {"event": "run.finished", "org_id": "01J...", "job_id": "01J...", "run_id": "7c9e...", "pipeline": "ecommerce_demo",
+   "status": "succeeded", "run_status": "SUCCESS", "finished_at": "2026-10-19T06:03:12+00:00", "organization": "Acme",
+   "period_from": "2026-10-12", "period_to": "2026-10-18", "report_sha256": "9f2c...", "error_code": null,
+   "link": "https://reports.example.com/runs/7c9e..."}
+  ```
+
+  Delivery: one `POST` (`Content-Type: application/json`, UTF-8), no retries, timeout `DAAS_NOTIFY_WEBHOOK_TIMEOUT_SEC` (10 s), the same SSRF rules as the signed webhooks (public addresses only, the resolved IP is pinned, redirects are not followed); a `2xx` answer counts as sent. The `generic` body is **not signed**: the address itself is the secret — use the signed webhooks above when the receiver must verify the sender. Audit: `schedule.webhook_notified` (`meta`: `run_id`, `job_id`, `status` = run status `SUCCESS`/`PARTIAL`/`FAILED`, `channel` = kind, `sent`, `status_code` when the receiver answered, `error_type` on failure, e.g. `http_status`, `private_address`, `dns_failed`, `ReadTimeout`).
 - Reminders are sent by a loop inside the API process (cloud mode only, see `docs/DEPLOY.md`); a reminder that fell due while the server was down goes out once after the start, the next one is computed from that moment.
 
 ## Usage and plan limits
@@ -356,7 +372,7 @@ The cockpit screen *Data health* (`/health`) turns the list into a verdict: any 
 
 ## Audit log
 
-`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (scope `audit:read`; `limit` 1-200, default 50). Ordered by `(ts, id)` descending. The response is `{"items": [...], "next_cursor": "..." | null}`; the cursor is an opaque base64url value (an encoded `[ts, id]` pair): pass it back unchanged. A malformed cursor answers `422 invalid_cursor`. Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `schedule.updated`, `schedule.reminder`, `schedule.auto_run_skipped`, `schedule.notified`, `auth.login`, `auth.logout`, `auth_denied`, `mcp.tool` (one per MCP tool call: `tool`, `ok`, `duration_ms`, `key_id`; never the arguments). `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
+`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (scope `audit:read`; `limit` 1-200, default 50). Ordered by `(ts, id)` descending. The response is `{"items": [...], "next_cursor": "..." | null}`; the cursor is an opaque base64url value (an encoded `[ts, id]` pair): pass it back unchanged. A malformed cursor answers `422 invalid_cursor`. Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `schedule.updated`, `schedule.reminder`, `schedule.auto_run_skipped`, `schedule.notified`, `schedule.webhook_notified`, `auth.login`, `auth.logout`, `auth_denied`, `mcp.tool` (one per MCP tool call: `tool`, `ok`, `duration_ms`, `key_id`; never the arguments). `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
 
 ## Metrics
 

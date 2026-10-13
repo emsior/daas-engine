@@ -109,7 +109,7 @@ curl -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/<run_id>/report?fmt=html"
 
 ### Every week without clicks
 
-In the cockpit, *Settings → Schedule and notifications* (or `PUT /api/v1/orgs/{org_id}/schedule`): a weekly e-mail reminder to export (for example Monday 8:00 Europe/Warsaw, skipped when the file already came in), an automatic run right after the upload and an e-mail with a link to the report when it is ready. The e-mails carry no report content; the data stays in the cockpit. Details: [`docs/API.md`](docs/API.md#schedule-and-notifications).
+In the cockpit, *Settings → Schedule and notifications* (or `PUT /api/v1/orgs/{org_id}/schedule`): a weekly e-mail reminder to export (for example Monday 8:00 Europe/Warsaw, skipped when the file already came in), an automatic run right after the upload and an e-mail with a link to the report when it is ready. A short message can also go to the team chat (Slack, Microsoft Teams or any JSON webhook) with the status, data period, report hash and the link. The messages carry no report content; the data stays in the cockpit. Details: [`docs/API.md`](docs/API.md#schedule-and-notifications).
 
 The *Data health* screen (or `GET /api/v1/orgs/{org_id}/data-health`) tells whether next Monday's report is safe: files, reports and failures week by week, the streak of weeks with a report and what to fix, each item linked to the right screen ([`docs/API.md`](docs/API.md#data-health)).
 

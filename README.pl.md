@@ -140,7 +140,7 @@ curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/<run_id>/report?fmt=ht
 
 ### Co tydzień bez klikania
 
-W kokpicie *Ustawienia → Harmonogram i powiadomienia* (albo `PUT /api/v1/orgs/{org_id}/schedule`): cotygodniowe przypomnienie e-mailem o eksporcie (np. poniedziałek 8:00 Europe/Warsaw, pomijane, gdy plik już przyszedł), automatyczne uruchomienie raportu zaraz po wgraniu pliku i e-mail z linkiem do raportu, gdy jest gotowy. W wiadomościach nie ma treści raportu — dane zostają w kokpicie. Szczegóły: [`docs/API.md`](docs/API.md#schedule-and-notifications).
+W kokpicie *Ustawienia → Harmonogram i powiadomienia* (albo `PUT /api/v1/orgs/{org_id}/schedule`): cotygodniowe przypomnienie e-mailem o eksporcie (np. poniedziałek 8:00 Europe/Warsaw, pomijane, gdy plik już przyszedł), automatyczne uruchomienie raportu zaraz po wgraniu pliku i e-mail z linkiem do raportu, gdy jest gotowy. Krótka wiadomość może też trafić na czat zespołu (Slack, Microsoft Teams albo dowolny webhook JSON): status, okres danych, skrót raportu i link. W wiadomościach nie ma treści raportu — dane zostają w kokpicie. Szczegóły: [`docs/API.md`](docs/API.md#schedule-and-notifications).
 
 Ekran *Zdrowie danych* (albo `GET /api/v1/orgs/{org_id}/data-health`) mówi, czy raport w przyszły poniedziałek jest bezpieczny: pliki, raporty i błędy tydzień po tygodniu, seria tygodni z raportem i to, co naprawić, z linkiem do właściwego ekranu ([`docs/API.md`](docs/API.md#data-health)).
 

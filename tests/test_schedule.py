@@ -413,7 +413,9 @@ def api_org(cloud_client: TestClient, cloud_settings: Settings):
 def test_get_returns_defaults_without_a_row(cloud_client, cloud_settings, api_org):
     r = cloud_client.get(schedule_url(api_org.org_id), headers=key_headers(api_org.api_key))
     assert r.status_code == 200, r.text
-    assert r.json() == {**sched.DEFAULTS, "next_reminder_at": None, "last_reminder_at": None, "updated_at": None}
+    public = {k: v for k, v in sched.DEFAULTS.items() if k != "notify_webhook_url"}  # adres tylko do zapisu
+    assert r.json() == {**public, "notify_webhook_set": False, "notify_webhook_hint": None,
+                        "next_reminder_at": None, "last_reminder_at": None, "updated_at": None}
     assert get_rows(cloud_settings, OrgSchedule) == []  # GET niczego nie tworzy
 
 

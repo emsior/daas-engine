@@ -1761,7 +1761,7 @@
         "type": "object"
       },
       "ScheduleIn": {
-        "description": "Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna).",
+        "description": "Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: adres webhooka\nczatu jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres).",
         "properties": {
           "auto_run_on_upload": {
             "default": false,
@@ -1774,6 +1774,33 @@
             "description": "e-mail do czlonkow po zakonczeniu runu (sukces i blad)",
             "title": "Notify On Finish",
             "type": "boolean"
+          },
+          "notify_webhook_kind": {
+            "default": "slack",
+            "description": "format of the chat message after a run: `slack` (Incoming Webhook), `teams` (Workflows webhook trigger) or `generic` (plain JSON); send it with every PUT",
+            "enum": [
+              "slack",
+              "teams",
+              "generic"
+            ],
+            "title": "Notify Webhook Kind",
+            "type": "string"
+          },
+          "notify_webhook_url": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "chat webhook address (write-only secret, never returned). Omitted = unchanged, `null` = remove the address, text = set it: `https` and a public address (outside dev), no credentials; an invalid address answers `422 validation_error` naming this field",
+            "examples": [
+              "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX"
+            ],
+            "title": "Notify Webhook Url"
           },
           "reminder_enabled": {
             "default": false,
@@ -1851,6 +1878,36 @@
             "title": "Notify On Finish",
             "type": "boolean"
           },
+          "notify_webhook_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "masked saved address: host and the last 4 characters of a long path (no query); `null` = none",
+            "examples": [
+              "hooks.slack.com/…XyZ9"
+            ],
+            "title": "Notify Webhook Hint"
+          },
+          "notify_webhook_kind": {
+            "description": "format of the chat message after a run",
+            "enum": [
+              "slack",
+              "teams",
+              "generic"
+            ],
+            "title": "Notify Webhook Kind",
+            "type": "string"
+          },
+          "notify_webhook_set": {
+            "description": "a chat webhook address is saved (the address itself is never returned)",
+            "title": "Notify Webhook Set",
+            "type": "boolean"
+          },
           "reminder_enabled": {
             "title": "Reminder Enabled",
             "type": "boolean"
@@ -1896,7 +1953,9 @@
           "timezone",
           "reminder_skip_if_recent_upload",
           "auto_run_on_upload",
-          "notify_on_finish"
+          "notify_on_finish",
+          "notify_webhook_kind",
+          "notify_webhook_set"
         ],
         "title": "ScheduleOut",
         "type": "object"
@@ -4057,7 +4116,7 @@
     },
     "/api/v1/orgs/{org_id}/schedule": {
       "get": {
-        "description": "Weekly export reminder, auto-run after upload and the e-mail when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`).",
+        "description": "Weekly export reminder, auto-run after upload, the e-mail and the chat message when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`). The chat webhook address is never returned: `notify_webhook_set` and the masked `notify_webhook_hint` say whether and which one is saved.",
         "operationId": "get_schedule_api_v1_orgs__org_id__schedule_get",
         "parameters": [
           {
@@ -4100,7 +4159,7 @@
         ]
       },
       "put": {
-        "description": "Replaces the whole schedule (an omitted field takes its default). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.",
+        "description": "Replaces the whole schedule (an omitted field takes its default), except `notify_webhook_url`: omitted = unchanged, `null` = remove, text = set (https, public address, no credentials). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.",
         "operationId": "put_schedule_api_v1_orgs__org_id__schedule_put",
         "parameters": [
           {
@@ -4137,7 +4196,7 @@
             "description": "Successful Response"
           },
           "422": {
-            "description": "Invalid weekday, hour or time zone"
+            "description": "Invalid weekday, hour, time zone or chat webhook address"
           }
         },
         "summary": "Save the schedule and notifications",
