@@ -52,6 +52,13 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   is never sent twice; a stored time zone that is no longer known disables that reminder with an audit entry instead
   of failing every tick. Migration `0004` adds `org_schedules`; the cockpit has a "Schedule and notifications" section
   in Settings (read only for members).
+- **MCP resources and prompts:** four resource templates (`daas://runs/{run_id}/report.md`, `.../report.json`,
+  `.../evidence.json`, `daas://uploads/{upload_id}/summary.json`) with the same content and SHA-256 as
+  `get_report` / `get_evidence`, `resources/list` with the 20 newest reports of the key's organization, and three
+  prompts (`weekly_summary`, `compare_runs`, `data_quality_check`) that tell the assistant which tools to call, to
+  treat their output as data and to change nothing without the user's confirmation. Scopes and tenant isolation as
+  for the tools (a foreign id is `not_found`); audit `mcp.resource` (template without the id) and `mcp.prompt`;
+  errors are JSON-RPC errors with `code: message` that never echo the URI or argument values. Guide: `docs/MCP.md`.
 
 ### Fixed
 

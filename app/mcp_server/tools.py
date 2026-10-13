@@ -9,7 +9,8 @@ audyt i izolacja najemcow sa wspolne. Bledy domenowe wracaja jako wynik z `isErr
 bledy domenowe na wynik `isError`. `tool_gate` (middleware SDK, warstwa `tools/call`) zapisuje dla kazdego wywolania
 zdarzenie audytu `mcp.tool` (`tool`, `ok`, `duration_ms`, `key_id`; bez argumentow — moga zawierac dane klienta)
 i ujednolica bledy zglaszane przez SDK przed narzedziem (`validation_error: pole: komunikat` bez wartosci,
-`not_found: unknown tool`).
+`not_found: unknown tool`). Ta sama bramka audytuje `resources/read` (`mcp.resource`) i `prompts/get` (`mcp.prompt`);
+funkcje zasobow i promptow (`resources.py`, `prompts.py`) opakowuje `rpc_guarded`, a ich bledy to `RpcFailure`.
 """
 from __future__ import annotations
 
@@ -19,14 +20,16 @@ import hmac
 import io
 import logging
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
 from mcp.server.mcpserver import Context
+from mcp.server.mcpserver.prompts import Prompt
 from mcp.server.mcpserver.tools import Tool
-from mcp_types import CallToolResult, TextContent, ToolAnnotations
+from mcp.shared.exceptions import MCPError
+from mcp_types import INTERNAL_ERROR, INVALID_PARAMS, CallToolResult, TextContent, ToolAnnotations
 from pydantic import Field, ValidationError
 from sqlalchemy import select
 from starlette.datastructures import Headers, UploadFile
@@ -499,15 +502,23 @@ def _set_text(result: dict[str, Any], text: str) -> None:
     result.pop("structuredContent", None)
 
 
-def make_tool_gate(tools: dict[str, tuple[ToolSpec, Tool]]):
-    """Middleware SDK dla `tools/call` (inne metody bez zmian): audyt `mcp.tool` kazdego wywolania i komunikaty
-    bledow w formacie `code: message` dla przypadkow obslugiwanych przez SDK przed narzedziem (nieznane narzedzie,
-    argumenty niezgodne ze schematem — tekst SDK zawieralby wartosci przeslane przez klienta).
+def make_tool_gate(tools: dict[str, tuple[ToolSpec, Tool]], *, prompts: Mapping[str, Prompt] | None = None,
+                   resource_name: Callable[[str], str | None] | None = None):
+    """Middleware SDK dla `tools/call`, `resources/read` i `prompts/get` (inne metody, takze `resources/list`
+    i `prompts/list`, bez zmian i bez audytu).
+
+    `tools/call`: audyt `mcp.tool` kazdego wywolania i komunikaty bledow w formacie `code: message` dla przypadkow
+    obslugiwanych przez SDK przed narzedziem (nieznane narzedzie, argumenty niezgodne ze schematem — tekst SDK
+    zawieralby wartosci przeslane przez klienta). `resources/read` i `prompts/get`: `_rpc_gate`; `prompts` to prompty
+    serwera wg nazwy, `resource_name(uri)` daje szablon zasobu bez identyfikatora (np. `runs/report.md`) albo None.
 
     Middleware nie skraca lancucha (zawsze `call_next`): koperte odpowiedzi buduje SDK, tu zmienia sie tylko tresc
-    `content` wyniku z `isError`."""
+    `content` wyniku z `isError` albo tekst bledu JSON-RPC."""
+    known_prompts = dict(prompts or {})
 
     async def tool_gate(ctx, call_next):
+        if ctx.request_id is not None and ctx.method in _RPC_AUDIT:
+            return await _rpc_gate(ctx, call_next, known_prompts, resource_name)
         if ctx.method != "tools/call" or ctx.request_id is None:
             return await call_next(ctx)
         started = time.perf_counter()
@@ -549,6 +560,125 @@ def _sdk_error_text(result: dict[str, Any], name: str) -> bool:
     content = result.get("content") or [{}]
     text = content[0].get("text", "") if isinstance(content[0], dict) else ""
     return text.startswith(f"Error executing tool {name}")
+
+
+# ============================================================================ zasoby i prompty
+#: Metody JSON-RPC audytowane obok `tools/call`: akcja audytu i klucz meta z nazwa zasobu albo prompta.
+_RPC_AUDIT: dict[str, tuple[str, str]] = {"resources/read": ("mcp.resource", "resource"),
+                                          "prompts/get": ("mcp.prompt", "prompt")}
+
+
+class RpcFailure(MCPError):
+    """Blad domenowy zasobu (`resources/read`) albo prompta (`prompts/get`). Te metody nie maja wyniku z `isError`,
+    wiec to blad JSON-RPC: tekst `code: message` (kody jak w wynikach narzedzi), kod -32602 (-32603 dla
+    `internal_error` i bledow serwera), bez `data` i bez wartosci od klienta. Bramka przepuszcza go bez zmian."""
+
+    def __init__(self, code: str, message: str, *, server_error: bool = False) -> None:
+        rpc_code = INTERNAL_ERROR if server_error or code == "internal_error" else INVALID_PARAMS
+        super().__init__(code=rpc_code, message=f"{code}: {message}")
+        self.reason = code
+
+
+def rpc_guarded(fn: Callable[..., Awaitable[Any]], *, scope: str, target: str) -> Callable[..., Awaitable[Any]]:
+    """Opakowanie funkcji zasobu albo prompta (odpowiednik `guarded`): zakres klucza (`insufficient_scope` + audyt
+    `auth_denied` z `target`) przed cialem funkcji oraz zamiana bledow domenowych (`ToolFailure`,
+    `ProblemError`/`HTTPException` z v1) na `RpcFailure`. Nieoczekiwany wyjatek trafia do logu z request_id; klient
+    dostaje `internal_error` bez szczegolow. `Context` (z zadaniem HTTP i podmiotem) SDK wstawia w argument `ctx`."""
+
+    @functools.wraps(fn)
+    async def wrapper(*args: Any, **kwargs: Any) -> Any:
+        try:
+            call = call_of(kwargs["ctx"])
+            if scope not in call.principal.scopes:
+                await _audit(call.request, call.principal, "auth_denied", target,
+                             {"reason": "insufficient_scope", "scope": scope})
+                raise RpcFailure("insufficient_scope", f"this API key lacks the {scope} scope")
+            return await fn(*args, **kwargs)
+        except RpcFailure:
+            raise
+        except ToolFailure as failure:
+            raise RpcFailure(failure.code, failure.message) from None
+        except HTTPException as exc:
+            detail = exc.detail if isinstance(exc.detail, str) else "request failed"
+            raise RpcFailure(code_for(exc.status_code, exc), detail, server_error=exc.status_code >= 500) from None
+        except Exception:  # noqa: BLE001 - granica zasobu/prompta: szczegoly tylko w logu
+            log.exception("mcp %s failed", target)
+            raise RpcFailure("internal_error", f"unexpected server error (request_id {get_request_id()})") from None
+
+    return wrapper
+
+
+async def _rpc_gate(ctx, call_next, prompts: Mapping[str, Prompt],
+                    resource_name: Callable[[str], str | None] | None) -> Any:
+    """`resources/read` i `prompts/get`: audyt `mcp.resource` / `mcp.prompt` (`resource` albo `prompt`, `ok`,
+    `duration_ms`, `key_id`) i tekst bledow SDK bez danych klienta (`_rpc_failure_of`). Nazwa w audycie to szablon
+    zasobu bez identyfikatora albo nazwa prompta serwera; nieznane = `unknown` (nigdy URI ani nazwa od klienta)."""
+    started = time.perf_counter()
+    action, meta_key = _RPC_AUDIT[ctx.method]
+    params = ctx.params if isinstance(ctx.params, Mapping) else {}
+    if ctx.method == "resources/read":
+        uri = params.get("uri")
+        name = resource_name(uri) if resource_name is not None and isinstance(uri, str) else None
+    else:
+        raw_name = params.get("name")
+        name = raw_name if isinstance(raw_name, str) and raw_name in prompts else None
+    ok = False
+    try:
+        result = await call_next(ctx)
+        ok = True
+        return result
+    except RpcFailure:
+        raise
+    except Exception as exc:  # noqa: BLE001 - blad SDK sprzed funkcji: wlasny tekst bez wartosci klienta
+        raise _rpc_failure_of(exc, ctx.method, name, params, prompts) from None
+    finally:
+        request = ctx.request if isinstance(ctx.request, Request) else None
+        principal = principal_of(request)
+        if request is not None and principal is not None:
+            await _audit(request, principal, action, f"mcp:{name or 'unknown'}", {
+                meta_key: name or "unknown", "ok": ok,
+                "duration_ms": round((time.perf_counter() - started) * 1000, 1),
+                "key_id": principal.key.id if principal.key is not None else principal.actor_id,
+            })
+
+
+def _rpc_failure_of(exc: Exception, method: str, name: str | None, params: Mapping[str, Any],
+                    prompts: Mapping[str, Prompt]) -> RpcFailure:
+    """`RpcFailure` w miejsce bledu SDK. SDK wstawia do odpowiedzi URI (`Unknown resource: <uri>`, `data.uri`) i nazwe
+    prompta (`Unknown prompt: <nazwa>`); tu zostaja tylko nazwy pol i nazwy zdefiniowane na serwerze."""
+    if isinstance(exc, ValidationError):  # parametry metody niezgodne ze schematem (np. `uri` nie jest tekstem)
+        return RpcFailure("validation_error", _params_message(exc))
+    if method == "resources/read":
+        # ResourceNotFoundError: zaden szablon nie pasuje albo SDK odrzucil identyfikator (np. `%2E%2E`)
+        if isinstance(exc, MCPError) and exc.code == INVALID_PARAMS:
+            if name is None:
+                return RpcFailure("not_found", "unknown resource")
+            return RpcFailure("validation_error", "uri: the identifier in the URI is not valid")
+    elif name is None:
+        return RpcFailure("not_found", "unknown prompt")
+    else:
+        arguments = params.get("arguments")
+        given = set(arguments) if isinstance(arguments, Mapping) else set()
+        declared = [arg.name for arg in prompts[name].arguments or []]
+        missing = [arg.name for arg in prompts[name].arguments or [] if arg.required and arg.name not in given]
+        if missing:
+            return RpcFailure("validation_error", "; ".join(f"{arg}: missing required argument" for arg in missing))
+        if given - set(declared):
+            return RpcFailure("validation_error", f"arguments: unexpected argument (expected: {', '.join(declared)})")
+    log.exception("mcp %s failed before the handler", method)
+    return RpcFailure("internal_error", f"unexpected server error (request_id {get_request_id()})")
+
+
+def _params_message(exc: ValidationError) -> str:
+    """Jak `_validation_message`, ale tylko pole najwyzszego poziomu (`uri`, `name`, `arguments`; SDK poprzedza je
+    elementem `params`): dalsze elementy `loc` bywaja kluczami slownika `arguments` przyslanymi przez klienta."""
+    parts = []
+    for err in exc.errors()[:5]:
+        loc = tuple(err.get("loc") or ())
+        if loc[:1] == ("params",):
+            loc = loc[1:]
+        parts.append(f"{loc[0] if loc else 'params'}: {err.get('msg', 'invalid value')}")
+    return "; ".join(parts)
 
 
 async def _audit(request: Request, principal: Principal, action: str, target: str, meta: dict[str, Any]) -> None:

@@ -39,7 +39,7 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 | Kokpit `web/` | Next.js 16 (App Router), React 19, TypeScript strict, Tailwind 4, TanStack Query, zod; Vitest + Testing Library; Playwright (e2e) |
 | Wdrożenie | Docker Compose (`deploy/`), Caddy (TLS), obrazy `api` (korzeń repo) i `web` (`web/Dockerfile`) |
 | Zależności Pythona | `requirements.lock`, `requirements-dev.lock` (pip-tools, hashe SHA-256; `--require-hashes`); wpisy tylko-Windows/poza-Windows dopisuje `tools/lock_windows_pins.py` |
-| Agenci AI (MCP) | `mcp` 2.3 (oficjalne SDK): `POST /mcp`, Streamable HTTP bezstanowy + JSON, klucz API jako Bearer, 12 narzędzi w `app/mcp_server/`; `docs/MCP.md` |
+| Agenci AI (MCP) | `mcp` 2.3 (oficjalne SDK): `POST /mcp`, Streamable HTTP bezstanowy + JSON, klucz API jako Bearer, 12 narzędzi + 4 zasoby (szablony `daas://`, `resources/list` z 20 najnowszymi raportami) + 3 prompty w `app/mcp_server/`; `docs/MCP.md` |
 | Harmonogram | `app/control/schedule.py` (pętla w lifespanie, tylko cloud), `app/control/notifications.py` (mail po runie), `GET/PUT /orgs/{id}/schedule`, Alembic `0004` |
 | Testy | pytest — 1777 przypadków (1776 passed, 1 skipped; stan 13.10.2026, po MCP, harmonogramie, poprawkach QA i scaleniu poprawki lifespanu), pełny przebieg 5–8 min; Linux (3.13) zielone; Windows (3.12): 1627/0 przed MCP i harmonogramem, pełny przebieg po scaleniu w `bundle\pytest_windows_2026-10-13.log` warsztatu; Vitest w `web/` (150) |
 | CI | GitHub Actions: `test` (3.11, 3.12, 3.13), `security` (gitleaks, semgrep, zizmor, pip-audit), `web`, `e2e`, `lighthouse`, `docker`; Dependabot (pip, actions, docker, npm); akcje przypięte do SHA |
@@ -125,7 +125,9 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
   auto-uruchomienie po uploadzie (`queue_job` wspólne z `POST /jobs`, pole `auto_job_id`), e-mail po runie
   (`app/control/notifications.py`, listener `run.finished`), sekcja w Ustawieniach kokpitu.
 - Kokpit `web/` (8 ekranów, PL/EN, jasny/ciemny motyw), `deploy/` (compose, Caddy, backup, restore, smoke), `docs/API.md`, `docs/SECURITY.md`.
-- Serwer MCP pod `/mcp` (12 narzędzi, te same funkcje serwisowe co API v1, audyt `mcp.tool`), `docs/MCP.md`.
+- Serwer MCP pod `/mcp` (12 narzędzi, te same funkcje serwisowe co API v1, audyt `mcp.tool`), `docs/MCP.md`; zasoby
+  (`app/mcp_server/resources.py`: raport MD/JSON, status artefaktów, podsumowanie uploadu; audyt `mcp.resource`) i prompty
+  (`app/mcp_server/prompts.py`: `weekly_summary`, `compare_runs`, `data_quality_check`; audyt `mcp.prompt`).
 - DevSecOps: ruff, gitleaks, semgrep, zizmor, pip-audit, Dependabot, pre-commit, kontenery bez roota.
 - README ze screenshotem i wideo demo `docs/daas_demo.mp4`; materiały pilota w `docs/pilot/`.
 - Poza repo: landing ofertowy na prochpc.pl i wzór umowy powierzenia danych (RODO art. 28); w repo szkic `docs/DPA_v1_PL.md` do przeglądu prawnego.
