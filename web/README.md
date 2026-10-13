@@ -83,18 +83,24 @@ e2e/               Playwright (specy, helpers, proxy.mjs, stack.sh)
 
 ## Testy
 
-`npm test` uruchamia testy jednostkowe (Vitest, jsdom). E2E (Playwright, Chromium z `PLAYWRIGHT_BROWSERS_PATH`; projekty `mobile-375` i `desktop-1280`) wymaga pełnego stosu w układzie produkcyjnym: jeden origin, `/api/*` do API, reszta do kokpitu. Raport jest osadzany w `<iframe>`, a API wysyła go z `frame-ancestors 'self'`, więc przy osobnych portach kokpitu i API ramka raportu jest blokowana; stąd proxy jednego originu.
+`npm test` uruchamia testy jednostkowe (Vitest, jsdom). E2E (Playwright: `npm run e2e` = Chromium z `PLAYWRIGHT_BROWSERS_PATH`, projekty `mobile-375` i `desktop-1280`; `npm run e2e:firefox` = `desktop-firefox`; `npm run e2e:webkit` = `mobile-webkit`, 375 px) wymaga pełnego stosu w układzie produkcyjnym: jeden origin, `/api/*` do API, reszta do kokpitu. Raport jest osadzany w `<iframe>`, a API wysyła go z `frame-ancestors 'self'`, więc przy osobnych portach kokpitu i API ramka raportu jest blokowana; stąd proxy jednego originu.
 
 ```bash
 cd web
 export E2E_RUNTIME=/tmp/daas-e2e               # dane testowe (kasowane przy starcie)
 ./e2e/stack.sh start                            # backend cloud + e-mail console + kokpit (standalone) + proxy :3100
 E2E_BASE_URL=http://127.0.0.1:3100 E2E_OUTBOX_DIR=$E2E_RUNTIME/outbox npm run e2e
+E2E_BASE_URL=http://127.0.0.1:3100 E2E_OUTBOX_DIR=$E2E_RUNTIME/outbox npm run e2e:firefox
+./e2e/stack.sh stop
+
+# WebKit: tylko po https (po http odrzuca ciasteczka Secure i __Host-, które API wystawia zawsze)
+E2E_TLS=1 ./e2e/stack.sh start                  # proxy :3100 po https, jednorazowy certyfikat self-signed w $E2E_RUNTIME/tls
+E2E_BASE_URL=https://127.0.0.1:3100 E2E_OUTBOX_DIR=$E2E_RUNTIME/outbox npm run e2e:webkit
 ./e2e/stack.sh stop
 ```
 
 `stack.sh` buduje kokpit z `NEXT_PUBLIC_API_ORIGIN=` (pusty = ten sam origin), jeśli nie ma `.next/standalone`; wymuś przebudowę usuwając `.next`. Wyłącza limity logowania (`DAAS_RATE_LIMIT_*=0`), bo seria testów loguje się z jednego adresu IP. Link logowania z adaptera `console` helper `e2e/helpers.ts` czyta z `E2E_OUTBOX_DIR` (pliki JSON z polem `link`).
 
-Specy: `login-onboarding-upload-report`, `api-keys`, `verify-local-hash` (zero żądań sieciowych), `upload-progress-sse`, `upload-errors`, `evidence` (fixture `data/fixtures/uksc`), `members`, `settings`, `states` (loading/error/empty/success), `preferences` (PL/EN, motyw), `responsive` (375 px), `security` (CSP, zero zewnętrznych originów), `a11y` (axe w obu motywach, klawiatura, fokus). Raport axe do pliku: `A11Y_LOG=/ścieżka/a11y.tsv`.
+Specy: `login-onboarding-upload-report`, `api-keys`, `verify-local-hash` (zero żądań sieciowych), `upload-progress-sse`, `upload-errors`, `evidence` (fixture `data/fixtures/uksc`), `members`, `settings`, `states` (loading/error/empty/success), `preferences` (PL/EN, motyw), `responsive` (375 px), `security` (CSP; naruszenia ze zdarzeń `securitypolicyviolation` w każdym silniku, zero zewnętrznych originów), `a11y` (axe w obu motywach, klawiatura, fokus). Raport axe do pliku: `A11Y_LOG=/ścieżka/a11y.tsv`.
 
-Wersja `@playwright/test` jest przypięta do 1.56.1 (Chromium 1194 z `/opt/pw-browsers`). Nie uruchamiaj `playwright install`, jeśli przeglądarki są już w `PLAYWRIGHT_BROWSERS_PATH`.
+Wersja `@playwright/test` jest przypięta do 1.56.1 (Chromium 1194 z `/opt/pw-browsers`; Firefox 1495 i WebKit 2215 dla `e2e:firefox`/`e2e:webkit`: `npx playwright install firefox webkit` i `npx playwright install-deps firefox webkit`). Nie uruchamiaj `playwright install`, jeśli przeglądarki są już w `PLAYWRIGHT_BROWSERS_PATH`. Konteksty tworzone w teście (`browser.newContext`) bierz z `newProjectContext` w `e2e/helpers.ts` (opcje projektu, w tym `ignoreHTTPSErrors`); schowek: `prepareClipboard`/`readClipboard` (Firefox i WebKit nie pozwalają czytać schowka).

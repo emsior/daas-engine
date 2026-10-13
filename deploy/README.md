@@ -174,7 +174,7 @@ Adresy `api:8000` i `web:3000` działają, gdy kontener wspólnego proxy jest w 
 
 ## Znane ograniczenia i uwagi
 
-- Jeden węzeł, brak HA: control plane to SQLite w wolumenie (`DAAS_CONTROL_DB_URL` pozwala przejść na Postgres, wymaga dodatkowej zależności `asyncpg`, patrz `pyproject.toml`).
+- Jeden węzeł, brak HA: control plane to SQLite w wolumenie (`DAAS_CONTROL_DB_URL` pozwala przejść na Postgres, wymaga dodatkowej zależności `asyncpg`: `requirements-postgres.lock`, dodatek `postgres` w `pyproject.toml`; obraz `api` jej nie zawiera; CI sprawdza control plane na PostgreSQL 16).
 - Aktualizacja zatrzymuje `api` na czas restartu (sekundy); trwające zadania w locie kończą się jako `failed` z kodem `abandoned`.
 - `Caddyfile` przeszedł `caddy validate` (2.10) i próbę filtra dziennika na lokalnym Caddy, a `compose.yml` `docker compose config`; obrazy nie były budowane ani uruchamiane lokalnie (brak demona Dockera; budowę obrazów sprawdza job `docker` w CI), więc pełny rozruch na docelowym VPS to zadanie operatora: wykonaj `./smoke.sh --public ...` i potraktuj go jako bramę przyjęcia.
 - Obrazy bazowe są przypięte tagami (`python:3.12-slim`, `node:22-alpine`, `caddy:2`), nie skrótami. Dependabot (ekosystem `docker`) podpowiada podbicia.

@@ -60,7 +60,7 @@ Kolumna „Tryb": `c` = istotne w `cloud`, `s` = w `selfhost`, `cs` = w obu.
 | `DAAS_MODE` | `selfhost` | cs | `selfhost` albo `cloud`; `deploy/compose.yml` ustawia `cloud` |
 | `DAAS_API_KEY` | brak | s | klucz instancji w nagłówku `X-API-Key` (min. 16 znaków). W `cloud` nie jest używany |
 | `DAAS_SECRET_KEY` | brak | c | **wymagany w `cloud`**, min. 32 znaki. Podpis cookie sesji i sekretów webhooków. `openssl rand -hex 32` |
-| `DAAS_CONTROL_DB_URL` | `sqlite+aiosqlite:///runtime/control.db` | cs | baza control plane (SQLAlchemy async). Postgres: `postgresql+asyncpg://...` i pakiet `asyncpg` (dodatek `postgres`) |
+| `DAAS_CONTROL_DB_URL` | `sqlite+aiosqlite:///runtime/control.db` | cs | baza control plane (SQLAlchemy async). Postgres: `postgresql+asyncpg://...` i pakiet `asyncpg` (dodatek `postgres`; z hashami: `pip install --require-hashes -r requirements-postgres.lock`; obraz `api` go nie zawiera) |
 | `DAAS_AUTO_MIGRATE` | `true` | cs | `alembic upgrade head` przy starcie (idempotentne); `false`, gdy migracje wykonuje operator (`python -m app.cli migrate`) |
 | `DAAS_COCKPIT_ORIGIN` | brak | c | jedyny origin kokpitu dopuszczony przez CORS z cookie, np. `https://raporty.example.com`. Brak = CORS wyłączony |
 | `DAAS_COOKIE_SECURE` | `true` | c | atrybut `Secure` cookie sesji; `false` tylko do lokalnych prób po http |

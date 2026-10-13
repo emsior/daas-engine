@@ -192,7 +192,7 @@ pytest                                  # backend, offline
 cd web && npm test && npm run e2e       # cockpit: unit tests; e2e needs the API in cloud mode (see web/README.md)
 ```
 
-CI runs on every push (`.github/workflows/ci.yml`): backend tests on Python 3.11, 3.12 and 3.13, security scans (gitleaks, semgrep, zizmor, pip-audit), cockpit lint/typecheck/tests/build, Playwright end-to-end tests, a Lighthouse gate and Docker image builds with a container smoke test.
+CI runs on every push (`.github/workflows/ci.yml`): backend tests on Python 3.11, 3.12 and 3.13, control-plane tests on a real PostgreSQL (row locks, migrations), security scans (gitleaks, semgrep, zizmor, pip-audit), cockpit lint/typecheck/tests/build, Playwright end-to-end tests in Chromium, Firefox and WebKit, a Lighthouse gate and Docker image builds with a container smoke test.
 
 ---
 

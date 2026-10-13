@@ -265,7 +265,7 @@ pytest                                  # backend, offline
 cd web && npm test && npm run e2e       # kokpit: testy jednostkowe; e2e wymaga API w trybie cloud (web/README.md)
 ```
 
-CI (`.github/workflows/ci.yml`): pytest na Python 3.11/3.12/3.13, smoke API przez curl, skanery (gitleaks, semgrep, zizmor, pip-audit), kokpit (eslint, tsc, vitest, build), testy end-to-end Playwright, Lighthouse (mobile), build obrazów Docker (API i kokpit) wraz ze smoke w kontenerze.
+CI (`.github/workflows/ci.yml`): pytest na Python 3.11/3.12/3.13, testy control plane na prawdziwym PostgreSQL (blokady wierszy, migracje), smoke API przez curl, skanery (gitleaks, semgrep, zizmor, pip-audit), kokpit (eslint, tsc, vitest, build), testy end-to-end Playwright w Chromium, Firefoksie i WebKicie, Lighthouse (mobile), build obrazów Docker (API i kokpit) wraz ze smoke w kontenerze.
 
 Szczegółowa lista kontrolna: [VALIDATION.md](VALIDATION.md). Historia zmian: [CHANGELOG.md](CHANGELOG.md).
 
