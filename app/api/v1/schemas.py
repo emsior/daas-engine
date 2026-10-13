@@ -5,7 +5,7 @@ import re
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from app.control import scopes as sc
 from app.control.service import is_valid_email, normalize_email
@@ -16,6 +16,11 @@ JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 PipelineId = Literal["cs2_demo", "ecommerce_demo", "uksc_evidence"]
 UploadKind = Literal["csv", "xlsx", "package"]
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+#: Zakres dat runu (`JobCreate.period_from/period_to`): najwczesniejsza dozwolona data i najdluzszy zakres w dniach
+#: (oba konce wlacznie). Starsze daty i dluzsze zakresy to niemal zawsze pomylka w formacie albo w roku.
+PERIOD_MIN_DATE = date(2000, 1, 1)
+PERIOD_MAX_DAYS = 400
 
 
 class Out(BaseModel):
@@ -208,6 +213,35 @@ class JobCreate(BaseModel):
     upload_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     force_mock: bool = False
     client_name: str | None = Field(default=None, max_length=200)
+    period_from: date | None = Field(
+        default=None, examples=["2026-08-01"],
+        description="first day of the requested report period (ISO `YYYY-MM-DD`, inclusive; not before 2000-01-01); "
+                    "only rows dated on or after it are counted. `ecommerce_demo` only; `null` = no lower bound")
+    period_to: date | None = Field(
+        default=None, examples=["2026-08-07"],
+        description="last day of the requested report period (ISO `YYYY-MM-DD`, inclusive); not before `period_from` "
+                    f"and at most {PERIOD_MAX_DAYS} days after it counting both ends. `ecommerce_demo` only; "
+                    "`null` = no upper bound")
+
+    @field_validator("period_from", "period_to")
+    @classmethod
+    def _not_too_old(cls, value: date | None) -> date | None:
+        if value is not None and value < PERIOD_MIN_DATE:
+            raise ValueError(f"date must not be earlier than {PERIOD_MIN_DATE.isoformat()}")
+        return value
+
+    @field_validator("period_to")
+    @classmethod
+    def _period_order(cls, value: date | None, info: ValidationInfo) -> date | None:
+        """Kolejnosc i dlugosc zakresu; blad ma `loc` = `period_to` (pole `period_from` jest juz zwalidowane)."""
+        start = info.data.get("period_from")
+        if value is None or start is None:
+            return value
+        if value < start:
+            raise ValueError("period_to must not be earlier than period_from")
+        if (value - start).days + 1 > PERIOD_MAX_DAYS:
+            raise ValueError(f"the period must not be longer than {PERIOD_MAX_DAYS} days")
+        return value
 
 
 class JobOut(BaseModel):
@@ -222,6 +256,10 @@ class JobOut(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    period_from: date | None = Field(default=None, description="requested first day of the report period "
+                                                               "(`JobCreate.period_from`); `null` = no lower bound")
+    period_to: date | None = Field(default=None, description="requested last day of the report period "
+                                                             "(`JobCreate.period_to`); `null` = no upper bound")
 
 
 class JobPage(BaseModel):

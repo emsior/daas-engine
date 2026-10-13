@@ -88,6 +88,9 @@ export interface UploadPreview {
 export interface CreateJobRequest {
   pipeline: KnownPipeline;
   upload_id: string;
+  /** Zamówiony okres raportu (ISO `YYYY-MM-DD`, włącznie; tylko `ecommerce_demo`); pominięty = bez granicy. */
+  period_from?: string | null;
+  period_to?: string | null;
 }
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -104,6 +107,9 @@ export interface Job {
   started_at: string | null;
   finished_at: string | null;
   error_code: string | null;
+  /** Okres zamówiony przy starcie zadania (ISO `YYYY-MM-DD`, włącznie); null = bez granicy z tej strony. */
+  period_from?: string | null;
+  period_to?: string | null;
 }
 
 /** Zdarzenia SSE z `GET /orgs/{id}/jobs/{job_id}/events`. */

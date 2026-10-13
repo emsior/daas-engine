@@ -8,7 +8,7 @@ import logging
 import time
 import uuid
 from collections.abc import Callable
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -109,7 +109,8 @@ class PipelineRunner:
             if pipeline == "cs2_demo":
                 src, metrics, records = self._run_cs2(run_id, request.force_mock)
             elif pipeline == "ecommerce_demo":
-                src, metrics, records = self._run_ecommerce(run_id, request.force_mock, request.source_path)
+                src, metrics, records = self._run_ecommerce(run_id, request.force_mock, request.source_path,
+                                                            period=(request.period_from, request.period_to))
             elif pipeline == "uksc_evidence":
                 src, metrics, records = self._run_uksc(run_id, request.force_mock, request.source_path,
                                                        request.client_name)
@@ -170,8 +171,13 @@ class PipelineRunner:
         n = self.db.write_cs2_matches(run_id, src.records, src.data_status.value)
         return src, transform_cs2(src.records), n
 
-    def _run_ecommerce(self, run_id: str, force_mock: bool, source_path: str | None = None) -> tuple[SourceResult, Any, int]:
+    def _run_ecommerce(self, run_id: str, force_mock: bool, source_path: str | None = None,
+                       period: tuple[date | None, date | None] = (None, None)) -> tuple[SourceResult, Any, int]:
         src = EcommerceSource(self.settings).fetch(force_mock=force_mock, source_path=source_path)
+        if period != (None, None):
+            # zakres zamowiony przez klienta: filtr PRZED zapisem i metrykami (raport, DuckDB i zakres runu
+            # widza te same rekordy); zero rekordow po filtrze = istniejaca sciezka `no_records`
+            src = _filter_period(src, *period)
         n = self.db.write_ecommerce_orders(run_id, src.records, src.data_status.value)
         return src, transform_ecommerce(src.records), n
 
@@ -206,6 +212,29 @@ class PipelineRunner:
             httpx.post(self.settings.discord_webhook_url, json={"content": content}, timeout=5.0)
         except Exception as exc:  # noqa: BLE001
             log.warning("discord notify failed: %s", exc)
+
+
+def _day(value: Any) -> date | None:
+    """Data rekordu jako `date` (`datetime` -> sam dzien); inny typ -> None (rekord poza kazdym zakresem)."""
+    if isinstance(value, datetime):
+        return value.date()
+    return value if isinstance(value, date) else None
+
+
+def _filter_period(src: SourceResult, start: date | None, end: date | None) -> SourceResult:
+    """Rekordy z data (pole `date`) w zakresie `start..end` wlacznie; None = brak granicy z tej strony.
+
+    `detail` dostaje dopisek z zakresem i licznikami (bez danych klienta), np.
+    `period 2026-08-01..2026-08-07 (8 of 15 records)`."""
+    total = len(src.records)
+    kept = [r for r in src.records
+            if (day := _day(r.get("date"))) is not None
+            and (start is None or day >= start) and (end is None or day <= end)]
+    label = f"{start.isoformat() if start else ''}..{end.isoformat() if end else ''}"
+    note = f"period {label} ({len(kept)} of {total} records)"
+    src.records = kept
+    src.detail = f"{src.detail} | {note}" if src.detail else note
+    return src
 
 
 def _summary(metrics: Any) -> dict[str, Any]:

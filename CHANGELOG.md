@@ -66,6 +66,14 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   content) with the SSRF rules and IP pinning of the signed webhooks, a single attempt with
   `DAAS_NOTIFY_WEBHOOK_TIMEOUT_SEC`, independent of the run e-mail, audited as `schedule.webhook_notified`; the
   cockpit section "Chat notification" sets it.
+- **Report period and XLSX over MCP.** `POST .../jobs` and the MCP tool `start_run` take `period_from`/`period_to`
+  (ISO dates, inclusive, either optional; at most 400 days, not before 2000-01-01): an `ecommerce_demo` run counts only
+  the orders dated in that range (filtered before storage and metrics; the source line names the period and the kept
+  records; a period without orders ends `no_records` and uses no run of the plan); other pipelines answer
+  `422 period_not_supported`. The job (`JobOut`, MCP `get_job`) keeps the requested period, `job.created` audits it and
+  MCP reuses a pending job only for the same upload, pipeline and period. New MCP tool `upload_xlsx` (13 tools): an
+  XLSX workbook as base64 through the same checks as the REST upload, `DAAS_MCP_MAX_UPLOAD_BYTES` counted on the
+  decoded file.
 
 ### Fixed
 
