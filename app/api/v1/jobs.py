@@ -44,6 +44,15 @@ def job_out(job: Job) -> JobOut:
     return JobOut.model_validate(job, from_attributes=True)
 
 
+def check_period(body: JobCreate) -> None:
+    """Zakres dat (`period_from`/`period_to`) tylko dla pipeline'ow czytajacych eksport CSV/XLSX: runner filtruje
+    po dacie zamowienia. Inny pipeline -> 422 `period_not_supported` (zamiast po cichu policzyc wszystko)."""
+    if body.period_from is None and body.period_to is None:
+        return
+    if "csv" not in (PIPELINE_UPLOAD_KINDS[body.pipeline] or ()):
+        raise ProblemError(422, "period_not_supported", f"pipeline {body.pipeline} ignores period_from/period_to")
+
+
 async def load_job(db: AsyncSession, org_id: str, job_id: str) -> Job:
     """Zadanie organizacji albo 404 `not_found` (zadanie innej organizacji wyglada jak nieistniejace)."""
     job = (await db.execute(select(Job).where(Job.id == job_id, Job.org_id == org_id))).scalar_one_or_none()
@@ -58,6 +67,7 @@ async def queue_job(db: AsyncSession, state, org_id: str, principal: Principal, 
     i auto-uruchomienia po uploadzie. Rzuca `ProblemError` (422/404/409) zanim cokolwiek zapisze; po sukcesie
     robi commit i `submit`. Limity planu (429 `plan_limit`) i limit zadan na minute egzekwuje wolajacy
     (trasa: `plan_guard` i `enforce`; MCP: `check_plan_limit` i `submit_job`)."""
+    check_period(body)
     kinds = PIPELINE_UPLOAD_KINDS[body.pipeline]
     if state.settings.cloud and not body.force_mock:
         # M-7: w chmurze zrodlem jest wylacznie plik klienta (albo dane syntetyczne); nigdy zasoby operatora z env
@@ -82,10 +92,15 @@ async def queue_job(db: AsyncSession, state, org_id: str, principal: Principal, 
     if pending >= MAX_PENDING_JOBS:
         raise ProblemError(409, "queue_full", f"at most {MAX_PENDING_JOBS} queued or running jobs per organization")
     job = Job(org_id=org_id, pipeline=body.pipeline, upload_id=body.upload_id, force_mock=body.force_mock,
-              client_name=body.client_name, created_by=principal.actor_tag, message="queued")
+              client_name=body.client_name, created_by=principal.actor_tag, message="queued",
+              period_from=body.period_from, period_to=body.period_to)
     db.add(job)
     await db.flush()
     meta = {"job_id": job.id, "pipeline": body.pipeline, "upload_id": body.upload_id}
+    if body.period_from is not None:
+        meta["period_from"] = body.period_from.isoformat()
+    if body.period_to is not None:
+        meta["period_to"] = body.period_to.isoformat()
     if audit_reason:
         meta["reason"] = audit_reason
     await record_event(db, request, org_id=org_id, actor_type=principal.actor_type, actor_id=principal.actor_id,
@@ -105,9 +120,11 @@ async def submit_job(request: Request, db: AsyncSession, ctx: OrgContext, body: 
 @router.post(
     "/orgs/{org_id}/jobs", status_code=202, response_model=JobOut, summary="Start a job",
     description="Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with "
-                "`GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time.",
+                "`GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time. "
+                "`period_from`/`period_to` (inclusive, either may be omitted) limit an `ecommerce_demo` run to the "
+                "orders dated in that range; other pipelines answer `422 period_not_supported`.",
     responses={404: {"description": "Upload not found"}, 409: {"description": "Queue full"},
-               422: {"description": "Pipeline and upload do not match"}},
+               422: {"description": "Pipeline and upload do not match, or the period is invalid or not supported"}},
 )
 async def create_job(body: JobCreate, request: Request, response: Response, ctx: OrgContext = Depends(_WRITE),
                      db: AsyncSession = Depends(get_db)) -> JobOut:

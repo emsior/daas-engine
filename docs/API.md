@@ -81,7 +81,7 @@ Validation errors (`422`, `code: validation_error`) list `errors[]` with `loc`, 
 | 410 | `report_expired` | the report files were removed by the retention job; the run record and its SHA-256 stay (`POST .../verify` still works) |
 | 413 | `file_too_large`, `quota_exceeded` | file or upload quota too large |
 | 415 | `extension_not_allowed` | file type not accepted |
-| 422 | `validation_error`, `dpa_required`, `upload_required` (cloud: a pipeline that reads files needs `upload_id`, or `force_mock` for synthetic data), `mock_required`, `upload_kind_mismatch`, `upload_not_applicable`, `events_required` (webhook without events), `webhook_url_invalid`, `invalid_cursor`, upload checks (`schema_mismatch`, `decode_failed`, `header_missing`, `too_many_records`, `xlsx_invalid`) | invalid content |
+| 422 | `validation_error`, `dpa_required`, `upload_required` (cloud: a pipeline that reads files needs `upload_id`, or `force_mock` for synthetic data), `mock_required`, `upload_kind_mismatch`, `upload_not_applicable`, `period_not_supported` (`period_from`/`period_to` for a pipeline other than `ecommerce_demo`), `events_required` (webhook without events), `webhook_url_invalid`, `invalid_cursor`, upload checks (`schema_mismatch`, `decode_failed`, `header_missing`, `too_many_records`, `xlsx_invalid`) | invalid content |
 | 429 | `rate_limited`, `plan_limit`, `invitation_limit`, `sse_limit` | too many requests (header `Retry-After`), a monthly plan limit is used up, the invitation limit (20 per organization per 24 h, 5 per minute per caller) or the open event-stream limit is reached |
 | 500 | `report_integrity_error` | the stored report no longer matches its recorded SHA-256; it is not served |
 | 503 | `sessions_unavailable`, `webhooks_unavailable`, `shutting_down`, `unavailable` | the server lacks a required setting, is not ready, or is shutting down (`shutting_down` on a new event stream: retry after `Retry-After`) |
@@ -116,7 +116,7 @@ Rate limits are per client address and per key and are kept in process memory; r
 | POST | `/api/v1/orgs/{org_id}/api-keys` | `keys:manage` | 201 | 403, 409, 422 | create a key; the full key appears once |
 | DELETE | `/api/v1/orgs/{org_id}/api-keys/{key_id}` | `keys:manage` | 204 | 403, 404 | revoke a key (immediate) |
 | POST | `/api/v1/orgs/{org_id}/uploads` | `uploads:write` | 201 | 413, 415, 422, 429 | upload CSV, XLSX or a collector package (`.json`); `auto_job_id` when the schedule auto-runs it |
-| POST | `/api/v1/orgs/{org_id}/jobs` | `runs:write` | 202 | 404, 409, 422, 429 | start a pipeline run (`Location` header) |
+| POST | `/api/v1/orgs/{org_id}/jobs` | `runs:write` | 202 | 404, 409, 422, 429 | start a pipeline run (`Location` header); optional report period `period_from`/`period_to` |
 | GET | `/api/v1/orgs/{org_id}/jobs` | `runs:read` | 200 | 404 | list jobs; filter `status` |
 | GET | `/api/v1/orgs/{org_id}/jobs/{job_id}` | `runs:read` | 200 | 404 | job state and progress |
 | POST | `/api/v1/orgs/{org_id}/jobs/{job_id}/cancel` | `runs:write` | 200 | 404, 409 | cancel a queued job |
@@ -171,6 +171,22 @@ curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/c0a8.../report?fmt=ht
 The upload answer carries `warnings[]` (Polish text, not error codes) about what the mapper did with the data: numbers it could not read or read from an ambiguous thousand/decimal separator, rows with a negative revenue kept as corrections, rows skipped for an unreadable date or missing revenue, duplicate order ids (first one kept), a missing cost column, a numeric cell longer than 64 characters (not parsed; counted among the unreadable numbers), and for XLSX the cells with formulas that have no stored value ("N komórek z formułami bez zapisanych wartości — zapisz plik ponownie w Excelu/LibreOffice"; such cells are read as empty because formulas are never evaluated). The XLSX warning appears in the v1 upload answer and in the legacy `POST /upload` of `selfhost`. The same file always gives the same warnings; the upload is still `ready` when they appear.
 
 Limits: CSV and XLSX up to 10 MiB (CSV at most 100 000 rows; XLSX without macros, at most 200 000 rows, 20 sheets and 256 columns); a collector package up to 5 MiB. A job is accepted for at most 20 queued or running jobs per organization; one run per organization executes at a time.
+
+### Report for a date range
+
+`POST .../jobs` accepts `period_from` and `period_to` (ISO `YYYY-MM-DD`, both inclusive; leave one out for an open range). An `ecommerce_demo` run then counts only the orders dated in that range, so a quarterly export gives the report for one week without cutting the file:
+
+```bash
+curl -sS -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"pipeline":"ecommerce_demo","upload_id":"3f2a...","period_from":"2026-08-01","period_to":"2026-08-07"}' \
+  "$DAAS/api/v1/orgs/$ORG/jobs"
+# {"id":"01J...","status":"queued","period_from":"2026-08-01","period_to":"2026-08-07",...}
+```
+
+- Validation (`422 validation_error`, `loc` names the field): `period_to` not before `period_from`, at most 400 days counting both ends, no date before 2000-01-01; a value that is not a `YYYY-MM-DD` date (`01.08.2026`, `2026-02-30`) is rejected too. Other pipelines (`uksc_evidence`, `cs2_demo`) answer `422 period_not_supported`.
+- The orders are filtered before they are stored and before the metrics, so the report, the week-over-week figures and the stored rows describe the same records. The job (`JobOut`: answer, list, SSE snapshots) carries the requested `period_from`/`period_to`; `period_from`/`period_to` of the run (`GET .../runs/{run_id}`) stay the first and last order date actually in the report, and `source_detail` (also the source line of the report) says how many records were kept: `period 2026-08-01..2026-08-07 (8 of 15 records)`.
+- A period without orders ends the job `failed` with `error_code: no_records`; such a run does not count towards the plan's run limit.
+- The audit event `job.created` records `period_from`/`period_to` when they are set. A job queued automatically after an upload (schedule) has no period.
 
 ### Report integrity (verify)
 

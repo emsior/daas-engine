@@ -288,7 +288,7 @@ export interface paths {
         put?: never;
         /**
          * Start a job
-         * @description Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with `GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time.
+         * @description Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with `GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time. `period_from`/`period_to` (inclusive, either may be omitted) limit an `ecommerce_demo` run to the orders dated in that range; other pipelines answer `422 period_not_supported`.
          */
         post: operations["create_job_api_v1_orgs__org_id__jobs_post"];
         delete?: never;
@@ -920,6 +920,18 @@ export interface components {
              */
             force_mock: boolean;
             /**
+             * Period From
+             * @description first day of the requested report period (ISO `YYYY-MM-DD`, inclusive; not before 2000-01-01); only rows dated on or after it are counted. `ecommerce_demo` only; `null` = no lower bound
+             * @example 2026-08-01
+             */
+            period_from?: string | null;
+            /**
+             * Period To
+             * @description last day of the requested report period (ISO `YYYY-MM-DD`, inclusive); not before `period_from` and at most 400 days after it counting both ends. `ecommerce_demo` only; `null` = no upper bound
+             * @example 2026-08-07
+             */
+            period_to?: string | null;
+            /**
              * Pipeline
              * @example ecommerce_demo
              * @enum {string}
@@ -943,6 +955,16 @@ export interface components {
             id: string;
             /** Message */
             message?: string | null;
+            /**
+             * Period From
+             * @description requested first day of the report period (`JobCreate.period_from`); `null` = no lower bound
+             */
+            period_from?: string | null;
+            /**
+             * Period To
+             * @description requested last day of the report period (`JobCreate.period_to`); `null` = no upper bound
+             */
+            period_to?: string | null;
             /** Pipeline */
             pipeline: string;
             /** Progress */
@@ -2203,7 +2225,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Pipeline and upload do not match */
+            /** @description Pipeline and upload do not match, or the period is invalid or not supported */
             422: {
                 headers: {
                     [name: string]: unknown;

@@ -40,11 +40,23 @@ class RunRequest(BaseModel):
                     "Dla plików z POST /upload użyj upload_id. Wykluczone z upload_id.",
     )
     client_name: str | None = Field(default=None, description="Nazwa klienta do nagłówka raportu")
+    period_from: date | None = Field(
+        default=None, description="First day of the requested period (inclusive); ecommerce_demo counts only "
+                                  "orders dated on or after it. Null = no lower bound")
+    period_to: date | None = Field(
+        default=None, description="Last day of the requested period (inclusive); ecommerce_demo counts only "
+                                  "orders dated on or before it. Null = no upper bound")
 
     @model_validator(mode="after")
     def _one_source(self) -> RunRequest:
         if self.upload_id and self.source_path:
             raise ValueError("podaj upload_id albo source_path, nie oba")
+        return self
+
+    @model_validator(mode="after")
+    def _period_order(self) -> RunRequest:
+        if self.period_from and self.period_to and self.period_from > self.period_to:
+            raise ValueError("period_to must not be earlier than period_from")
         return self
 
 

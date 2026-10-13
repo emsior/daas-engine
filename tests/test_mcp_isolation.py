@@ -7,6 +7,7 @@ w `CASES` zawali `test_matrix_covers_every_tool`.
 """
 from __future__ import annotations
 
+import base64
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -20,9 +21,11 @@ from app.core.config import Settings
 from app.main import create_app
 from tests.conftest import PROJECT_ROOT, TEST_SECRET_KEY
 from tests.mcp_helpers import TOOL_NAMES, call_tool, error_code, ok, text_of, wait_job
+from tests.test_xlsx_upload import fixture_workbook, workbook_bytes
 from tests.v1_helpers import Seeded, get_rows, seed_org, with_db
 
 CSV_TEXT = (PROJECT_ROOT / "data" / "fixtures" / "client_export_pl.csv").read_text(encoding="utf-8")
+XLSX_B64 = base64.b64encode(workbook_bytes(fixture_workbook())).decode("ascii")
 UKSC_RUN_ID = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 
 
@@ -94,6 +97,7 @@ CASES: list[tuple[str, Callable[[World], dict[str, Any]], str | Check]] = [
     ("list_pipelines", lambda w: {}, lambda w, d: None),
     ("list_uploads", lambda w: {"limit": 100}, _no_upload_of_b),
     ("upload_csv", lambda w: {"filename": "a.csv", "content": CSV_TEXT}, _a_upload_only),
+    ("upload_xlsx", lambda w: {"filename": "a.xlsx", "content_base64": XLSX_B64}, _a_upload_only),
     ("start_run", lambda w: {"upload_id": w.b_upload_id, "pipeline": "ecommerce_demo"}, "not_found"),
     ("get_job", lambda w: {"job_id": w.b_job_id}, "not_found"),
     ("list_runs", lambda w: {"limit": 100}, _empty),
@@ -119,6 +123,18 @@ def test_key_of_a_never_reaches_resources_of_b(world: World, tool, args, expect)
     serialized = repr(result)
     for secret in world.b_secrets:
         assert secret not in serialized, (tool, secret)
+
+
+@pytest.mark.parametrize("period", [{"period_from": "2026-08-01", "period_to": "2026-08-07"},
+                                    {"period_to": "2026-08-07"}], ids=["week", "open-start"])
+def test_start_run_with_a_period_on_an_upload_of_b_is_not_found(world: World, period: dict[str, str]):
+    # okres nie zmienia konwencji: upload B pod kluczem A wyglada jak nieistniejacy (i nie powstaje zadanie)
+    result = call_tool(world.client, world.a.api_key, "start_run",
+                       {"upload_id": world.b_upload_id, "pipeline": "ecommerce_demo", **period})
+    assert error_code(result) == "not_found", text_of(result)
+    for secret in world.b_secrets:
+        assert secret not in repr(result), secret
+    assert get_rows(world.settings, models.Job, models.Job.org_id == world.a.org_id) == []
 
 
 def test_second_report_tool_of_b_is_hidden_too(world: World):

@@ -17,6 +17,7 @@ from tests.conftest import PROJECT_ROOT, TEST_API_KEY
 from tests.mcp_helpers import (
     MCP,
     TOOL_NAMES,
+    WRITE_TOOLS,
     call_tool,
     error_code,
     handshake,
@@ -73,6 +74,7 @@ def test_handshake_and_tool_list(cloud_client, org):
     r = post(cloud_client, rpc("tools/list"), org.api_key)
     assert r.status_code == 200 and r.headers["content-type"].startswith("application/json")
     tools = r.json()["result"]["tools"]
+    assert len(tools) == len(TOOL_NAMES) == 13
     assert sorted(t["name"] for t in tools) == sorted(TOOL_NAMES)
     for tool in tools:
         assert tool["inputSchema"]["type"] == "object", tool["name"]
@@ -81,13 +83,24 @@ def test_handshake_and_tool_list(cloud_client, org):
         hints = tool["annotations"]
         assert {"readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint"} <= set(hints), tool["name"]
         assert hints["openWorldHint"] is False and hints["destructiveHint"] is False
-        assert hints["readOnlyHint"] is (tool["name"] not in ("upload_csv", "start_run"))
+        assert hints["readOnlyHint"] is (tool["name"] not in WRITE_TOOLS), tool["name"]
     by_name = {t["name"]: t for t in tools}
-    for name in ("get_report", "get_run", "get_evidence", "list_uploads", "upload_csv"):  # tresc z plikow klienta
-        assert mcp_tools.UNTRUSTED in by_name[name]["description"], name
+    for name in ("get_report", "get_run", "get_evidence", "list_uploads", "upload_csv", "upload_xlsx"):
+        assert mcp_tools.UNTRUSTED in by_name[name]["description"], name  # tresc z plikow klienta
     assert "auto_job_id" in by_name["upload_csv"]["description"] and "reused" in by_name["start_run"]["description"]
+    assert "auto_job_id" in by_name["upload_xlsx"]["description"]
+    assert "DAAS_MCP_MAX_BODY_BYTES" in by_name["upload_xlsx"]["description"]
     assert by_name["list_uploads"]["inputSchema"]["properties"]["limit"]["maximum"] == 100
     assert by_name["upload_csv"]["inputSchema"]["properties"]["filename"]["maxLength"] == 128
+    xlsx_input = by_name["upload_xlsx"]["inputSchema"]
+    assert xlsx_input["required"] == ["filename", "content_base64"]
+    assert xlsx_input["properties"]["filename"]["maxLength"] == 128
+    assert xlsx_input["properties"]["sheet"]["anyOf"][0]["maxLength"] == 64
+    assert by_name["upload_xlsx"]["annotations"]["idempotentHint"] is False
+    run_input = by_name["start_run"]["inputSchema"]
+    assert run_input["required"] == ["upload_id", "pipeline"]
+    for field in ("period_from", "period_to"):
+        assert run_input["properties"][field]["anyOf"][0] == {"format": "date", "type": "string"}, field
 
 
 def test_stateless_requests_need_no_session_and_answer_json(cloud_client, org):
@@ -235,6 +248,9 @@ def test_every_pipeline_has_an_mcp_doc_entry():
         kinds = mcp_tools.v1_jobs.PIPELINE_UPLOAD_KINDS[name]
         assert description.endswith(".") and example, name
         assert (spec.kind is None) == (kinds is None), name  # zgodnosc z rejestrem rodzajow uploadu
+        # `kinds` = wszystkie rodzaje z rejestru (paczka kolektora to plik JSON), `kind` = pierwszy z nich
+        assert spec.kinds == ["json" if k == "package" else k for k in kinds or ()], name
+        assert spec.kind == (spec.kinds[0] if spec.kinds else None), name
 
 
 def test_expired_report_is_report_expired(cloud_client, cloud_settings, org):
@@ -320,7 +336,8 @@ def test_upload_csv_with_auto_run_reports_the_job_and_start_run_reuses_it(cloud_
     # agent, ktory mimo to wola start_run (przeplyw z INSTRUCTIONS), dostaje to samo zadanie zamiast drugiego runu
     started = call_tool(cloud_client, org.api_key, "start_run", {"upload_id": up["id"], "pipeline": "ecommerce_demo"})
     same = ok(started)
-    assert same == {"job_id": up["auto_job_id"], "status": "queued", "run_id": None, "reused": True}
+    assert same == {"job_id": up["auto_job_id"], "status": "queued", "run_id": None, "reused": True,
+                    "period_from": None, "period_to": None}
     assert "already queued" in text_of(started) and len(get_rows(cloud_settings, models.Job)) == 1
 
     # po zakonczeniu tamtego zadania start_run tworzy nowe (ponowne przeliczenie jest dozwolone)

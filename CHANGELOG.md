@@ -52,6 +52,14 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   is never sent twice; a stored time zone that is no longer known disables that reminder with an audit entry instead
   of failing every tick. Migration `0004` adds `org_schedules`; the cockpit has a "Schedule and notifications" section
   in Settings (read only for members).
+- **Report period and XLSX over MCP.** `POST .../jobs` and the MCP tool `start_run` take `period_from`/`period_to`
+  (ISO dates, inclusive, either optional; at most 400 days, not before 2000-01-01): an `ecommerce_demo` run counts only
+  the orders dated in that range (filtered before storage and metrics; the source line names the period and the kept
+  records; a period without orders ends `no_records` and uses no run of the plan); other pipelines answer
+  `422 period_not_supported`. The job (`JobOut`, MCP `get_job`) keeps the requested period, `job.created` audits it and
+  MCP reuses a pending job only for the same upload, pipeline and period. New MCP tool `upload_xlsx` (13 tools): an
+  XLSX workbook as base64 through the same checks as the REST upload, `DAAS_MCP_MAX_UPLOAD_BYTES` counted on the
+  decoded file.
 
 ### Fixed
 
