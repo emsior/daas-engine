@@ -9,6 +9,7 @@ import type {
   CreateOrgRequest,
   CreateWebhookRequest,
   InviteRequest,
+  OAuthDecisionRequest,
   Role,
   ScheduleSettings,
   UpdateOrgRequest,
@@ -28,6 +29,8 @@ export const qk = {
   schedule: (org: string) => ["orgs", org, "schedule"] as const,
   dataHealth: (org: string, weeks: number) => ["orgs", org, "data-health", weeks] as const,
   job: (org: string, id: string) => ["orgs", org, "jobs", id] as const,
+  oauthRequest: (id: string) => ["oauth", "requests", id] as const,
+  oauthGrants: (org: string) => ["orgs", org, "oauth-grants"] as const,
 };
 
 /* --- sesja --- */
@@ -251,5 +254,38 @@ export function useDataHealth(org: string, weeks: number) {
     queryKey: qk.dataHealth(org, weeks),
     queryFn: ({ signal }) => api.getDataHealth(org, weeks, signal),
     placeholderData: keepPreviousData,
+/* --- OAuth: zgoda i połączone aplikacje --- */
+
+/** Prośba o dostęp jest jednorazowa: bez ponawiania (404/410 to stan, nie awaria) i bez odświeżania po decyzji. */
+export function useOAuthRequest(id: string | null) {
+  return useQuery({
+    queryKey: qk.oauthRequest(id ?? "none"),
+    queryFn: ({ signal }) => api.getOAuthRequest(id ?? "", signal),
+    enabled: id !== null,
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: Infinity,
+  });
+}
+
+export function useDecideOAuthRequest(id: string) {
+  return useMutation({
+    mutationFn: (body: OAuthDecisionRequest) => api.decideOAuthRequest(id, body),
+  });
+}
+
+export function useOAuthGrants(org: string, enabled = true) {
+  return useQuery({
+    queryKey: qk.oauthGrants(org),
+    queryFn: () => api.listOAuthGrants(org),
+    enabled,
+  });
+}
+
+export function useRevokeOAuthGrant(org: string) {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (tokenId: string) => api.revokeOAuthGrant(org, tokenId),
+    onSuccess: () => client.invalidateQueries({ queryKey: qk.oauthGrants(org) }),
   });
 }

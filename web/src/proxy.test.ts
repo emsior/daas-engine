@@ -35,4 +35,18 @@ describe("proxy: sprawdzenie sesji w API", () => {
     expect(response.status).toBe(307);
     expect(response.headers.get("location")).toBe("https://app.example.test/login");
   });
+
+  it("ze strony zgody OAuth przekierowuje na /login z parametrem next (ścieżka i zapytanie)", async () => {
+    fetchMock.mockResolvedValue(new Response("{}", { status: 401 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await proxy(
+      new NextRequest("https://app.example.test/oauth/consent?request=01ARZ3NDEKTSV4RRFFQ69G5FAV"),
+    );
+    expect(response.status).toBe(307);
+    const location = new URL(response.headers.get("location") ?? "");
+    expect(location.origin + location.pathname).toBe("https://app.example.test/login");
+    expect(location.searchParams.get("next")).toBe(
+      "/oauth/consent?request=01ARZ3NDEKTSV4RRFFQ69G5FAV",
+    );
+  });
 });

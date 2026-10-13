@@ -1,6 +1,7 @@
 /**
  * Proxy Next.js 16 (dawniej middleware): CSP z nonce, nagłówki bezpieczeństwa,
  * wybór języka (?lang=) i przekierowanie na /login, gdy `GET /api/v1/me` zwraca 401.
+ * Ze strony zgody OAuth (`/oauth/...`) przekierowanie niesie `next`: po logowaniu użytkownik wraca do decyzji.
  *
  * Next 16 przemianował konwencję `middleware.ts` na `proxy.ts` (stary plik działa, ale jest
  * oznaczony jako przestarzały); logika jest ta sama.
@@ -17,6 +18,8 @@ import {
 import { normalizeLocale } from "@/i18n";
 
 const SESSION_CHECK_TIMEOUT_MS = 3000;
+/** Ścieżki, na które wracamy po logowaniu (`/login?next=`): zgoda dla aplikacji czeka na decyzję. */
+const RETURN_AFTER_LOGIN = ["/oauth/"];
 
 /** Zwraca false tylko wtedy, gdy API jednoznacznie odpowiada 401. Awarie API nie wylogowują. */
 async function sessionRejected(request: NextRequest): Promise<boolean> {
@@ -63,6 +66,10 @@ export async function proxy(request: NextRequest) {
 
   if (!isPublicPath(request.nextUrl.pathname) && (await sessionRejected(request))) {
     const login = new URL("/login", request.url);
+    const { pathname, search } = request.nextUrl;
+    if (RETURN_AFTER_LOGIN.some((prefix) => pathname.startsWith(prefix))) {
+      login.searchParams.set("next", `${pathname}${search}`);
+    }
     return finish(NextResponse.redirect(login));
   }
 

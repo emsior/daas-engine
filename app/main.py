@@ -32,6 +32,7 @@ from app.control import service as control_service
 from app.control.executor import JobExecutor
 from app.control.mailer import build_mailer
 from app.control.notifications import RunNotifier
+from app.control.oauth import mount_oauth
 from app.control.retention import retention_loop
 from app.control.schedule import SchedulerLoop
 from app.control.tenancy import TenantRegistry
@@ -164,6 +165,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.retention_task = None
     app.state.mcp = build_mcp(settings)  # None, gdy DAAS_MCP_ENABLED=false
     app.state.scheduler = None
+    app.state.oauth = None  # serwer autoryzacji OAuth 2.1 dla konektorow MCP (tylko cloud; nizej)
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:
@@ -220,6 +222,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # POST /mcp (Streamable HTTP): zwykla trasa Starlette (endpoint ASGI), wiec poza OpenAPI, a pod middleware
         # aplikacji (request-id, naglowki bezpieczenstwa, metryki, CORS z `cors_origins`); docs/MCP.md
         app.router.routes.append(Route(MCP_PATH, endpoint=app.state.mcp.endpoint, include_in_schema=False))
+    if settings.cloud and settings.daas_oauth_enabled:
+        # OAuth 2.1 dla konektorow MCP (ChatGPT, Claude): trasy SDK /authorize, /token, /register, /revoke
+        # i /.well-known/oauth-* (poza OpenAPI, z limitem per IP); bez issuera ostrzezenie i brak tras (404)
+        app.state.oauth = mount_oauth(app, settings)
     if not settings.cloud:
         app.include_router(router)  # trasy legacy: tylko selfhost; w cloud odpowiadaja 404
     return app

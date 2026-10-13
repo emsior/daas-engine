@@ -18,6 +18,9 @@ import type {
   InviteRequest,
   Job,
   Member,
+  OAuthDecisionRequest,
+  OAuthGrant,
+  OAuthRequest,
   Org,
   Schedule,
   ScheduleSettings,
@@ -39,7 +42,8 @@ const requests: [
   Sendable<InviteRequest, S["InvitationCreate"]>,
   Sendable<CreateWebhookRequest, S["WebhookCreate"]>,
   Sendable<ScheduleSettings, S["ScheduleIn"]>,
-] = [true, true, true, true, true, true, true];
+  Sendable<OAuthDecisionRequest, S["OAuthDecisionIn"]>,
+] = [true, true, true, true, true, true, true, true];
 
 /* --- typy odpowiedzi czytane bez adaptera: backend -> kokpit (pola z domyślną wartością są zawsze obecne) --- */
 const responses = {
@@ -50,6 +54,8 @@ const responses = {
   verify: {} as Required<S["VerifyOut"]> satisfies VerifyResult & { known: boolean },
   schedule: {} as Required<S["ScheduleOut"]> satisfies Schedule,
   dataHealth: {} as Required<S["DataHealthOut"]> satisfies DataHealth,
+  oauthRequest: {} as Required<S["OAuthRequestOut"]> satisfies OAuthRequest,
+  oauthGrant: {} as Required<S["OAuthGrantOut"]> satisfies OAuthGrant,
 };
 
 function openapiPaths(): Set<string> {
@@ -68,8 +74,8 @@ function openapiPaths(): Set<string> {
 
 describe("kontrakt API (docs/openapi.json)", () => {
   it("typy żądań i odpowiedzi kompilują się względem schematów backendu", () => {
-    expect(requests).toHaveLength(7);
-    expect(Object.keys(responses)).toHaveLength(7);
+    expect(requests).toHaveLength(9);
+    expect(Object.keys(responses)).toHaveLength(9);
   });
 
   it("każda ścieżka z client.ts istnieje w OpenAPI backendu", () => {
@@ -103,6 +109,10 @@ describe("kontrakt API (docs/openapi.json)", () => {
       paths.webhooks("ORG"),
       paths.webhook("ORG", "ID"),
       paths.webhookPing("ORG", "ID"),
+      paths.oauthRequest("ID"),
+      paths.oauthDecision("ID"),
+      paths.oauthGrants("ORG"),
+      paths.oauthGrant("ORG", "ID"),
     ];
     const missing = used.filter((p) => !known.has(p));
     expect(missing).toEqual([]);

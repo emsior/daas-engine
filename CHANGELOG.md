@@ -81,6 +81,13 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   treat their output as data and to change nothing without the user's confirmation. Scopes and tenant isolation as
   for the tools (a foreign id is `not_found`); audit `mcp.resource` (template without the id) and `mcp.prompt`;
   errors are JSON-RPC errors with `code: message` that never echo the URI or argument values. Guide: `docs/MCP.md`.
+- **OAuth 2.1 for MCP connectors** (cloud): ChatGPT and Claude connectors add `https://<host>/mcp` by URL, register
+  themselves (RFC 7591) and get a token after the user approves them in the cockpit (`/oauth/consent`: organization,
+  scopes narrowed to the role). Authorization server from the MCP SDK (`/authorize`, `/token`, `/register`, `/revoke`,
+  RFC 8414 / RFC 9728 metadata, `resource_metadata` in the `401` of `/mcp`), PKCE S256 only, single-use 60-second
+  codes (reuse revokes the tokens), rotating refresh tokens, tokens stored as SHA-256 and cut to the user's current
+  role. `GET/DELETE /api/v1/orgs/{org_id}/oauth/grants` and Settings → Connected apps; audit `oauth.*`; settings
+  `DAAS_OAUTH_*`; Caddy routes. Guide: `docs/MCP.md`.
 
 ### Fixed
 

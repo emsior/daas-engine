@@ -131,6 +131,10 @@ Rate limits are per client address and per key and are kept in process memory; r
 | GET | `/api/v1/orgs/{org_id}/audit` | `audit:read` | 200 | 422 | audit log, newest first |
 | GET | `/api/v1/orgs/{org_id}/schedule` | `org:read` | 200 | 404 | schedule and notifications (defaults when never saved; the chat webhook address only masked) |
 | PUT | `/api/v1/orgs/{org_id}/schedule` | `org:manage` | 200 | 403, 404, 422 | save the schedule; recomputes `next_reminder_at`; an omitted `notify_webhook_url` stays unchanged |
+| GET | `/api/v1/oauth/requests/{request_id}` | S | 200 | 403, 404, 410 | consent screen of an OAuth connector: application, requested scopes, return host, the user's organizations with the scopes each role can grant |
+| POST | `/api/v1/oauth/requests/{request_id}/decision` | S | 200 | 403, 404, 409, 410, 422 | approve (`org_id`, optional `scopes`) or deny; answers `{redirect_to}` for the browser |
+| GET | `/api/v1/orgs/{org_id}/oauth/grants` | `org:manage` | 200 | 403, 404 | connected applications (OAuth) |
+| DELETE | `/api/v1/orgs/{org_id}/oauth/grants/{token_id}` | `org:manage` | 204 | 403, 404 | disconnect an application (revokes its tokens at once) |
 | GET | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 200 | 403 | list webhooks |
 | POST | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 201 | 409, 422, 503 | register an HTTPS endpoint; the signing secret appears once |
 | DELETE | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}` | `webhooks:manage` | 204 | 404 | delete |
@@ -318,6 +322,29 @@ curl -s -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" "$DAAS/a
 
   Delivery: one `POST` (`Content-Type: application/json`, UTF-8), no retries, timeout `DAAS_NOTIFY_WEBHOOK_TIMEOUT_SEC` (10 s), the same SSRF rules as the signed webhooks (public addresses only, the resolved IP is pinned, redirects are not followed); a `2xx` answer counts as sent. The `generic` body is **not signed**: the address itself is the secret — use the signed webhooks above when the receiver must verify the sender. Audit: `schedule.webhook_notified` (`meta`: `run_id`, `job_id`, `status` = run status `SUCCESS`/`PARTIAL`/`FAILED`, `channel` = kind, `sent`, `status_code` when the receiver answered, `error_type` on failure, e.g. `http_status`, `private_address`, `dns_failed`, `ReadTimeout`).
 - Reminders are sent by a loop inside the API process (cloud mode only, see `docs/DEPLOY.md`); a reminder that fell due while the server was down goes out once after the start, the next one is computed from that moment.
+
+## Connected applications (OAuth)
+
+In `cloud` mode AI assistants (ChatGPT and Claude connectors) connect to `/mcp` through OAuth 2.1 instead of an API key; the flow and the endpoints of the authorization server (`/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource/mcp`, outside `/api/v1` and outside `openapi.json`) are in [`MCP.md`](MCP.md#connect-from-chatgpt--claude-oauth). The API part is the consent screen of the cockpit and the list of connections:
+
+```bash
+# consent (user session + X-CSRF-Token); the id comes from /oauth/consent?request=<id>
+curl -s -b cookies.txt "$DAAS/api/v1/oauth/requests/$REQUEST"
+# {"request_id":"01J...","client_id":"6f1c...","client_name":"ChatGPT","scopes_requested":["runs:read","reports:read"],
+#  "redirect_host":"chatgpt.com","expires_at":"...","organizations":[{"org_id":"01J...","name":"Acme","role":"owner",
+#  "scopes_grantable":["runs:read","reports:read"]}]}
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -H "Content-Type: application/json" \
+  -d '{"approve":true,"org_id":"01J...","scopes":["runs:read"]}' "$DAAS/api/v1/oauth/requests/$REQUEST/decision"
+# {"redirect_to":"https://chatgpt.com/...?code=...&state=..."}
+
+curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/oauth/grants"
+# [{"token_id":"01J...","client_id":"6f1c...","client_name":"ChatGPT","user_id":"01J...","role":"owner",
+#   "scopes":["runs:read"],"created_at":"...","last_used_at":"...","expires_at":"..."}]
+```
+
+- The consent routes accept only a signed-in user (an API key gets `403 user_session_required`); the decision needs the CSRF header. A request that is not pending answers `404`, an expired one `410 expired`, a second decision `409 request_already_decided`.
+- Approve: the user must be a member of `org_id` (`403` otherwise, `422` when `org_id` is missing). Granted scopes = `scopes` (default: all) narrowed to the requested ones and to what the role allows; nothing left = `422 no_grantable_scopes`. `redirect_to` keeps the query of the registered redirect URI and adds `code` (single use, 60 seconds) and `state`; deny adds `error=access_denied`. Audit: `oauth.consent` (`client_id`, `scopes`).
+- Grants: one item per connection (its active refresh token); `token_id` changes when the application refreshes. `user_id` and `role` name who approved it (`role: null` = no longer a member); no e-mail and no token value. `DELETE` revokes the refresh token and every access token issued from it, also when the id came from a list made before a refresh. Audit: `oauth.token_revoked` (`reason: disconnected`).
 
 ## Usage and plan limits
 

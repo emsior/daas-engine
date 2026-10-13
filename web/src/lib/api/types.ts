@@ -386,6 +386,72 @@ export interface VerifyResult {
   format?: ReportFormat | null;
 }
 
+/* --- OAuth: konektory MCP (ChatGPT, Claude) --- */
+
+/** Zakresy, o które aplikacja może poprosić przez OAuth (`KEY_SCOPES` backendu). */
+export const OAUTH_SCOPES = [
+  "org:read",
+  "org:manage",
+  "members:manage",
+  "keys:manage",
+  "uploads:write",
+  "runs:read",
+  "runs:write",
+  "reports:read",
+  "usage:read",
+  "audit:read",
+  "webhooks:manage",
+] as const;
+export type OAuthScope = (typeof OAUTH_SCOPES)[number];
+
+/** Organizacja użytkownika na ekranie zgody: zakresy, których jego rola może udzielić. */
+export interface OAuthOrgOption {
+  org_id: string;
+  name: string;
+  role: Role;
+  scopes_grantable: string[];
+}
+
+/** `GET /oauth/requests/{id}`: prośba aplikacji o dostęp (ekran zgody). */
+export interface OAuthRequest {
+  request_id: string;
+  client_id: string;
+  /** Nazwa podana przez samą aplikację przy rejestracji; null = bez nazwy. */
+  client_name: string | null;
+  scopes_requested: string[];
+  /** Host, na który przeglądarka wróci po decyzji. */
+  redirect_host: string;
+  expires_at: string;
+  organizations: OAuthOrgOption[];
+}
+
+export interface OAuthDecisionRequest {
+  approve: boolean;
+  org_id?: string | null;
+  /** Zakresy do nadania; brak = wszystkie możliwe. */
+  scopes?: string[] | null;
+}
+
+/** Odpowiedź decyzji: adres powrotu do aplikacji (z kodem albo `error=access_denied`). */
+export interface OAuthDecision {
+  redirect_to: string;
+}
+
+/** Połączona aplikacja organizacji (`GET /orgs/{id}/oauth/grants`). */
+export interface OAuthGrant {
+  token_id: string;
+  client_id: string;
+  client_name: string | null;
+  /** Kto udzielił zgody; null = konto usunięte. */
+  user_id: string | null;
+  /** Bieżąca rola tej osoby; null = już nie należy do organizacji. */
+  role: Role | null;
+  scopes: string[];
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
+}
+
 /** Ciało błędu `application/problem+json` (RFC 9457) z rozszerzeniem `request_id`. */
 export interface ProblemDetails {
   type?: string;

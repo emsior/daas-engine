@@ -167,9 +167,10 @@ async def whoami(ctx: Context) -> Annotated[CallToolResult, WhoAmIOut]:
         octx = await call.org_context(db)
     settings = call.state.settings
     key = call.principal.key
-    out = WhoAmIOut(org_id=octx.org_id, org_name=octx.org.name, mode=settings.daas_mode,
-                    key_prefix=key.prefix if key is not None else None, scopes=sorted(call.principal.scopes),
-                    server_version=installed_version(settings.app_version),
+    auth = "oauth" if call.principal.kind == "oauth" else ("api_key" if key is not None else "deployment_key")
+    out = WhoAmIOut(org_id=octx.org_id, org_name=octx.org.name, mode=settings.daas_mode, auth=auth,
+                    key_prefix=key.prefix if key is not None else None, client_id=call.principal.oauth_client_id,
+                    scopes=sorted(call.principal.scopes), server_version=installed_version(settings.app_version),
                     protocol=ctx.request_context.protocol_version)
     return ok_result(f"Organization {out.org_name} ({out.org_id}), mode {out.mode}, "
                      f"{len(out.scopes)} scopes: {', '.join(out.scopes) or 'none'}.", out)
@@ -490,8 +491,8 @@ class ToolSpec:
 
 
 SPECS: tuple[ToolSpec, ...] = (
-    ToolSpec(whoami, None, "Shows the organization, mode and scopes of the API key in use; it changes nothing.",
-             title="Who am I"),
+    ToolSpec(whoami, None, "Shows the organization, mode, credential type and scopes of the API key or OAuth token "
+                           "in use; it changes nothing.", title="Who am I"),
     ToolSpec(list_pipelines, sc.RUNS_READ,
              "Lists the report pipelines with the input each one reads and an example; it starts nothing.",
              title="List pipelines"),

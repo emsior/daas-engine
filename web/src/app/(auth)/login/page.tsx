@@ -13,6 +13,7 @@ import { useT } from "@/i18n/provider";
 import { useRequestMagicLink, useVerifyMagicLink } from "@/lib/api/hooks";
 import { isApiError } from "@/lib/api/client";
 import { describeError } from "@/lib/errors";
+import { rememberNextPath, safeNextPath, takeRememberedNextPath } from "@/lib/next-path";
 import { extractToken, toSummary, validateEmail } from "@/lib/validation";
 import type { Me } from "@/lib/api/types";
 
@@ -51,8 +52,17 @@ function LoginView() {
   const [linkLost, setLinkLost] = useState(false);
 
   const tokenFromUrl = params.get("token");
+  // powrót po logowaniu (np. na ekran zgody OAuth): tylko ścieżki tego originu, zapamiętane na czas linku
+  const nextFromUrl = safeNextPath(params.get("next"));
 
-  const goAfterLogin = (me: Me) => router.replace(me.org ? "/" : "/onboarding");
+  useEffect(() => {
+    if (nextFromUrl) rememberNextPath(nextFromUrl);
+  }, [nextFromUrl]);
+
+  const goAfterLogin = (me: Me) => {
+    const next = takeRememberedNextPath() ?? nextFromUrl;
+    router.replace(me.org ? (next ?? "/") : "/onboarding");
+  };
 
   const failVerify = () => {
     setTokenOpen(true);

@@ -21,6 +21,10 @@ import type {
   Locale,
   Member,
   Me,
+  OAuthDecision,
+  OAuthDecisionRequest,
+  OAuthGrant,
+  OAuthRequest,
   Org,
   ProblemDetails,
   Role,
@@ -57,6 +61,10 @@ import {
   type WireWebhook,
   type WireWebhookPing,
 } from "./wire";
+import type { components } from "./schema";
+
+type WireOAuthRequest = components["schemas"]["OAuthRequestOut"];
+type WireOAuthGrant = components["schemas"]["OAuthGrantOut"];
 
 /* ------------------------------------------------------------------ */
 /* Błędy                                                               */
@@ -136,6 +144,11 @@ export const paths = {
   webhooks: (org: string) => `/orgs/${org}/webhooks`,
   webhook: (org: string, id: string) => `/orgs/${org}/webhooks/${id}`,
   webhookPing: (org: string, id: string) => `/orgs/${org}/webhooks/${id}/ping`,
+  /** Id prośby pochodzi z adresu strony zgody: kodujemy je, zanim trafi do ścieżki. */
+  oauthRequest: (id: string) => `/oauth/requests/${encodeURIComponent(id)}`,
+  oauthDecision: (id: string) => `/oauth/requests/${encodeURIComponent(id)}/decision`,
+  oauthGrants: (org: string) => `/orgs/${org}/oauth/grants`,
+  oauthGrant: (org: string, id: string) => `/orgs/${org}/oauth/grants/${id}`,
 } as const;
 
 /* ------------------------------------------------------------------ */
@@ -375,6 +388,25 @@ export const api = {
     request<void>(paths.webhook(org, id), { method: "DELETE" }),
   pingWebhook: async (org: string, id: string): Promise<WebhookPingResult> =>
     toWebhookPing(await request<WireWebhookPing>(paths.webhookPing(org, id), { method: "POST" })),
+
+  /* --- OAuth: zgoda na połączenie aplikacji (ChatGPT, Claude) i połączone aplikacje --- */
+  getOAuthRequest: async (id: string, signal?: AbortSignal): Promise<OAuthRequest> => {
+    const wire = await request<WireOAuthRequest>(paths.oauthRequest(id), { signal });
+    return { ...wire, client_name: wire.client_name ?? null };
+  },
+  decideOAuthRequest: (id: string, body: OAuthDecisionRequest) =>
+    request<OAuthDecision>(paths.oauthDecision(id), { method: "POST", json: body }),
+  listOAuthGrants: async (org: string): Promise<OAuthGrant[]> =>
+    (await request<WireOAuthGrant[]>(paths.oauthGrants(org))).map((grant) => ({
+      ...grant,
+      client_name: grant.client_name ?? null,
+      user_id: grant.user_id ?? null,
+      role: grant.role ?? null,
+      last_used_at: grant.last_used_at ?? null,
+      expires_at: grant.expires_at ?? null,
+    })),
+  revokeOAuthGrant: (org: string, id: string) =>
+    request<void>(paths.oauthGrant(org, id), { method: "DELETE" }),
 };
 
 /* ------------------------------------------------------------------ */

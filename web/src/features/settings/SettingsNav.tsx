@@ -19,6 +19,11 @@ export function SettingsNav() {
       label: t("settings.nav.members"),
       active: pathname.startsWith("/settings/members"),
     },
+    {
+      href: "/settings/connected-apps",
+      label: t("settings.connectedApps.nav"),
+      active: pathname.startsWith("/settings/connected-apps"),
+    },
   ];
   return (
     <nav aria-label={t("settings.nav.label")}>

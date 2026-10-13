@@ -43,18 +43,22 @@ LAST_USED_THROTTLE = timedelta(minutes=5)
 
 @dataclass(frozen=True)
 class Principal:
-    """Kto wola. `kind`: `api_key` (klucz organizacji), `selfhost_key` (klucz z env), `user` (sesja cookie)."""
+    """Kto wola. `kind`: `api_key` (klucz organizacji), `selfhost_key` (klucz z env), `user` (sesja cookie),
+    `oauth` (token dostepu konektora MCP, `app.control.oauth`: dziala w imieniu uzytkownika w organizacji zgody,
+    `org_id` i `scopes` jak u klucza, `user` = osoba, ktora udzielila zgody)."""
 
     kind: str
-    org_id: str | None = None  # klucze: ich organizacja; uzytkownik: None (czlonkostwa sprawdzane per org)
+    org_id: str | None = None  # klucze i OAuth: ich organizacja; uzytkownik: None (czlonkostwa sprawdzane per org)
     scopes: frozenset[str] = frozenset()
     user: User | None = field(default=None, repr=False)
     key: ApiKey | None = field(default=None, repr=False)
     session: Session | None = field(default=None, repr=False)
+    oauth_token_id: str | None = None  # OAuth: id tokenu dostepu (`oauth_tokens.id`)
+    oauth_client_id: str | None = None  # OAuth: klient (konektor), ktoremu wydano token
 
     @property
     def actor_type(self) -> str:
-        return "user" if self.kind == "user" else "key"
+        return "user" if self.kind in ("user", "oauth") else "key"
 
     @property
     def actor_id(self) -> str | None:
@@ -66,7 +70,7 @@ class Principal:
 
     @property
     def actor_tag(self) -> str | None:
-        """Znacznik w kolumnach `created_by`: `user:<id>` albo `key:<id>`."""
+        """Znacznik w kolumnach `created_by`: `user:<id>` (takze token OAuth) albo `key:<id>`."""
         return f"{self.actor_type}:{self.actor_id}" if self.actor_id else None
 
 

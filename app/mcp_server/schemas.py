@@ -18,7 +18,13 @@ class WhoAmIOut(BaseModel):
     org_id: str
     org_name: str
     mode: Literal["cloud", "selfhost"]
-    key_prefix: str | None = Field(default=None, description="visible key prefix; null for the deployment key")
+    auth: Literal["api_key", "oauth", "deployment_key"] = Field(
+        ..., description="credential of this request: an organization API key, an OAuth access token of a "
+                         "connector (ChatGPT, Claude, ...) or the selfhost deployment key")
+    key_prefix: str | None = Field(default=None, description="visible key prefix; null for the deployment key and "
+                                                             "OAuth tokens")
+    client_id: str | None = Field(default=None, description="OAuth client (connector) the token was issued to; "
+                                                            "null for API keys")
     scopes: list[str]
     server_version: str
     protocol: str = Field(..., description="MCP protocol version of this request")
