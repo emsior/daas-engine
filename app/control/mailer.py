@@ -144,3 +144,57 @@ def invitation_mail(settings: Settings, to: str, org_name: str, role: str, local
         body = (f"Zaproszono Cię do organizacji „{name}” jako {role}.\n"
                 f"Zaloguj się tym adresem e-mail, aby dołączyć: {link}\n")
     return OutgoingMail(to=to, subject=subject, body=body, link=link)
+
+
+def _cockpit_origin(settings: Settings) -> str:
+    return (settings.daas_cockpit_origin or "http://localhost:3000").rstrip("/")
+
+
+def reminder_mail(settings: Settings, to: str, org_name: str, locale: str) -> OutgoingMail:
+    """Cotygodniowe przypomnienie o eksporcie. Link do ekranu wgrywania w kokpicie, bez tokenu (logowanie jak zwykle)."""
+    link = f"{_cockpit_origin(settings)}/upload"
+    name = sanitize_org_name(org_name)
+    if locale == "en":
+        subject = "Time for this week's export"
+        body = (f"Time for the export for \"{name}\": upload the file and the report will be ready in a few minutes.\n\n"
+                f"{link}\n\n"
+                "You get this reminder because the weekly reminder is on in the organization settings.\n")
+    else:
+        subject = "Czas na cotygodniowy eksport"
+        body = (f"Czas na eksport dla „{name}” — wgraj plik, raport będzie gotowy po kilku minutach.\n\n"
+                f"{link}\n\n"
+                "Dostajesz to przypomnienie, bo w ustawieniach organizacji jest włączone cotygodniowe przypomnienie.\n")
+    return OutgoingMail(to=to, subject=subject, body=body, link=link)
+
+
+def run_finished_mail(settings: Settings, to: str, locale: str, *, org_name: str, pipeline: str, succeeded: bool,
+                      run_id: str, period: tuple[str | None, str | None], report_sha256: str | None,
+                      error_code: str | None) -> OutgoingMail:
+    """Powiadomienie o zakonczonym runie: metadane (pipeline, status, okres, hash, kod bledu) i link do widoku runu.
+    Zadnej tresci raportu ani danych klienta — dane zostaja w kokpicie."""
+    link = f"{_cockpit_origin(settings)}/runs/{run_id}"
+    name = sanitize_org_name(org_name)
+    first, last = period
+    if locale == "en":
+        subject = "Your report is ready" if succeeded else "The report run failed"
+        lines = [f"Organization: {name}", f"Pipeline: {pipeline}",
+                 f"Status: {'succeeded' if succeeded else 'failed'}"]
+        if first or last:
+            lines.append(f"Data period: {first or '?'} – {last or '?'}")
+        if report_sha256:
+            lines.append(f"Report SHA-256 (HTML): {report_sha256}")
+        if error_code and not succeeded:
+            lines.append(f"Error code: {error_code}")
+        lines += ["", f"Open the run in the cockpit: {link}"]
+    else:
+        subject = "Raport jest gotowy" if succeeded else "Przetwarzanie raportu nie powiodło się"
+        lines = [f"Organizacja: {name}", f"Pipeline: {pipeline}",
+                 f"Status: {'zakończony' if succeeded else 'błąd'}"]
+        if first or last:
+            lines.append(f"Okres danych: {first or '?'} – {last or '?'}")
+        if report_sha256:
+            lines.append(f"SHA-256 raportu (HTML): {report_sha256}")
+        if error_code and not succeeded:
+            lines.append(f"Kod błędu: {error_code}")
+        lines += ["", f"Otwórz run w kokpicie: {link}"]
+    return OutgoingMail(to=to, subject=subject, body="\n".join(lines) + "\n", link=link)

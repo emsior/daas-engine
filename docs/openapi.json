@@ -1531,6 +1531,147 @@
         "title": "RunPage",
         "type": "object"
       },
+      "ScheduleIn": {
+        "description": "Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna).",
+        "properties": {
+          "auto_run_on_upload": {
+            "default": false,
+            "description": "po uploadzie zakolejkuj zadanie dla `suggested_pipeline`",
+            "title": "Auto Run On Upload",
+            "type": "boolean"
+          },
+          "notify_on_finish": {
+            "default": false,
+            "description": "e-mail do czlonkow po zakonczeniu runu (sukces i blad)",
+            "title": "Notify On Finish",
+            "type": "boolean"
+          },
+          "reminder_enabled": {
+            "default": false,
+            "description": "cotygodniowe przypomnienie e-mail o eksporcie",
+            "title": "Reminder Enabled",
+            "type": "boolean"
+          },
+          "reminder_hour": {
+            "default": 8,
+            "description": "godzina (czas lokalny w `timezone`)",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Reminder Hour",
+            "type": "integer"
+          },
+          "reminder_skip_if_recent_upload": {
+            "default": true,
+            "description": "nie przypominaj, jesli w ostatnich 6 dniach byl upload",
+            "title": "Reminder Skip If Recent Upload",
+            "type": "boolean"
+          },
+          "reminder_weekday": {
+            "default": 0,
+            "description": "dzien tygodnia: 0 = poniedzialek, 6 = niedziela",
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Reminder Weekday",
+            "type": "integer"
+          },
+          "timezone": {
+            "default": "Europe/Warsaw",
+            "description": "strefa czasowa IANA, np. `Europe/Warsaw`",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "title": "ScheduleIn",
+        "type": "object"
+      },
+      "ScheduleOut": {
+        "properties": {
+          "auto_run_on_upload": {
+            "title": "Auto Run On Upload",
+            "type": "boolean"
+          },
+          "last_reminder_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ostatnia proba przypomnienia (UTC)",
+            "title": "Last Reminder At"
+          },
+          "next_reminder_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "najblizsze przypomnienie (UTC); `null` = przypomnienie wylaczone",
+            "title": "Next Reminder At"
+          },
+          "notify_on_finish": {
+            "title": "Notify On Finish",
+            "type": "boolean"
+          },
+          "reminder_enabled": {
+            "title": "Reminder Enabled",
+            "type": "boolean"
+          },
+          "reminder_hour": {
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Reminder Hour",
+            "type": "integer"
+          },
+          "reminder_skip_if_recent_upload": {
+            "title": "Reminder Skip If Recent Upload",
+            "type": "boolean"
+          },
+          "reminder_weekday": {
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Reminder Weekday",
+            "type": "integer"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` = ustawienia domyslne, nigdy nie zapisane",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "reminder_enabled",
+          "reminder_weekday",
+          "reminder_hour",
+          "timezone",
+          "reminder_skip_if_recent_upload",
+          "auto_run_on_upload",
+          "notify_on_finish"
+        ],
+        "title": "ScheduleOut",
+        "type": "object"
+      },
       "SessionOut": {
         "properties": {
           "csrf_token": {
@@ -1565,6 +1706,18 @@
       },
       "UploadOut": {
         "properties": {
+          "auto_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zadanie zakolejkowane automatycznie po uploadzie (harmonogram: `auto_run_on_upload`); `null` = brak auto-uruchomienia albo pominiete",
+            "title": "Auto Job Id"
+          },
           "bytes": {
             "title": "Bytes",
             "type": "integer"
@@ -3535,6 +3688,97 @@
         "summary": "Download a report",
         "tags": [
           "runs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/schedule": {
+      "get": {
+        "description": "Weekly export reminder, auto-run after upload and the e-mail when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`).",
+        "operationId": "get_schedule_api_v1_orgs__org_id__schedule_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get the schedule and notifications",
+        "tags": [
+          "schedule"
+        ]
+      },
+      "put": {
+        "description": "Replaces the whole schedule (an omitted field takes its default). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.",
+        "operationId": "put_schedule_api_v1_orgs__org_id__schedule_put",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Invalid weekday, hour or time zone"
+          }
+        },
+        "summary": "Save the schedule and notifications",
+        "tags": [
+          "schedule"
         ]
       }
     },

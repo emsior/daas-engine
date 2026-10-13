@@ -4,6 +4,7 @@ import {
   formatDate,
   formatDateRange,
   formatDateTime,
+  formatDateTimeInZone,
   formatNumber,
   formatPLN,
   formatPLNOrNd,
@@ -38,6 +39,14 @@ describe("format", () => {
 
   it("formatuje datę z godziną", () => {
     expect(formatDateTime("2026-10-09T08:05:00Z")).toBe("09.10.2026 10:05");
+  });
+
+  it("formatuje datę z godziną w podanej strefie (harmonogram), nieznana strefa = Warszawa", () => {
+    expect(formatDateTimeInZone("2026-10-19T06:00:00Z", "Europe/Warsaw")).toBe("19.10.2026 08:00");
+    expect(formatDateTimeInZone("2026-10-26T07:00:00Z", "Europe/Warsaw")).toBe("26.10.2026 08:00");
+    expect(formatDateTimeInZone("2026-10-19T06:00:00Z", "UTC")).toBe("19.10.2026 06:00");
+    expect(formatDateTimeInZone("2026-10-19T06:00:00Z", "Mars/Olympus")).toBe("19.10.2026 08:00");
+    expect(formatDateTimeInZone(null, "UTC")).toBe("—");
   });
 
   it("zwraca myślnik dla pustej lub niepoprawnej daty", () => {

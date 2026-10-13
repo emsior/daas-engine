@@ -25,6 +25,8 @@ import type {
   Role,
   ReportFormat,
   Run,
+  Schedule,
+  ScheduleSettings,
   UpdateOrgRequest,
   UploadPreview,
   Usage,
@@ -128,6 +130,7 @@ export const paths = {
   verify: (org: string) => `/orgs/${org}/verify`,
   evidence: (org: string) => `/orgs/${org}/evidence`,
   usage: (org: string) => `/orgs/${org}/usage`,
+  schedule: (org: string) => `/orgs/${org}/schedule`,
   webhooks: (org: string) => `/orgs/${org}/webhooks`,
   webhook: (org: string, id: string) => `/orgs/${org}/webhooks/${id}`,
   webhookPing: (org: string, id: string) => `/orgs/${org}/webhooks/${id}/ping`,
@@ -351,6 +354,9 @@ export const api = {
     }
   },
   usage: async (org: string): Promise<Usage> => toUsage(await request<WireUsage>(paths.usage(org))),
+  getSchedule: (org: string) => request<Schedule>(paths.schedule(org)),
+  updateSchedule: (org: string, body: ScheduleSettings) =>
+    request<Schedule>(paths.schedule(org), { method: "PUT", json: body }),
   verifyHash: (org: string, sha256: string) =>
     request<VerifyResult>(paths.verify(org), { method: "POST", json: { sha256 } }),
 

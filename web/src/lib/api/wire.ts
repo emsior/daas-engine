@@ -109,6 +109,7 @@ export function toUploadPreview(wire: WireUpload): UploadPreview {
     // paczka kolektora jest walidowana po stronie serwera już przy zapisie: bez wierszy do mapowania
     ready: wire.ready ?? isPackage,
     suggested_pipeline: wire.suggested_pipeline,
+    auto_job_id: wire.auto_job_id ?? null,
   };
 }
 

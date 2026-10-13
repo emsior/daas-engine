@@ -31,7 +31,9 @@ from app.control import db as control_db
 from app.control import service as control_service
 from app.control.executor import JobExecutor
 from app.control.mailer import build_mailer
+from app.control.notifications import RunNotifier
 from app.control.retention import retention_loop
+from app.control.schedule import SchedulerLoop
 from app.control.tenancy import TenantRegistry
 from app.control.webhooks import WebhookDispatcher
 from app.core.auth import API_KEY_HEADER
@@ -98,7 +100,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dispatcher = WebhookDispatcher(settings, app.state.db_sessionmaker)
         app.state.webhooks = dispatcher
         executor.listeners.append(dispatcher.on_run_finished)
+        # powiadomienie e-mail po runie (`notify_on_finish`): ten sam listener `run.finished`, wysylka w tle
+        notifier = RunNotifier(settings, app.state.db_sessionmaker, app.state.mailer)
+        app.state.notifier = notifier
+        executor.listeners.append(notifier.on_run_finished)
         await executor.start()
+        # przypomnienia o eksporcie: tylko cloud, jeden proces (workers=1), wylaczane DAAS_SCHEDULER_ENABLED=false
+        app.state.scheduler = None
+        if settings.cloud and settings.daas_scheduler_enabled:
+            app.state.scheduler = SchedulerLoop(settings, app.state.db_sessionmaker, app.state.mailer)
+            app.state.scheduler.start()
         # retencja (kasowanie po terminie): tylko cloud, cykliczne zadanie w tle
         app.state.retention_task = None
         if settings.cloud and settings.daas_retention_interval_min > 0:
@@ -117,8 +128,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if app.state.retention_task is not None:
                 app.state.retention_task.cancel()
                 await asyncio.gather(app.state.retention_task, return_exceptions=True)
+            if app.state.scheduler is not None:
+                await app.state.scheduler.stop()
             await executor.stop()
             await dispatcher.close()
+            await notifier.close()
             registry.close_all()
             await engine.dispose()
 
@@ -140,6 +154,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.runner = None  # ustawiane w lifespan (selfhost); w cloud zostaje None
     app.state.retention_task = None
     app.state.mcp = build_mcp(settings)  # None, gdy DAAS_MCP_ENABLED=false
+    app.state.scheduler = None
 
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> JSONResponse:

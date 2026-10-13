@@ -123,3 +123,32 @@ export function formatBytes(bytes: number): string {
   }
   return `${hardSpaces(new Intl.NumberFormat("pl-PL", { maximumFractionDigits: 1 }).format(value))}${NBSP}${units[unit]}`;
 }
+
+/**
+ * `19.10.2026 08:00` w podanej strefie IANA (np. strefa harmonogramu organizacji); nieznana strefa = Europe/Warsaw.
+ */
+export function formatDateTimeInZone(
+  input: string | number | Date | null | undefined,
+  timeZone: string,
+): string {
+  if (input === null || input === undefined || input === "") return "—";
+  const date = toDate(input);
+  if (!date) return "—";
+  let format: Intl.DateTimeFormat;
+  try {
+    format = new Intl.DateTimeFormat("pl-PL", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+      timeZone,
+    });
+  } catch {
+    return formatDateTime(date);
+  }
+  const p: Record<string, string> = {};
+  for (const part of format.formatToParts(date)) p[part.type] = part.value;
+  return `${p.day}.${p.month}.${p.year} ${p.hour}:${p.minute}`;
+}

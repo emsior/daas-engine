@@ -31,6 +31,7 @@ import type { Org, Webhook } from "@/lib/api/types";
 import { describeError } from "@/lib/errors";
 import { formatBytes, formatNumber } from "@/lib/format";
 import { isHttpsUrl, parseRetentionDays, toSummary } from "@/lib/validation";
+import { ScheduleSettingsCard } from "./ScheduleSettings";
 import { SettingsNav } from "./SettingsNav";
 
 const RETENTION_ID = "settings-retention";
@@ -373,13 +374,16 @@ function WebhooksCard({ orgId }: { orgId: string }) {
 
 export function GeneralSettings() {
   const t = useT();
-  const { org } = useSession();
+  const { org, me } = useSession();
+  // org:manage (zapis harmonogramu) maja role owner i admin; member widzi ustawienia tylko do odczytu
+  const canManage = me.role === "owner" || me.role === "admin";
 
   return (
     <div className="view">
       <PageHeading>{t("settings.title")}</PageHeading>
       <SettingsNav />
       <RetentionAndLlm org={org} />
+      <ScheduleSettingsCard orgId={org.id} canManage={canManage} />
       <UsageCard orgId={org.id} />
       <WebhooksCard orgId={org.id} />
     </div>

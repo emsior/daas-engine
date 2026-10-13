@@ -105,6 +105,10 @@ class Settings(BaseSettings):
     daas_retention_days: int = Field(default=90, ge=1, le=3650)
     #: Co ile minut tryb cloud uruchamia retencje (kasowanie uploadow, raportow i danych po terminie); 0 = wylaczone.
     daas_retention_interval_min: int = Field(default=60, ge=0, le=10080)
+    #: Petla harmonogramu (przypomnienia o eksporcie): tylko tryb cloud; `false` wylacza ja w tym procesie.
+    daas_scheduler_enabled: bool = True
+    #: Co ile sekund petla harmonogramu sprawdza terminy przypomnien (min. 5).
+    daas_scheduler_tick_sec: int = Field(default=60, ge=5, le=3600)
     daas_rate_limit_magic_email_per_min: int = Field(default=3, ge=0, description="POST /auth/magic-link, per e-mail")
     daas_rate_limit_magic_ip_per_min: int = Field(default=10, ge=0, description="POST /auth/magic-link, per IP")
     #: Odstepy miedzy ponowieniami dostawy webhooka, w sekundach (po jednej probie poczatkowej).

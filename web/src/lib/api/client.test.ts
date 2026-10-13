@@ -278,6 +278,46 @@ describe("client API", () => {
     expect(preview.ready).toBe(true);
     expect(preview.mapping).toEqual({});
     expect(preview.suggested_pipeline).toBe("uksc_evidence");
+    expect(preview.auto_job_id).toBeNull();
+  });
+
+  it("upload: przenosi auto_job_id (harmonogram: zadanie zakolejkowane po uploadzie)", async () => {
+    fetchMock.mockResolvedValue(
+      jsonResponse(
+        {
+          id: "u2",
+          kind: "csv",
+          filename: "d.csv",
+          bytes: 10,
+          sha256: "c".repeat(64),
+          created_at: "x",
+          retention_until: "y",
+          suggested_pipeline: "ecommerce_demo",
+          rows: 3,
+          ready: true,
+          auto_job_id: "01JOB",
+        },
+        { status: 201 },
+      ),
+    );
+    expect((await api.upload("o1", new File(["a;b"], "d.csv"))).auto_job_id).toBe("01JOB");
+  });
+
+  it("harmonogram: GET i PUT na /orgs/{id}/schedule", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ reminder_enabled: false }));
+    await api.getSchedule("o1");
+    await api.updateSchedule("o1", {
+      reminder_enabled: true,
+      reminder_weekday: 0,
+      reminder_hour: 8,
+      timezone: "Europe/Warsaw",
+      reminder_skip_if_recent_upload: true,
+      auto_run_on_upload: false,
+      notify_on_finish: false,
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toMatch(/\/orgs\/o1\/schedule$/);
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("GET");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("PUT");
   });
 
   it("evidence: checks -> controls; 404 = pusty raport", async () => {

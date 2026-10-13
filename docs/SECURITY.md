@@ -65,6 +65,7 @@ Rate limits per address and the audit trail use the client address that uvicorn 
 - Retention does **not** reach backups (`deploy/backup.sh` archives and any off-server copies), the technical audit trail (`audit.jsonl` and `audit_events`: identifiers and metadata, no customer content) or logs. Plan the lifetime of backups so that it matches the promise made to the customer.
 - Deleting an organization removes its control-plane records and its data directory.
 - The audit trail records who did what and when (identifiers, technical metadata, address); it does not record file names, file content, e-mail addresses or key values.
+- Scheduled e-mails (`PUT /orgs/{id}/schedule`, off by default) go only to the members of the organization (owner, admin, member); nobody else can be added as a recipient. The weekly reminder carries a fixed text and a link to the upload screen; the run e-mail carries the pipeline, status, data period, report SHA-256, error code and a link to the run. Neither contains report content, customer data from the file, the client name of the job or any sign-in token: the link opens the cockpit, which asks for the usual sign-in. The organization name in the text passes the same sanitizer as invitations (no URLs or domains, no control characters).
 - The data processing agreement (version 1, a draft awaiting legal review) is [`DPA_v1_PL.md`](DPA_v1_PL.md).
 
 ## Known limitations
@@ -72,6 +73,7 @@ Rate limits per address and the audit trail use the client address that uvicorn 
 These are accepted for 2.0 and documented so that nobody relies on more than is there:
 
 - Rate limits, the quota counter and pending webhook retries live in process memory: one worker only (the server refuses to start with more), counters reset on restart, and a restart drops retries in flight.
+- Scheduled reminders and run e-mails are sent from the application process. A reminder is claimed before it is sent, so a crash between the claim and the SMTP call loses that week's reminder instead of sending it twice; a run e-mail that was in flight during a restart is not sent again. A failed SMTP call is logged and audited (`sent: false`), not retried.
 - Webhook deliveries run in the application process and are not persisted: a restart loses retries still pending (only finished deliveries leave an audit entry).
 - Rotating `DAAS_SECRET_KEY` invalidates every webhook signing secret (secrets are derived from it) as well as all sessions; webhooks must be re-created to get new secrets.
 - Webhook addresses are checked when registered and resolved again at every delivery, but there is no pinning of the resolved address: a DNS rebinding race between the check and the connection is not excluded.

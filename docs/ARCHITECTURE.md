@@ -31,17 +31,18 @@ The mode changes which routes and credentials exist; pipelines, reports and the 
                           │   orgs, users, memberships, api_keys (hash),                   runtime/tenants/   │
                           │   sessions, magic_links, invitations, uploads (metadata),        <org_id>/        │
                           │   jobs, run_records (report hashes), audit_events,                 daas.duckdb    │
-                          │   usage_counters, webhooks                                         uploads/       │
+                          │   usage_counters, webhooks, org_schedules                          uploads/       │
                           │          ▲                                                         reports/       │
                           │          │ state, results                                          audit.jsonl    │
                           │   JobExecutor (queue, 1 run per org, global semaphore) ───────────► PipelineRunner │
                           │          │                                                                         │
-                          │          └─► listeners: usage, audit, webhook delivery (HMAC)                      │
+                          │          └─► listeners: usage, audit, webhook delivery (HMAC), run e-mail          │
+                          │   SchedulerLoop (cloud, every DAAS_SCHEDULER_TICK_SEC) ─► weekly export reminders  │
                           └────────────────────────────────────────────────────────────────────────────────────┘
-        outbound only: SMTP (sign-in links), webhooks you register, optional LLM provider
+        outbound only: SMTP (sign-in links, reminders, run e-mails), webhooks you register, optional LLM provider
 ```
 
-**Control plane** (`app/control/`): who may do what, and the trace of what happened. Models in `models.py`, migrations in `alembic/versions/` (`0001_initial` the schema, `0002_run_period` the data period of a run, `0003_retention_loginnonce_indexes` the report-purge marker, the sign-in link nonce and listing indexes; applied at start with `DAAS_AUTO_MIGRATE`, or by hand with `python -m app.cli migrate`). It stores metadata only: no customer file or report content. API keys, sign-in tokens and invitation tokens exist only as SHA-256 hashes. `RunRecord` keeps the SHA-256 of each report so `POST .../verify` can answer "is this one of ours" without reading the report.
+**Control plane** (`app/control/`): who may do what, and the trace of what happened. Models in `models.py`, migrations in `alembic/versions/` (`0001_initial` the schema, `0002_run_period` the data period of a run, `0003_retention_loginnonce_indexes` the report-purge marker, the sign-in link nonce and listing indexes, `0004_schedules` the per-organization schedule; applied at start with `DAAS_AUTO_MIGRATE`, or by hand with `python -m app.cli migrate`). It stores metadata only: no customer file or report content. API keys, sign-in tokens and invitation tokens exist only as SHA-256 hashes. `RunRecord` keeps the SHA-256 of each report so `POST .../verify` can answer "is this one of ours" without reading the report.
 
 **Data plane** (`app/control/tenancy.py`): everything that belongs to a customer, in one directory per organization.
 
@@ -65,8 +66,18 @@ runtime/
 - at most one run per organization at a time, at most `DAAS_MAX_CONCURRENT_RUNS` in the process;
 - state lives in the database, not in memory: after a restart `running` jobs become `failed` (`abandoned`) and `queued` jobs are queued again;
 - a `queued` job can be cancelled; a running one finishes;
-- on completion it stores the `RunRecord` with report hashes, increments the monthly usage counter, writes the audit event and notifies listeners (webhook delivery);
+- on completion it stores the `RunRecord` with report hashes, increments the monthly usage counter, writes the audit event and notifies listeners (webhook delivery, the run e-mail of `app/control/notifications.py` when the organization turned on `notify_on_finish`; both send in background tasks, so a slow receiver never holds the organization lock);
 - progress is published to an in-process bus; `GET .../events` turns it into Server-Sent Events (`status`, `progress`, `log`, `done`).
+
+### Schedule (`app/control/schedule.py`, `app/control/notifications.py`)
+
+One `org_schedules` row per organization (created on the first `PUT .../schedule`; without it the defaults apply). Three automations behind "the Monday report":
+
+- **Reminder.** `SchedulerLoop` starts with the application in `cloud` mode when `DAAS_SCHEDULER_ENABLED=true` (default) and wakes every `DAAS_SCHEDULER_TICK_SEC` seconds (default 60, minimum 5; the first pass runs right after the start). One pass selects `reminder_enabled AND next_reminder_at <= now` and handles each organization in its own transactions; an error in one organization is logged and the others go on. `send_reminder` first claims the slot with a conditional `UPDATE` (moves `next_reminder_at` to the next week and sets `last_reminder_at`), then mails the members: two passes or a restart in the middle never send twice (at most once). `compute_next_reminder` uses `zoneinfo`, so the local hour survives clock changes.
+- **Auto-run.** The v1 upload handler, after storing the upload, calls `queue_job` (the same function as `POST .../jobs`) for `suggested_pipeline`; a plan limit or a full queue never fails the upload.
+- **Run e-mail.** `RunNotifier` is a second `run.finished` listener next to the webhook dispatcher: one e-mail batch per run, sent in a background task.
+
+The loop lives in the API process. Like rate limits and the job queue it assumes **one worker** (`workers=1`): with several processes each would run its own loop (the conditional `UPDATE` still prevents a duplicate reminder, but the design is not meant for it). `selfhost` has no loop; there n8n schedules runs.
 
 ### Retention (`app/control/retention.py`)
 
