@@ -14,6 +14,7 @@ import type {
   CreateJobRequest,
   CreateOrgRequest,
   CreateWebhookRequest,
+  DataHealth,
   InviteRequest,
   Job,
   Member,
@@ -48,6 +49,7 @@ const responses = {
   org: {} as Required<S["OrgOut"]> satisfies Org,
   verify: {} as Required<S["VerifyOut"]> satisfies VerifyResult & { known: boolean },
   schedule: {} as Required<S["ScheduleOut"]> satisfies Schedule,
+  dataHealth: {} as Required<S["DataHealthOut"]> satisfies DataHealth,
 };
 
 function openapiPaths(): Set<string> {
@@ -67,7 +69,7 @@ function openapiPaths(): Set<string> {
 describe("kontrakt API (docs/openapi.json)", () => {
   it("typy żądań i odpowiedzi kompilują się względem schematów backendu", () => {
     expect(requests).toHaveLength(7);
-    expect(Object.keys(responses)).toHaveLength(6);
+    expect(Object.keys(responses)).toHaveLength(7);
   });
 
   it("każda ścieżka z client.ts istnieje w OpenAPI backendu", () => {
@@ -97,6 +99,7 @@ describe("kontrakt API (docs/openapi.json)", () => {
       paths.evidence("ORG"),
       paths.usage("ORG"),
       paths.schedule("ORG"),
+      paths.dataHealth("ORG"),
       paths.webhooks("ORG"),
       paths.webhook("ORG", "ID"),
       paths.webhookPing("ORG", "ID"),

@@ -13,6 +13,7 @@ import type {
   CreateJobRequest,
   CreateOrgRequest,
   CreateWebhookRequest,
+  DataHealth,
   EvidenceReport,
   Invitation,
   InviteRequest,
@@ -131,6 +132,7 @@ export const paths = {
   evidence: (org: string) => `/orgs/${org}/evidence`,
   usage: (org: string) => `/orgs/${org}/usage`,
   schedule: (org: string) => `/orgs/${org}/schedule`,
+  dataHealth: (org: string) => `/orgs/${org}/data-health`,
   webhooks: (org: string) => `/orgs/${org}/webhooks`,
   webhook: (org: string, id: string) => `/orgs/${org}/webhooks/${id}`,
   webhookPing: (org: string, id: string) => `/orgs/${org}/webhooks/${id}/ping`,
@@ -357,6 +359,9 @@ export const api = {
   getSchedule: (org: string) => request<Schedule>(paths.schedule(org)),
   updateSchedule: (org: string, body: ScheduleSettings) =>
     request<Schedule>(paths.schedule(org), { method: "PUT", json: body }),
+  /** Pulpit zdrowia danych: `weeks` (1-26) ogranicza tylko tabelę tygodni, werdykt jest liczony z 26 tygodni. */
+  getDataHealth: (org: string, weeks: number, signal?: AbortSignal) =>
+    request<DataHealth>(paths.dataHealth(org), { query: { weeks }, signal }),
   verifyHash: (org: string, sha256: string) =>
     request<VerifyResult>(paths.verify(org), { method: "POST", json: { sha256 } }),
 

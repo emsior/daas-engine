@@ -42,7 +42,7 @@ There are no passwords. Sign-in is a single-use link sent by e-mail (`POST /auth
 | `members:manage` | add members, invite | | x | x | yes |
 | `keys:manage` | list, create, revoke keys | | x | x | yes |
 | `uploads:write` | upload files | x | x | x | yes |
-| `runs:read` | list and read jobs and runs, SSE | x | x | x | yes |
+| `runs:read` | list and read jobs and runs, SSE, data health | x | x | x | yes |
 | `runs:write` | start and cancel jobs | x | x | x | yes |
 | `reports:read` | download reports, verify hashes, artifact status | x | x | x | yes |
 | `usage:read` | usage and plan limits | x | x | x | yes |
@@ -127,6 +127,7 @@ Rate limits are per client address and per key and are kept in process memory; r
 | POST | `/api/v1/orgs/{org_id}/verify` | `reports:read` | 200 | 422 | does this SHA-256 belong to one of your reports |
 | GET | `/api/v1/orgs/{org_id}/evidence` | `reports:read` | 200 | 404 | artifact status of the latest collector run |
 | GET | `/api/v1/orgs/{org_id}/usage` | `usage:read` | 200 | 404 | monthly usage and plan limits |
+| GET | `/api/v1/orgs/{org_id}/data-health?weeks=12` | `runs:read` | 200 | 404, 422 | weekly rhythm (uploads, reports, failures), summary and issues to fix |
 | GET | `/api/v1/orgs/{org_id}/audit` | `audit:read` | 200 | 422 | audit log, newest first |
 | GET | `/api/v1/orgs/{org_id}/schedule` | `org:read` | 200 | 404 | schedule and notifications (defaults when never saved) |
 | PUT | `/api/v1/orgs/{org_id}/schedule` | `org:manage` | 200 | 403, 404, 422 | save the schedule; recomputes `next_reminder_at` |
@@ -315,6 +316,43 @@ When a limit is used up, `POST .../jobs` and `POST .../uploads` answer `429` wit
 ```
 
 `resource` is `runs` or `upload_bytes`. Queued and running jobs count towards the run limit. The upload check uses the declared `Content-Length`, so it is approximate. A caller without access to the organization gets `404`/`403`, never `429`. There is no online payment in 2.0.
+
+## Data health
+
+`GET /api/v1/orgs/{org_id}/data-health?weeks=12` (scope `runs:read`, every role) answers one question: is next Monday's report safe, and if not, what to fix. It is computed on the fly from uploads, jobs, runs, the schedule and the plan usage; nothing is stored and reading it is not audited.
+
+```bash
+curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/data-health?weeks=8"
+# {"generated_at":"2026-10-14T10:00:00Z","timezone":"Europe/Warsaw",
+#  "weeks":[{"week_start":"2026-08-24","partial":false,"uploads":1,"upload_bytes":48211,"runs_succeeded":1,
+#            "runs_failed":0,"reports":1,"avg_run_seconds":4.2,"last_report_at":"2026-08-24T06:12:09Z"}, ...,
+#           {"week_start":"2026-10-12","partial":true, ...}],
+#  "summary":{"last_upload_at":"...","last_success_at":"...","last_failure_at":null,"last_error_code":null,
+#             "streak_weeks":7,"reminder_enabled":true,"next_reminder_at":"2026-10-19T06:00:00Z",
+#             "auto_run_on_upload":true,"notify_on_finish":true,"plan":"free","runs_used":9,"runs_limit":20,
+#             "retention_days":90},
+#  "issues":[]}
+```
+
+- **Weeks** are ISO weeks in the time zone of the schedule (`Europe/Warsaw` when the schedule was never saved or its zone is no longer known): a week starts on Monday 00:00 local time, so a file uploaded on a summer Sunday at 23:30 UTC (Monday 01:30 in Warsaw) counts for the new week, and the weeks with a clock change last 167 or 169 hours. The list runs from the oldest week to the current one, which is still running (`partial: true`). `weeks` is 1-26 (default 12); any other value answers `422 validation_error` with `loc: ["query", "weeks"]`.
+- Per week: `uploads` and `upload_bytes` (by upload time); `runs_succeeded` and `runs_failed` (jobs, by the time they finished; `failed` includes `no_records`); `reports` = runs `SUCCESS` or `PARTIAL` whose job did not fail (a source without records is a failure, not a report); `avg_run_seconds` = mean `finished_at - started_at` of the finished jobs (`null` = none); `last_report_at`.
+- `summary`: the last upload still on record (retention removes old upload records), the last job that finished `succeeded` and the last one that finished `failed` with its `error_code`, `streak_weeks` = finished weeks in a row with at least one report, counted back from last week (the current week neither extends nor breaks it; at most 25), the reminder, auto-run and run e-mail settings of the schedule, and the runs of the current calendar month (UTC) with the plan limit (`null` = unlimited).
+- `weeks` only limits the list: the summary and the issues always look at the last 26 weeks, so switching between 8, 12 and 26 weeks in the cockpit never changes the verdict.
+
+`issues` come most severe first (`error`, `warning`, `info`); `since` is when the condition started (`null` when unknown) and `link` is a path in the cockpit:
+
+| `code` | `severity` | When | `link` |
+|---|---|---|---|
+| `last_run_failed` | `error` | the latest finished job failed (`since` = when it finished; the code is `summary.last_error_code`) | `/runs/{run_id}`, or `/upload` when the job has no run |
+| `plan_limit_reached` | `error` | runs this month reached the plan limit (new jobs answer `429 plan_limit`) | `/settings` |
+| `stale_upload` | `warning` | no upload for 7 days or more (`since` = the last upload; `null` when retention already removed its record) | `/upload` |
+| `plan_limit_near` | `warning` | runs this month reached 80 % of the plan limit (16 of 20 on `free`) | `/settings` |
+| `partial_reports` | `warning` | at least one `PARTIAL` report in the last 4 weeks, the current one included (`since` = the first of them) | `/` |
+| `no_uploads_yet` | `info` | the organization never uploaded a file | `/upload` |
+| `reminder_off` | `info` | the weekly export reminder is off | `/settings` |
+| `auto_run_off` | `info` | a job does not start automatically after an upload | `/settings` |
+
+The cockpit screen *Data health* (`/health`) turns the list into a verdict: any `error` = at risk (red), only `warning` = at risk (yellow), no file yet = no data, otherwise safe (green).
 
 ## Audit log
 

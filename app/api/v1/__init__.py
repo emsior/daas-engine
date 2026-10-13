@@ -8,6 +8,7 @@ from app.api.v1 import (
     api_keys,
     audit,
     auth,
+    data_health,
     jobs,
     members,
     orgs,
@@ -34,7 +35,7 @@ def build_router() -> APIRouter:
                          tags=["system"], summary="Readiness (public)", responses={503: {"model": ReadyResponse}})
     router.include_router(auth.public_router)
     router.include_router(auth.router)
-    for module in (orgs, members, api_keys, runs, usage, audit, webhooks, schedule):
+    for module in (orgs, members, api_keys, runs, usage, audit, webhooks, schedule, data_health):
         router.include_router(module.router)
     # limity planu (429 `plan_limit`) dla POST /jobs i POST /uploads — bez zmian w samych handlerach
     for module in (uploads, jobs):

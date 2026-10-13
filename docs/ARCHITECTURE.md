@@ -136,7 +136,7 @@ job   ─► pipelines/runner (PipelineRunner)
 
 ## Cockpit (`web/`)
 
-Next.js 16 (App Router, React 19, TypeScript strict, Tailwind 4, TanStack Query). No external CDN or fonts. `src/proxy.ts` sets a nonce-based CSP and redirects to `/login` when `GET /api/v1/me` answers `401`. The browser talks to the API at the same origin (`/api/*`, through Caddy) with the session cookie and the CSRF header; the report is shown in a sandboxed iframe; the "check yourself" box computes SHA-256 locally in the browser (Web Crypto) and sends nothing. Screens: login, onboarding (DPA), dashboard, upload wizard with live progress, run/report, evidence, API keys, members, settings. Details: [`web/README.md`](../web/README.md).
+Next.js 16 (App Router, React 19, TypeScript strict, Tailwind 4, TanStack Query). No external CDN or fonts. `src/proxy.ts` sets a nonce-based CSP and redirects to `/login` when `GET /api/v1/me` answers `401`. The browser talks to the API at the same origin (`/api/*`, through Caddy) with the session cookie and the CSRF header; the report is shown in a sandboxed iframe; the "check yourself" box computes SHA-256 locally in the browser (Web Crypto) and sends nothing. Screens: login, onboarding (DPA), dashboard, upload wizard with live progress, data health (verdict on next Monday's report, key figures and an 8/12/26-week table from `GET .../data-health`, computed on the fly from the control database), run/report, evidence, API keys, members, settings. Details: [`web/README.md`](../web/README.md).
 
 ## Deployment
 

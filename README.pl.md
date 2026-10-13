@@ -142,6 +142,8 @@ curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/<run_id>/report?fmt=ht
 
 W kokpicie *Ustawienia → Harmonogram i powiadomienia* (albo `PUT /api/v1/orgs/{org_id}/schedule`): cotygodniowe przypomnienie e-mailem o eksporcie (np. poniedziałek 8:00 Europe/Warsaw, pomijane, gdy plik już przyszedł), automatyczne uruchomienie raportu zaraz po wgraniu pliku i e-mail z linkiem do raportu, gdy jest gotowy. W wiadomościach nie ma treści raportu — dane zostają w kokpicie. Szczegóły: [`docs/API.md`](docs/API.md#schedule-and-notifications).
 
+Ekran *Zdrowie danych* (albo `GET /api/v1/orgs/{org_id}/data-health`) mówi, czy raport w przyszły poniedziałek jest bezpieczny: pliki, raporty i błędy tydzień po tygodniu, seria tygodni z raportem i to, co naprawić, z linkiem do właściwego ekranu ([`docs/API.md`](docs/API.md#data-health)).
+
 Tryb selfhost, trasy legacy (każda poza `/health` i `/ready` wymaga `X-API-Key` z `DAAS_API_KEY`):
 
 ```bash

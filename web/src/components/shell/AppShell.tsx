@@ -20,6 +20,7 @@ interface NavItem {
 const NAV: NavItem[] = [
   { href: "/", label: "nav.dashboard", match: (p) => p === "/" || p.startsWith("/runs") },
   { href: "/upload", label: "nav.upload", match: (p) => p.startsWith("/upload") },
+  { href: "/health", label: "nav.health", match: (p) => p.startsWith("/health") },
   { href: "/evidence", label: "nav.evidence", match: (p) => p.startsWith("/evidence") },
   { href: "/settings", label: "nav.settings", match: (p) => p.startsWith("/settings") },
 ];

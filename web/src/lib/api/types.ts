@@ -286,6 +286,73 @@ export interface Usage {
   upload_bytes_limit?: number | null;
 }
 
+/* --- pulpit „Zdrowie danych” (`GET /orgs/{id}/data-health`) --- */
+
+export type HealthIssueCode =
+  | "last_run_failed"
+  | "plan_limit_reached"
+  | "stale_upload"
+  | "plan_limit_near"
+  | "partial_reports"
+  | "no_uploads_yet"
+  | "reminder_off"
+  | "auto_run_off";
+export type HealthSeverity = "error" | "warning" | "info";
+
+/** Jeden tydzień ISO w strefie harmonogramu organizacji (poniedziałek 00:00 czasu lokalnego). */
+export interface WeekHealth {
+  /** Poniedziałek tygodnia: data lokalna `YYYY-MM-DD` (bez godziny i strefy). */
+  week_start: string;
+  /** Bieżący, jeszcze trwający tydzień. */
+  partial: boolean;
+  uploads: number;
+  upload_bytes: number;
+  runs_succeeded: number;
+  /** Zadania zakończone błędem, w tym `no_records`. */
+  runs_failed: number;
+  /** Raporty SUCCESS i PARTIAL, których zadanie nie zakończyło się błędem. */
+  reports: number;
+  /** Średni czas uruchomienia (sekundy); null = brak zakończonych zadań. */
+  avg_run_seconds: number | null;
+  last_report_at: string | null;
+}
+
+export interface DataHealthSummary {
+  last_upload_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_error_code: string | null;
+  /** Pełne tygodnie z rzędu z co najmniej jednym raportem (bez bieżącego). */
+  streak_weeks: number;
+  reminder_enabled: boolean;
+  next_reminder_at: string | null;
+  auto_run_on_upload: boolean;
+  notify_on_finish: boolean;
+  plan: string;
+  runs_used: number;
+  /** null = plan bez limitu. */
+  runs_limit: number | null;
+  retention_days: number;
+}
+
+export interface HealthIssue {
+  code: HealthIssueCode;
+  severity: HealthSeverity;
+  since: string | null;
+  /** Ścieżka w kokpicie, która wyjaśnia albo naprawia problem (np. `/upload`). */
+  link: string;
+}
+
+/** Problemy są posortowane od najpoważniejszych; tygodnie od najstarszego do bieżącego. */
+export interface DataHealth {
+  generated_at: string;
+  /** Strefa IANA harmonogramu, w której liczone są tygodnie. */
+  timezone: string;
+  weeks: WeekHealth[];
+  summary: DataHealthSummary;
+  issues: HealthIssue[];
+}
+
 export interface VerifyResult {
   known: boolean;
   run_id?: string | null;
