@@ -1,11 +1,8 @@
 import { expect, test } from "@playwright/test";
-import { readLatestLoginToken, uniqueEmail } from "./helpers";
+import { newProjectContext, readLatestLoginToken, requestLoginLink, uniqueEmail } from "./helpers";
 
 async function requestLink(page: import("@playwright/test").Page, email: string) {
-  await page.goto("/login");
-  await page.getByLabel("Adres e-mail").fill(email);
-  await page.getByRole("button", { name: "Wyślij link logowania" }).click();
-  await expect(page.getByRole("heading", { name: "Sprawdź skrzynkę" })).toBeVisible();
+  await requestLoginLink(page, email);
   return readLatestLoginToken(email);
 }
 
@@ -21,12 +18,11 @@ test("link otwarty w tej samej przeglądarce loguje bez dodatkowego ekranu (adre
 test("link otwarty w innej przeglądarce wymaga potwierdzenia: ekran, zamaskowany adres, przycisk", async ({
   page,
   browser,
-  baseURL,
 }) => {
   const email = uniqueEmail("other");
   const token = await requestLink(page, email);
 
-  const otherContext = await browser.newContext({ baseURL, locale: "pl-PL" });
+  const otherContext = await newProjectContext(browser);
   const other = await otherContext.newPage();
   await other.goto(`/login/verify?token=${token}`);
   const heading = other.getByRole("heading", {
@@ -57,10 +53,9 @@ test("link otwarty w innej przeglądarce wymaga potwierdzenia: ekran, zamaskowan
 test("„To nie ja”: rezygnacja wraca do formularza i zdejmuje token z adresu", async ({
   page,
   browser,
-  baseURL,
 }) => {
   const token = await requestLink(page, uniqueEmail("decline"));
-  const otherContext = await browser.newContext({ baseURL, locale: "pl-PL" });
+  const otherContext = await newProjectContext(browser);
   const other = await otherContext.newPage();
   await other.goto(`/login/verify?token=${token}`);
   await other.getByRole("button", { name: "To nie ja, wróć" }).click();
@@ -76,10 +71,9 @@ test("„To nie ja”: rezygnacja wraca do formularza i zdejmuje token z adresu"
 test("odświeżenie na ekranie potwierdzenia gubi token: komunikat „Link wygasł…”, brak tokena w adresie", async ({
   page,
   browser,
-  baseURL,
 }) => {
   const token = await requestLink(page, uniqueEmail("reload"));
-  const otherContext = await browser.newContext({ baseURL, locale: "pl-PL" });
+  const otherContext = await newProjectContext(browser);
   const other = await otherContext.newPage();
   await other.goto(`/login/verify?token=${token}`);
   await expect(other.getByRole("button", { name: /^Zaloguj jako/ })).toBeVisible();
@@ -91,9 +85,9 @@ test("odświeżenie na ekranie potwierdzenia gubi token: komunikat „Link wygas
   await otherContext.close();
 });
 
-test("ekran potwierdzenia po angielsku", async ({ page, browser, baseURL }) => {
+test("ekran potwierdzenia po angielsku", async ({ page, browser }) => {
   const token = await requestLink(page, uniqueEmail("en"));
-  const otherContext = await browser.newContext({ baseURL, locale: "en-US" });
+  const otherContext = await newProjectContext(browser, { locale: "en-US" });
   const other = await otherContext.newPage();
   await other.goto("/login?lang=en");
   await other.goto(`/login/verify?token=${token}`);

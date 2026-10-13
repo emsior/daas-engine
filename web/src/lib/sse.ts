@@ -5,6 +5,7 @@
  * - Po `maxRetries` kolejnych błędach bez udanego otwarcia wołamy `onGiveUp` (UI przechodzi na odpytywanie).
  */
 import { z } from "zod";
+import "./zod-config";
 import type { JobDoneEvent, JobLogEvent, JobProgressEvent, JobStatusEvent } from "./api/types";
 
 const jobStatus = z.enum(["queued", "running", "succeeded", "failed", "cancelled"]);

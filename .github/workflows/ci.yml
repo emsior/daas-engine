@@ -49,6 +49,40 @@ jobs:
           curl -sf -H "X-API-Key: $DAAS_API_KEY" -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
           curl -sf -H "X-API-Key: $DAAS_API_KEY" localhost:8000/reports/ecommerce_demo/latest | grep -q "<table>"
 
+  # Testy na prawdziwym Postgresie: blokady wierszy (FOR UPDATE), SAVEPOINT i migracje Alembic, ktorych SQLite nie sprawdza.
+  # Serwer to PostgreSQL preinstalowany na obrazie ubuntu-24.04 (bez obrazu kontenera); wersja drukowana w logu.
+  postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: PostgreSQL (preinstalled on the runner image)
+        run: |
+          if ! systemctl list-unit-files postgresql.service --no-legend | grep -q postgresql; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql
+          fi
+          sudo systemctl start postgresql.service
+          for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p 5432 && break || sleep 1; done
+          pg_isready -h 127.0.0.1 -p 5432
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE daas LOGIN CREATEDB PASSWORD 'daas-ci-test-only'"
+          sudo -u postgres psql -tAc 'select version()'
+          # DROP DATABASE ... WITH (FORCE) used by the tests needs PostgreSQL >= 13
+          test "$(sudo -u postgres psql -tAc 'show server_version_num')" -ge 130000
+      - name: Install
+        run: pip install --require-hashes -r requirements-dev.lock -r requirements-postgres.lock && pip install --no-deps -e .
+      - name: Tests (PostgreSQL)
+        env:
+          DAAS_TEST_POSTGRES_URL: postgresql+asyncpg://daas:daas-ci-test-only@127.0.0.1:5432/postgres
+          DAAS_TEST_POSTGRES_REQUIRED: "1"
+        run: pytest tests/test_postgres.py -v -p no:cacheprovider
+
   security:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -75,7 +109,7 @@ jobs:
       - name: Znane podatnosci zaleznosci (pip-audit)
         # requirements.lock ma hashe: --require-hashes wymusza ich sprawdzenie, --disable-pip czyta wersje z pliku
         # bez instalowania. Pakiety nieznane indeksowi ("unknown") sa raportowane i nie blokuja przebiegu.
-        run: pip-audit -r requirements.lock --require-hashes --disable-pip --progress-spinner off
+        run: pip-audit -r requirements.lock -r requirements-postgres.lock --require-hashes --disable-pip --progress-spinner off
 
   web:
     runs-on: ubuntu-latest
@@ -174,6 +208,85 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # E2E w Firefoxie i WebKicie (job `e2e` zostaje na Chromium). Osobne nogi matrixu, zeby czerwony silnik nie
+  # chowal drugiego. WebKit odrzuca ciasteczka Secure/__Host- po http (API zawsze je wystawia), dlatego jego noga
+  # biegnie po https: stack.sh z E2E_TLS=1 generuje jednorazowy certyfikat self-signed, a Playwright dostaje
+  # ignoreHTTPSErrors tylko dla adresu https. Firefox przyjmuje te ciasteczka po http na 127.0.0.1.
+  e2e-browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: firefox
+            project: desktop-firefox
+            tls: "0"
+          - browser: webkit
+            project: mobile-webkit
+            tls: "1"
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Node.js 22
+        env:
+          NODE_VERSION: v22.22.0
+          NODE_SHA256: 9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/node.tar.xz" "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"
+          echo "${NODE_SHA256}  ${RUNNER_TEMP}/node.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP/node" --strip-components=1
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+      - name: Install backend (runtime lock)
+        run: pip install --require-hashes -r requirements.lock && pip install --no-deps -e .
+      - name: Install web and Playwright (browser + system libraries)
+        working-directory: web
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps "$BROWSER"
+      - name: Start stack (API cloud + console mail, web, one-origin proxy)
+        env:
+          PYTHON: python
+          E2E_TLS: ${{ matrix.tls }}
+        run: |
+          echo "E2E_RUNTIME=$RUNNER_TEMP/daas-e2e" >> "$GITHUB_ENV"
+          E2E_RUNTIME="$RUNNER_TEMP/daas-e2e" bash web/e2e/stack.sh start
+      - name: E2E (Playwright)
+        working-directory: web
+        env:
+          CI: "true"
+          PROJECT: ${{ matrix.project }}
+          TLS: ${{ matrix.tls }}
+        run: |
+          if [ "$TLS" = "1" ]; then E2E_BASE_URL=https://127.0.0.1:3100; else E2E_BASE_URL=http://127.0.0.1:3100; fi
+          export E2E_BASE_URL
+          E2E_OUTBOX_DIR="$E2E_RUNTIME/outbox" npx playwright test --project="$PROJECT"
+      - name: Server logs (on failure)
+        if: failure()
+        run: |
+          for f in api web proxy; do echo "--- $f.log"; tail -n 200 "$E2E_RUNTIME/$f.log" || true; done
+      # Akcja przypieta do SHA v4.6.2. Podbija Dependabot (ekosystem github-actions).
+      - name: Playwright report (artifact on failure)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report-${{ matrix.browser }}
           path: |
             web/playwright-report
             web/test-results

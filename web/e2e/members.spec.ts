@@ -1,10 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { login, signUp, uniqueEmail } from "./helpers";
+import { login, newProjectContext, signUp, uniqueEmail } from "./helpers";
 
 test("zaproszenie członka: formularz, błędy, przyjęcie po pierwszym logowaniu zaproszonej osoby", async ({
   page,
   browser,
-  baseURL,
 }) => {
   const ownerEmail = await signUp(page, "owner", "Firma Zapraszająca");
   await page.goto("/settings/members");
@@ -28,7 +27,7 @@ test("zaproszenie członka: formularz, błędy, przyjęcie po pierwszym logowani
   await expect(page.getByText(`Zaproszenie dla ${invited} przyjęte.`)).toBeVisible();
 
   // zaproszona osoba loguje się po raz pierwszy: trafia od razu do organizacji (bez onboardingu)
-  const guestContext = await browser.newContext({ baseURL, locale: "pl-PL" });
+  const guestContext = await newProjectContext(browser);
   const guest = await guestContext.newPage();
   await login(guest, invited);
   await expect(guest).toHaveURL(/\/$/);

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { SAMPLE_CSV, UKSC_FIXTURE, runReportFrom, signUp } from "./helpers";
+import { SAMPLE_CSV, UKSC_FIXTURE, collectCspViolations, runReportFrom, signUp } from "./helpers";
 
 test("CSP: nonce + strict-dynamic, bez unsafe-inline, ramki wyłączone", async ({ request }) => {
   const response = await request.get("/login");
@@ -17,10 +17,13 @@ test("CSP: nonce + strict-dynamic, bez unsafe-inline, ramki wyłączone", async 
 test("przejście po wszystkich ekranach: zero żądań poza własnym originem, zero naruszeń CSP", async ({
   page,
   baseURL,
+  browserName,
 }) => {
   const origin = new URL(baseURL ?? "http://127.0.0.1:3100").origin;
   const foreign: string[] = [];
   const violations: string[] = [];
+  // zdarzenie `securitypolicyviolation` działa w każdym silniku; konsola poniżej łapie tylko format Chromium
+  const cspEvents = await collectCspViolations(page);
   page.on("request", (request) => {
     const url = request.url();
     if (!url.startsWith("data:") && !url.startsWith("blob:") && new URL(url).origin !== origin) {
@@ -32,7 +35,38 @@ test("przejście po wszystkich ekranach: zero żądań poza własnym originem, z
       violations.push(message.text());
     }
   });
-  page.on("pageerror", (error) => violations.push(error.message));
+  // WebKit: fetch własnego originu przerwany nawigacją (prefetch RSC, odczyt API) kończy się nieobsłużonym
+  // odrzuceniem „<url> due to access control checks.” (artefakt silnika). Wyciszamy je tylko z dowodem przerwania:
+  // żądanie o tym URL-u wystartowało PRZED późniejszą nawigacją głównej ramki albo ponowieniem tego samego URL-a
+  // (nawigacja kliencka zastępuje prefetch) i nie zakończyło się inną porażką
+  // niż „cancel”. Kolejność ustalamy po zdarzeniach `request` (jeden kanał, więc uporządkowane); samo
+  // requestfailed jest niepełne (Playwright gubi je przy zmianie dokumentu). Rozstrzygamy na końcu testu.
+  let seq = 0;
+  const started: { url: string; seq: number }[] = [];
+  const navigations: number[] = [];
+  const failedOtherwise = new Set<string>();
+  const accessControlErrors: { message: string; target: string | null }[] = [];
+  const host = new URL(origin).host;
+  page.on("request", (request) => {
+    seq += 1;
+    started.push({ url: request.url(), seq });
+    if (request.isNavigationRequest() && request.frame() === page.mainFrame())
+      navigations.push(seq);
+  });
+  page.on("requestfailed", (request) => {
+    if (!/cancel/i.test(request.failure()?.errorText ?? "")) failedOtherwise.add(request.url());
+  });
+  page.on("pageerror", (error) => {
+    const message = error.message;
+    if (browserName === "webkit" && message.endsWith(" due to access control checks.")) {
+      const start = message.indexOf(host);
+      const target =
+        start >= 0 ? message.slice(start, -" due to access control checks.".length) : null;
+      accessControlErrors.push({ message, target });
+      return;
+    }
+    violations.push(message);
+  });
 
   await page.goto("/login");
   await signUp(page, "security");
@@ -49,6 +83,9 @@ test("przejście po wszystkich ekranach: zero żądań poza własnym originem, z
   ]) {
     await page.goto(path);
     await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
+    // WebKit zgłasza fetch przerwany nawigacją (prefetch RSC, odczyty API) jako nieobsłużony błąd strony
+    // „... due to access control checks”, a czasem kończy goto błędem wewnętrznym; czekamy na ciszę w sieci
+    await page.waitForLoadState("networkidle");
   }
   await page.goto("/");
   await page
@@ -58,8 +95,22 @@ test("przejście po wszystkich ekranach: zero żądań poza własnym originem, z
   await expect(page.locator("iframe.iframe-report")).toBeVisible();
   await page.waitForLoadState("networkidle");
 
+  for (const { message, target } of accessControlErrors) {
+    const matches = target === null ? [] : started.filter(({ url }) => url.endsWith(target));
+    const interrupted =
+      matches.length > 0 &&
+      !matches.some(({ url }) => failedOtherwise.has(url)) &&
+      matches.some(
+        (entry) =>
+          navigations.some((navigation) => navigation > entry.seq) ||
+          started.some((later) => later.url === entry.url && later.seq > entry.seq),
+      );
+    if (!interrupted) violations.push(message); // bez dowodu przerwania liczy się jak każdy inny błąd
+  }
+
   expect(foreign, "żądania do obcych originów (CDN, fonty)").toEqual([]);
-  expect(violations, "naruszenia CSP i błędy strony").toEqual([]);
+  expect(cspEvents, "zdarzenia securitypolicyviolation (wszystkie silniki)").toEqual([]);
+  expect(violations, "naruszenia CSP w konsoli i błędy strony").toEqual([]);
 });
 
 test("raport: nagłówki bezpieczeństwa API i ramka w sandboxie bez uprawnień", async ({ page }) => {

@@ -1,5 +1,6 @@
 /** Walidacja pól formularzy (zod). Funkcje zwracają kod błędu; komunikaty pochodzą ze słowników. */
 import { z } from "zod";
+import "./zod-config";
 
 const emailSchema = z.email();
 const retentionSchema = z.coerce.number().int().min(1).max(3650);

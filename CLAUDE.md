@@ -43,6 +43,7 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 | Harmonogram | `app/control/schedule.py` (pętla w lifespanie, tylko cloud), `app/control/notifications.py` (mail i wiadomość na czacie po runie: Slack / Teams / JSON, payloady w `app/control/chat_messages.py`, wysyłka `post_json` z `webhooks.py` z ochroną SSRF), `GET/PUT /orgs/{id}/schedule` (adres webhooka czatu tylko do zapisu, w odpowiedzi maska), Alembic `0004`, `0005` |
 | Testy | pytest — ok. 2090 przypadków (2086 passed + 1 skipped po scaleniu pięciu przyrostów P-12 13.10.2026, plus testy poprawek audytu Wave 2), pełny przebieg 8–10 min; Linux (3.13) zielone; Windows (3.12): 1777/0 przed P-12, pełny przebieg po P-12 w `bundle\pytest_windows_2026-10-13b.log` warsztatu; Vitest w `web/` (210) |
 | CI | GitHub Actions: `test` (3.11, 3.12, 3.13), `security` (gitleaks, semgrep, zizmor, pip-audit), `web`, `e2e`, `lighthouse`, `docker`; Dependabot (pip, actions, docker, npm); akcje przypięte do SHA |
+| CI poza SQLite i Chromium | `postgres`: PostgreSQL 16 z obrazu `ubuntu-24.04`, `tests/test_postgres.py` (migracje, `FOR UPDATE` przy dwóch sesjach, SAVEPOINT), `asyncpg` z `requirements-postgres.lock`; `e2e-browsers`: Firefox po http, WebKit po https (`E2E_TLS=1`) |
 
 ⚠ **Od 2.0 w repo jest JavaScript**: `web/` ma własny `package.json` i `package-lock.json`. Reszta repo (poza `web/`) to Python.
 
@@ -53,6 +54,8 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 . .venv/bin/activate                      # Windows: .\.venv\Scripts\Activate.ps1
 pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .   # działa też na Windows (uvloop za markerem sys_platform)
 python -m pytest -p no:cacheprovider      # addopts=-q już jest: nie dodawaj drugiego -q (znika podsumowanie)
+pip install --require-hashes -r requirements-postgres.lock   # asyncpg: testy na Postgresie i control plane na Postgresie
+DAAS_TEST_POSTGRES_URL=postgresql+asyncpg://<rola z CREATEDB>:<hasło>@127.0.0.1:5432/postgres python -m pytest tests/test_postgres.py -p no:cacheprovider   # bez URL-a: 1 skipped
 ruff check app tests                      # ta sama wersja co w CI (0.16.8)
 python -m app.main                        # API na 127.0.0.1:8000; selfhost wymaga DAAS_API_KEY, cloud wymaga DAAS_SECRET_KEY
 python -m app.cli migrate | migrate-runtime | create-org --name ... --owner-email ...
@@ -71,7 +74,11 @@ npm run gen:api                           # typy z ../docs/openapi.json
 
 # e2e (Playwright, backend w trybie cloud z poczta `console`)
 bash web/e2e/stack.sh start               # API + kokpit (standalone) + proxy jednego originu na :3100
-cd web && E2E_BASE_URL=http://127.0.0.1:3100 E2E_OUTBOX_DIR=<E2E_RUNTIME>/outbox npm run e2e
+cd web && E2E_BASE_URL=http://127.0.0.1:3100 E2E_OUTBOX_DIR=<E2E_RUNTIME>/outbox npm run e2e   # Chromium: mobile-375, desktop-1280
+cd web && E2E_BASE_URL=http://127.0.0.1:3100 E2E_OUTBOX_DIR=<E2E_RUNTIME>/outbox npm run e2e:firefox
+bash web/e2e/stack.sh stop
+E2E_TLS=1 bash web/e2e/stack.sh start     # WebKit tylko po https: po http odrzuca ciasteczka Secure/__Host- (certyfikat jednorazowy)
+cd web && E2E_BASE_URL=https://127.0.0.1:3100 E2E_OUTBOX_DIR=<E2E_RUNTIME>/outbox npm run e2e:webkit
 bash web/e2e/stack.sh stop
 
 # wdrożenie (VPS)
@@ -104,7 +111,8 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
 | Kokpit i API muszą być w jednej witrynie (cookie sesji `SameSite=Lax`, CSRF) | w dev/e2e użyj proxy jednego originu `web/e2e/proxy.mjs` albo `DAAS_COCKPIT_ORIGIN` + `DAAS_COOKIE_SECURE=false` po http |
 | Limity żądań i kwoty są w pamięci procesu | jeden worker; `WEB_CONCURRENCY`/`UVICORN_WORKERS` > 1 blokuje start. Za proxy adres klienta to adres proxy, dopóki `FORWARDED_ALLOW_IPS` go nie obejmie |
 | Zmiana `DAAS_SECRET_KEY` | wylogowuje wszystkich i unieważnia sekrety podpisu webhooków; kopia danych go nie zawiera |
-| Przeglądarki Playwright są już w `PLAYWRIGHT_BROWSERS_PATH` | nie uruchamiaj `playwright install` tam, gdzie są; wersja `@playwright/test` jest przypięta |
+| Przeglądarki Playwright są już w `PLAYWRIGHT_BROWSERS_PATH` (Chromium) | nie uruchamiaj `playwright install` tam, gdzie są; wersja `@playwright/test` jest przypięta. Firefox i WebKit (tylko `e2e:firefox`/`e2e:webkit`): `npx playwright install firefox webkit` + `npx playwright install-deps firefox webkit` |
+| WebKit odrzuca ciasteczka `Secure`/`__Host-` po http (Chromium i Firefox na 127.0.0.1 je przyjmują) | e2e w WebKicie tylko ze stosem `E2E_TLS=1` i `E2E_BASE_URL=https://…`; nie wyłączaj `DAAS_COOKIE_SECURE` dla testów |
 | Migracje control plane idą tylko do przodu i wykonują się przy starcie | przed aktualizacją `deploy/backup.sh`; wycofanie wersji po migracji = `deploy/restore.sh` |
 | Next 16 przemianował `middleware.ts` na `proxy.ts` | CSP z nonce i przekierowanie na `/login` są w `web/src/proxy.ts` |
 | Obraz `api` nie widzi `docs/`, `web/`, `tests/` (`.dockerignore`) | `COPY` w `Dockerfile` bierze tylko `app/`, `data/`, `alembic/` i pliki projektu |

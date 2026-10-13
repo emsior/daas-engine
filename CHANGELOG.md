@@ -23,6 +23,16 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Added
 
+- Verification beyond SQLite and Chromium. The `postgres` CI job runs `tests/test_postgres.py` against the
+  PostgreSQL 16 of the `ubuntu-24.04` runner: Alembic upgrade → downgrade → upgrade compared with the models, the
+  "at least one owner" guard with two concurrent sessions (`SELECT … FOR UPDATE`; the test proceeds only when the
+  server reports the second session as blocked, and a guard test shows that without the row lock both owners
+  disappear) and the first-write race of the usage counter (SAVEPOINT, then `UPDATE`). `asyncpg` comes from
+  `requirements-postgres.lock` (hashes, also audited by `pip-audit`); without `DAAS_TEST_POSTGRES_URL` the module is
+  skipped. The `e2e-browsers` CI job runs the Playwright suite in Firefox (`desktop-firefox`) and WebKit
+  (`mobile-webkit`, 375 px). WebKit refuses `Secure`/`__Host-` cookies over plain http, so its stack runs behind the
+  e2e proxy with a throwaway self-signed certificate (`E2E_TLS=1`); production cookies are unchanged.
+  `npm run e2e` keeps the two Chromium projects; `npm run e2e:firefox` and `npm run e2e:webkit` run the others.
 - In-memory token-bucket rate limits for `/run`, `/upload`, per-IP traffic and failed keys (`429` with `Retry-After`), a 1 GiB upload quota (`413`) and cleanup of stale `*.tmp` files.
 - XLSX support in `POST /upload` with container, macro, embedded-object, sheet and size limits; a workbook with several sheets needs the `sheet` field.
 - Request id, JSON logging and security headers on every response; report responses add a restrictive `Content-Security-Policy`.
@@ -92,6 +102,10 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Fixed
 
+- The cockpit raised a Content-Security-Policy violation (`script-src 'eval'`) in Chromium, Firefox and WebKit
+  after sign-in: zod 4 probes `new Function("")` before choosing its JIT. zod now runs `jitless`
+  (`web/src/lib/zod-config.ts`), so the policy stays without `unsafe-eval` and the console stays clean. The e2e
+  check collects `securitypolicyviolation` events in every engine; the old check read console text only and missed it.
 - Client-supplied values are escaped before they reach HTML reports in all three report builders; the HTML renderer drops raw HTML, links and images.
 - n8n workflows, the CI smoke test, the container health check and the PowerShell launcher send the API key.
 - Docker Compose pins `n8nio/n8n` to `2.43.1` instead of `latest`.

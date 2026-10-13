@@ -1,6 +1,13 @@
 import { expect, test } from "@playwright/test";
 import { createHash } from "node:crypto";
-import { SAMPLE_CSV, login, onboard, uniqueEmail } from "./helpers";
+import {
+  SAMPLE_CSV,
+  login,
+  onboard,
+  prepareClipboard,
+  readClipboard,
+  uniqueEmail,
+} from "./helpers";
 
 /**
  * Wymaga raportu w koncie testowym: spec sam przechodzi onboarding i wgrywa plik wzorcowy.
@@ -8,7 +15,7 @@ import { SAMPLE_CSV, login, onboard, uniqueEmail } from "./helpers";
  * więc zdanie „Plik nie został wysłany na serwer” jest prawdziwe.
  */
 test("Sprawdź sam: skrót liczony lokalnie, zero żądań sieciowych", async ({ page, context }) => {
-  await context.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => undefined);
+  await prepareClipboard(context);
   await login(page, uniqueEmail("verify"));
   await onboard(page);
   await page.goto("/upload");
@@ -60,5 +67,5 @@ test("Sprawdź sam: skrót liczony lokalnie, zero żądań sieciowych", async ({
   const copy = page.getByRole("button", { name: "Kopiuj całość: HTML" });
   await copy.click();
   await expect(page.getByRole("button", { name: "Skopiowano" })).toBeVisible();
-  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(expected);
+  expect(await readClipboard(page)).toBe(expected);
 });

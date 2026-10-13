@@ -1,10 +1,9 @@
 import { expect, test } from "@playwright/test";
-import { login, signUp, uniqueEmail } from "./helpers";
+import { login, newProjectContext, signUp, uniqueEmail } from "./helpers";
 
 test("zarządzanie członkami: zaproszenie, cofnięcie, zmiana roli, usunięcie z potwierdzeniem", async ({
   page,
   browser,
-  baseURL,
 }) => {
   const ownerEmail = await signUp(page, "mgr-owner", "Firma Zarządzana");
   await page.goto("/settings/members");
@@ -28,7 +27,7 @@ test("zarządzanie członkami: zaproszenie, cofnięcie, zmiana roli, usunięcie 
   await page.getByLabel("Adres e-mail zapraszanej osoby").fill(invited);
   await page.getByRole("button", { name: "Wyślij zaproszenie" }).click();
   await expect(pending).toContainText(invited);
-  const guestContext = await browser.newContext({ baseURL, locale: "pl-PL" });
+  const guestContext = await newProjectContext(browser);
   const guest = await guestContext.newPage();
   await login(guest, invited);
   await expect(guest).toHaveURL(/\/$/);
@@ -73,7 +72,6 @@ test("zarządzanie członkami: zaproszenie, cofnięcie, zmiana roli, usunięcie 
 test("blokada ostatniego właściciela: komunikat last_owner z odpowiedzi 409", async ({
   page,
   browser,
-  baseURL,
 }) => {
   await signUp(page, "last-owner", "Firma Jeden Właściciel");
   const second = uniqueEmail("second-owner");
@@ -81,7 +79,7 @@ test("blokada ostatniego właściciela: komunikat last_owner z odpowiedzi 409", 
   await page.getByLabel("Adres e-mail zapraszanej osoby").fill(second);
   await page.getByLabel("Rola").selectOption("owner");
   await page.getByRole("button", { name: "Wyślij zaproszenie" }).click();
-  const ctx = await browser.newContext({ baseURL, locale: "pl-PL" });
+  const ctx = await newProjectContext(browser);
   const other = await ctx.newPage();
   await login(other, second);
   await ctx.close();

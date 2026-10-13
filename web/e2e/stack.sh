@@ -2,8 +2,11 @@
 # Uruchamia pełny stos e2e: backend (DAAS_MODE=cloud, e-mail `console`) + kokpit (standalone) + proxy jednego originu.
 #   web/e2e/stack.sh start   # buduje kokpit (jeśli brak .next) i startuje trzy procesy w tle
 #   web/e2e/stack.sh stop    # zatrzymuje tylko procesy z pliku PID
-# Zmienne: E2E_RUNTIME (katalog danych, kasowany przy starcie), API_PORT, WEB_PORT, PROXY_PORT, PYTHON.
+# Zmienne: E2E_RUNTIME (katalog danych, kasowany przy starcie), API_PORT, WEB_PORT, PROXY_PORT, PYTHON,
+#   E2E_TLS=1 (opcjonalnie: proxy po https z jednorazowym certyfikatem self-signed w $E2E_RUNTIME/tls;
+#   potrzebne dla WebKit, który po http odrzuca ciasteczka Secure/__Host-; domyślnie http jak dotąd).
 # Po starcie: E2E_BASE_URL=http://127.0.0.1:3100 E2E_OUTBOX_DIR=$E2E_RUNTIME/outbox npm run e2e
+#   (z E2E_TLS=1: E2E_BASE_URL=https://127.0.0.1:3100)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -14,10 +17,12 @@ WEB_PORT="${WEB_PORT:-3000}"
 PROXY_PORT="${PROXY_PORT:-3100}"
 PYTHON="${PYTHON:-$ROOT/.venv/bin/python}"
 PIDS="$RT/pids"
+TLS="${E2E_TLS:-0}"
+if [ "$TLS" = "1" ]; then SCHEME=https; else SCHEME=http; fi
 
-wait_for() { # url, nazwa
+wait_for() { # url, nazwa (curl -k: certyfikat proxy w trybie TLS jest jednorazowy, self-signed)
   for _ in $(seq 1 90); do
-    if curl -fs -o /dev/null "$1"; then return 0; fi
+    if curl -fsk -o /dev/null "$1"; then return 0; fi
     sleep 1
   done
   echo "timeout: $2 ($1)" >&2
@@ -38,6 +43,14 @@ start() {
     # pusty origin API = ten sam origin co kokpit (proxy odtwarza Caddy)
     (cd "$WEB" && NEXT_PUBLIC_API_ORIGIN= npm run build)
   fi
+  if [ "$TLS" = "1" ]; then
+    # jednorazowy certyfikat tylko dla 127.0.0.1 (EC P-256, 2 dni); klucz czytelny wyłącznie dla właściciela
+    mkdir -p "$RT/tls" && chmod 700 "$RT/tls"
+    (umask 077 && openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 \
+      -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" \
+      -keyout "$RT/tls/key.pem" -out "$RT/tls/cert.pem" 2> "$RT/tls/openssl.log")
+    chmod 600 "$RT/tls/key.pem"
+  fi
   mkdir -p "$WEB/.next/standalone/.next"
   rm -rf "$WEB/.next/standalone/public" && cp -r "$WEB/public" "$WEB/.next/standalone/public"
   rm -rf "$WEB/.next/standalone/.next/static" && cp -r "$WEB/.next/static" "$WEB/.next/standalone/.next/static"
@@ -46,7 +59,7 @@ start() {
     cd "$ROOT"
     export DAAS_MODE=cloud APP_ENV=dev DAAS_EMAIL_BACKEND=console
     DAAS_SECRET_KEY="$(openssl rand -hex 32)"; export DAAS_SECRET_KEY
-    export DAAS_COCKPIT_ORIGIN="http://127.0.0.1:$PROXY_PORT"
+    export DAAS_COCKPIT_ORIGIN="$SCHEME://127.0.0.1:$PROXY_PORT"
     export DAAS_CONTROL_DB_URL="sqlite+aiosqlite:///$RT/control.db"
     export DUCKDB_PATH="$RT/daas.duckdb" REPORTS_DIR="$RT/reports"
     # limity logowania wyłączone: seria testów loguje się z jednego adresu IP
@@ -63,13 +76,14 @@ start() {
   (
     cd "$WEB"
     export E2E_API_ORIGIN="http://127.0.0.1:$API_PORT" E2E_WEB_ORIGIN="http://127.0.0.1:$WEB_PORT" E2E_PROXY_PORT="$PROXY_PORT"
+    if [ "$TLS" = "1" ]; then export E2E_TLS_CERT="$RT/tls/cert.pem" E2E_TLS_KEY="$RT/tls/key.pem"; fi
     nohup node e2e/proxy.mjs > "$RT/proxy.log" 2>&1 < /dev/null &
     echo $! >> "$PIDS"
   )
 
   wait_for "http://127.0.0.1:$API_PORT/ready" "API"
-  wait_for "http://127.0.0.1:$PROXY_PORT/login" "kokpit przez proxy"
-  echo "gotowe: E2E_BASE_URL=http://127.0.0.1:$PROXY_PORT E2E_OUTBOX_DIR=$RT/outbox (logi: $RT/*.log)"
+  wait_for "$SCHEME://127.0.0.1:$PROXY_PORT/login" "kokpit przez proxy"
+  echo "gotowe: E2E_BASE_URL=$SCHEME://127.0.0.1:$PROXY_PORT E2E_OUTBOX_DIR=$RT/outbox (logi: $RT/*.log)"
 }
 
 case "${1:-}" in

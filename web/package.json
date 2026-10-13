@@ -13,7 +13,9 @@
     "format:check": "prettier --check .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "playwright test",
+    "e2e": "playwright test --project=mobile-375 --project=desktop-1280",
+    "e2e:firefox": "playwright test --project=desktop-firefox",
+    "e2e:webkit": "playwright test --project=mobile-webkit",
     "gen:api": "openapi-typescript ../docs/openapi.json -o src/lib/api/schema.d.ts"
   },
   "dependencies": {

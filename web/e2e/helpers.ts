@@ -1,4 +1,11 @@
-import { expect, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Browser,
+  type BrowserContext,
+  type BrowserContextOptions,
+  type Page,
+} from "@playwright/test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 
@@ -26,12 +33,45 @@ export function readLatestLoginToken(email: string): string {
   throw new Error(`Brak wiadomości dla ${email} w ${dir}`);
 }
 
-/** Logowanie magic linkiem przez pole „Mam link lub token”. */
-export async function login(page: Page, email: string): Promise<void> {
+/**
+ * Czeka, aż React zahydruje element (dostaje własności `__reactProps$…`). Tekst wpisany w pole przed hydracją
+ * jest przy niej kasowany (pole kontrolowane), co w WebKicie, wolniejszym przy starcie, dawało losowy
+ * błąd „Podaj adres e-mail.” przy wysyłce formularza.
+ */
+export async function waitForHydration(page: Page, selector: string): Promise<void> {
+  const timeout = 15_000;
+  try {
+    await page.waitForFunction(
+      (css) => {
+        const element = document.querySelector(css);
+        return (
+          element !== null && Object.keys(element).some((key) => key.startsWith("__reactProps$"))
+        );
+      },
+      selector,
+      { timeout },
+    );
+  } catch (error) {
+    throw new Error(
+      `${selector} nie zahydrowany w ${timeout / 1000} s - znacznik Reacta __reactProps$ nie znaleziony ` +
+        "(zmiana wnętrza Reacta albo kokpit się nie uruchomił?)",
+      { cause: error },
+    );
+  }
+}
+
+/** Formularz logowania: wpisuje adres i prosi o link; kończy na ekranie „Sprawdź skrzynkę”. */
+export async function requestLoginLink(page: Page, email: string): Promise<void> {
   await page.goto("/login");
+  await waitForHydration(page, "#login-email");
   await page.getByLabel("Adres e-mail").fill(email);
   await page.getByRole("button", { name: "Wyślij link logowania" }).click();
   await expect(page.getByRole("heading", { name: "Sprawdź skrzynkę" })).toBeVisible();
+}
+
+/** Logowanie magic linkiem przez pole „Mam link lub token”. */
+export async function login(page: Page, email: string): Promise<void> {
+  await requestLoginLink(page, email);
   const token = readLatestLoginToken(email);
   await page.getByText("Mam link lub token").click();
   await page.getByLabel("Link lub token").fill(token);
@@ -81,4 +121,85 @@ export async function expectNoHorizontalOverflow(page: Page): Promise<void> {
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow, "poziome przewijanie strony").toBeLessThanOrEqual(0);
+}
+
+/**
+ * Drugi (np. „obcy”) kontekst przeglądarki z opcjami projektu. `browser.newContext()` nie dziedziczy `use`
+ * z playwright.config.ts, więc bez tego helpera gość nie dostałby `ignoreHTTPSErrors` (stos e2e z E2E_TLS=1)
+ * ani strefy czasowej. Wywołuj w treści testu; `overrides` nadpisują wartości projektu (np. `{ locale: "en-US" }`).
+ */
+export async function newProjectContext(
+  browser: Browser,
+  overrides: BrowserContextOptions = {},
+): Promise<BrowserContext> {
+  const { baseURL, ignoreHTTPSErrors, locale, timezoneId } = test.info().project.use;
+  return browser.newContext({ baseURL, ignoreHTTPSErrors, locale, timezoneId, ...overrides });
+}
+
+const CLIPBOARD_KEY = "__e2eClipboard";
+
+function isChromium(context: BrowserContext): boolean {
+  return context.browser()?.browserType().name() === "chromium";
+}
+
+/**
+ * Przygotowuje schowek przed nawigacją. Chromium: prawdziwe uprawnienia, odczyt przez `readText`.
+ * Firefox i WebKit nie pozwalają Playwrightowi odczytać schowka, więc `navigator.clipboard.writeText` jest
+ * przechwytywane (ostatni zapisany tekst ląduje w `window.__e2eClipboard`); odczyt robi `readClipboard`.
+ */
+export async function prepareClipboard(context: BrowserContext): Promise<void> {
+  if (isChromium(context)) {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]).catch(() => undefined);
+    return;
+  }
+  await context.addInitScript((key) => {
+    const target = window as unknown as Record<string, unknown>;
+    target[key] = null;
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText = (text: string) => {
+      target[key] = String(text);
+      return Promise.resolve();
+    };
+  }, CLIPBOARD_KEY);
+}
+
+/** Ostatnio skopiowany tekst (zob. `prepareClipboard`). */
+export async function readClipboard(page: Page): Promise<string | null> {
+  if (isChromium(page.context())) return page.evaluate(() => navigator.clipboard.readText());
+  return page.evaluate(
+    (key) => (window as unknown as Record<string, string | null>)[key] ?? null,
+    CLIPBOARD_KEY,
+  );
+}
+
+const cspViolationsByPage = new WeakMap<Page, string[]>();
+
+/**
+ * Zbiera naruszenia CSP niezależnie od silnika. Komunikaty w konsoli mają inny format w Chromium, Firefoksie
+ * i WebKicie, więc nasłuchujemy standardowego zdarzenia `securitypolicyviolation` (każdy dokument, także po
+ * nawigacji) i przekazujemy je do testu przez `exposeFunction`. Wywołaj przed pierwszym `page.goto`.
+ * Zwrócona tablica jest wypełniana na bieżąco: opis w formie `dyrektywa | zablokowany zasób | źródło`.
+ */
+export async function collectCspViolations(page: Page): Promise<string[]> {
+  const existing = cspViolationsByPage.get(page);
+  if (existing) return existing; // drugie wywołanie na tej samej stronie: ta sama lista (exposeFunction rzuciłoby)
+  const violations: string[] = [];
+  cspViolationsByPage.set(page, violations);
+  await page.exposeFunction("__e2eReportCspViolation", (description: string) => {
+    violations.push(description);
+  });
+  await page.addInitScript(() => {
+    window.addEventListener(
+      "securitypolicyviolation",
+      (event) => {
+        const report = (window as unknown as Record<string, (value: string) => void>)
+          .__e2eReportCspViolation;
+        report?.(
+          `${event.effectiveDirective} | ${event.blockedURI} | ${event.sourceFile || document.URL}`,
+        );
+      },
+      true,
+    );
+  });
+  return violations;
 }
