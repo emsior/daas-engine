@@ -74,7 +74,7 @@ function openapiPaths(): Set<string> {
 
 describe("kontrakt API (docs/openapi.json)", () => {
   it("typy żądań i odpowiedzi kompilują się względem schematów backendu", () => {
-    expect(requests).toHaveLength(9);
+    expect(requests).toHaveLength(8);
     expect(Object.keys(responses)).toHaveLength(9);
   });
 

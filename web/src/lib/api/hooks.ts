@@ -254,6 +254,9 @@ export function useDataHealth(org: string, weeks: number) {
     queryKey: qk.dataHealth(org, weeks),
     queryFn: ({ signal }) => api.getDataHealth(org, weeks, signal),
     placeholderData: keepPreviousData,
+  });
+}
+
 /* --- OAuth: zgoda i połączone aplikacje --- */
 
 /** Prośba o dostęp jest jednorazowa: bez ponawiania (404/410 to stan, nie awaria) i bez odświeżania po decyzji. */
