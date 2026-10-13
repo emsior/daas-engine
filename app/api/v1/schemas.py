@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 
 from app.control import scopes as sc
 from app.control.service import is_valid_email, normalize_email
+from app.core.models import PERIOD_MAX_DAYS, check_period_date, check_period_range
 
 Locale = Literal["pl", "en"]
 RoleName = Literal["owner", "admin", "member"]
@@ -19,8 +20,6 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 
 #: Zakres dat runu (`JobCreate.period_from/period_to`): najwczesniejsza dozwolona data i najdluzszy zakres w dniach
 #: (oba konce wlacznie). Starsze daty i dluzsze zakresy to niemal zawsze pomylka w formacie albo w roku.
-PERIOD_MIN_DATE = date(2000, 1, 1)
-PERIOD_MAX_DAYS = 400
 
 
 class Out(BaseModel):
@@ -223,24 +222,17 @@ class JobCreate(BaseModel):
                     f"and at most {PERIOD_MAX_DAYS} days after it counting both ends. `ecommerce_demo` only; "
                     "`null` = no upper bound")
 
+    # granice wspolne z selfhost `RunRequest` (`app.core.models`): ten sam kontrakt w obu trybach
     @field_validator("period_from", "period_to")
     @classmethod
-    def _not_too_old(cls, value: date | None) -> date | None:
-        if value is not None and value < PERIOD_MIN_DATE:
-            raise ValueError(f"date must not be earlier than {PERIOD_MIN_DATE.isoformat()}")
-        return value
+    def _period_dates(cls, value: date | None) -> date | None:
+        return check_period_date(value)
 
     @field_validator("period_to")
     @classmethod
     def _period_order(cls, value: date | None, info: ValidationInfo) -> date | None:
         """Kolejnosc i dlugosc zakresu; blad ma `loc` = `period_to` (pole `period_from` jest juz zwalidowane)."""
-        start = info.data.get("period_from")
-        if value is None or start is None:
-            return value
-        if value < start:
-            raise ValueError("period_to must not be earlier than period_from")
-        if (value - start).days + 1 > PERIOD_MAX_DAYS:
-            raise ValueError(f"the period must not be longer than {PERIOD_MAX_DAYS} days")
+        check_period_range(info.data.get("period_from"), value)
         return value
 
 
@@ -420,8 +412,9 @@ ChatWebhookKind = Literal["slack", "teams", "generic"]
 
 
 class ScheduleIn(BaseModel):
-    """Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: adres webhooka
-    czatu jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres)."""
+    """Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: para webhooka
+    czatu - adres jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres),
+    a pominiety `notify_webhook_kind` tez zostaje jak zapisany (bez adresu nie ma czego przestawiac)."""
 
     reminder_enabled: bool = Field(default=False, description="cotygodniowe przypomnienie e-mail o eksporcie")
     reminder_weekday: int = Field(default=0, ge=0, le=6, description="dzien tygodnia: 0 = poniedzialek, 6 = niedziela")
@@ -436,7 +429,7 @@ class ScheduleIn(BaseModel):
                                                               "(sukces i blad)")
     notify_webhook_kind: ChatWebhookKind = Field(
         default="slack", description="format of the chat message after a run: `slack` (Incoming Webhook), `teams` "
-                                     "(Workflows webhook trigger) or `generic` (plain JSON); send it with every PUT")
+                                     "(Workflows webhook trigger) or `generic` (plain JSON); omitted = unchanged")
     notify_webhook_url: str | None = Field(  # max_length = kolumna `org_schedules.notify_webhook_url`
         default=None, max_length=512, examples=["https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX"],
         description="chat webhook address (write-only secret, never returned). Omitted = unchanged, `null` = remove "

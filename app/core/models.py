@@ -25,6 +25,29 @@ class RunStatus(str, Enum):
 # ---------------------------------------------------------------------------
 # API: żądania / odpowiedzi
 # ---------------------------------------------------------------------------
+#: Granice okresu raportu (`period_from`/`period_to`) wspolne dla selfhost `POST /run`, v1 `POST .../jobs` i MCP
+#: `start_run`: nie wczesniej niz 2000-01-01, nie dluzej niz 400 dni liczac oba konce.
+PERIOD_MIN_DATE = date(2000, 1, 1)
+PERIOD_MAX_DAYS = 400
+
+
+def check_period_date(value: date | None) -> date | None:
+    """Pojedyncza granica okresu: nie wczesniej niz `PERIOD_MIN_DATE` (walidator pola)."""
+    if value is not None and value < PERIOD_MIN_DATE:
+        raise ValueError(f"date must not be earlier than {PERIOD_MIN_DATE.isoformat()}")
+    return value
+
+
+def check_period_range(start: date | None, end: date | None) -> None:
+    """Kolejnosc i dlugosc zakresu (walidator `period_to`, gdy obie granice sa podane)."""
+    if start is None or end is None:
+        return
+    if end < start:
+        raise ValueError("period_to must not be earlier than period_from")
+    if (end - start).days + 1 > PERIOD_MAX_DAYS:
+        raise ValueError(f"the period must not be longer than {PERIOD_MAX_DAYS} days")
+
+
 class RunRequest(BaseModel):
     pipeline: PipelineName = Field(..., description="Nazwa pipeline'u do uruchomienia")
     force_mock: bool = Field(default=False, description="Wymuś fixtures nawet gdy sekret istnieje")
@@ -41,11 +64,17 @@ class RunRequest(BaseModel):
     )
     client_name: str | None = Field(default=None, description="Nazwa klienta do nagłówka raportu")
     period_from: date | None = Field(
-        default=None, description="First day of the requested period (inclusive); ecommerce_demo counts only "
-                                  "orders dated on or after it. Null = no lower bound")
+        default=None, description="First day of the requested period (inclusive, not before 2000-01-01); "
+                                  "ecommerce_demo counts only orders dated on or after it. Null = no lower bound")
     period_to: date | None = Field(
-        default=None, description="Last day of the requested period (inclusive); ecommerce_demo counts only "
-                                  "orders dated on or before it. Null = no upper bound")
+        default=None, description="Last day of the requested period (inclusive; not before period_from and at most "
+                                  "400 days after it); ecommerce_demo counts only orders dated on or before it. "
+                                  "Null = no upper bound")
+
+    @field_validator("period_from", "period_to")
+    @classmethod
+    def _period_dates(cls, value: date | None) -> date | None:
+        return check_period_date(value)
 
     @model_validator(mode="after")
     def _one_source(self) -> RunRequest:
@@ -55,8 +84,7 @@ class RunRequest(BaseModel):
 
     @model_validator(mode="after")
     def _period_order(self) -> RunRequest:
-        if self.period_from and self.period_to and self.period_from > self.period_to:
-            raise ValueError("period_to must not be earlier than period_from")
+        check_period_range(self.period_from, self.period_to)
         return self
 
 

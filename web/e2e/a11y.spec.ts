@@ -148,6 +148,15 @@ test("axe: kokpit pusty i z danymi, upload, raport, artefakty, klucze API, czło
   await page.waitForLoadState("networkidle");
   for (const theme of themes) all.push(...(await scan(page, "ustawienia", theme)));
 
+  await page.goto("/settings/connected-apps");
+  await expect(page.getByRole("heading", { name: "Połączone aplikacje" })).toBeVisible();
+  for (const theme of themes) all.push(...(await scan(page, "połączone-aplikacje", theme)));
+
+  await page.goto("/health");
+  await expect(page.getByRole("heading", { name: "Zdrowie danych", level: 1 })).toBeVisible();
+  await page.waitForLoadState("networkidle");
+  for (const theme of themes) all.push(...(await scan(page, "zdrowie-danych", theme)));
+
   expect(blocking(all), JSON.stringify(blocking(all), null, 2)).toEqual([]);
 });
 

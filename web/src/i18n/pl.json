@@ -106,7 +106,7 @@
   "oauth.consent.heading": "Aplikacja {client} prosi o dostęp",
   "oauth.consent.unnamed": "bez nazwy",
   "oauth.consent.lead": "Po zgodzie aplikacja będzie działać w Twoim imieniu w wybranej organizacji, tylko w zakresie zaznaczonych uprawnień. Odłączysz ją w każdej chwili w Ustawieniach.",
-  "oauth.consent.selfDeclared": "Nazwę podała sama aplikacja. Zezwól tylko wtedy, gdy to Ty zaczynasz łączenie w tej aplikacji.",
+  "oauth.consent.selfDeclared": "Nazwę podała sama aplikacja i nikt jej nie zweryfikował — każdy może zarejestrować aplikację o dowolnej nazwie. Zezwól tylko wtedy, gdy to Ty przed chwilą zaczynasz łączenie w tej aplikacji i rozpoznajesz adres powrotu poniżej. Zgoda z linku przysłanego przez kogoś innego daje tej osobie dostęp do danych organizacji.",
   "oauth.consent.redirect": "Po decyzji wrócisz do: {host}",
   "oauth.consent.expires": "Decyzję podejmij do {time}.",
   "oauth.consent.org": "Organizacja",

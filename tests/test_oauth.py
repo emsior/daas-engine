@@ -584,10 +584,38 @@ def test_purge_removes_expired_codes_and_tokens(cloud_client, cloud_settings, or
     async def purge(db):
         return await purge_expired(db, now)
 
-    assert with_db(cloud_settings, purge) == (1, 1)
+    assert with_db(cloud_settings, purge) == (1, 1, 0)
     assert [c.status for c in get_rows(cloud_settings, models.OAuthCode)] == ["pending"]
     assert [t.kind for t in tokens(cloud_settings)] == ["refresh"]
-    assert with_db(cloud_settings, purge) == (0, 0)
+    assert with_db(cloud_settings, purge) == (0, 0, 0)
+
+
+def test_purge_removes_clients_left_without_codes_and_tokens(cloud_client, cloud_settings, org):
+    """Rejestracja `/register` jest anonimowa: klient bez zadnego zadania/kodu i tokenu znika dobe po rejestracji,
+    klient z aktywnym polaczeniem albo swiezym zadaniem zostaje (QS2-01)."""
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    abandoned_fresh = register_ok(cloud_client)["client_id"]
+    abandoned_old = register_ok(cloud_client)["client_id"]
+    pending_old = register_ok(cloud_client)["client_id"]
+    start(cloud_client, pending_old)
+    now = utcnow()
+    update_rows(cloud_settings, models.OAuthClient, {"created_at": now - timedelta(days=2)},
+                models.OAuthClient.client_id.in_([abandoned_old, pending_old, conn.client_id]))
+
+    async def purge(db):
+        return await purge_expired(db, now)
+
+    assert with_db(cloud_settings, purge) == (0, 0, 1)
+    left = {c.client_id for c in get_rows(cloud_settings, models.OAuthClient)}
+    assert left == {conn.client_id, abandoned_fresh, pending_old}
+    assert mcp_status(cloud_client, conn.access_token) == 200
+
+    # zadanie `pending_old` wygasa i po dobie jest sprzatane -> w nastepnym przebiegu znika tez jego klient
+    update_rows(cloud_settings, models.OAuthCode, {"expires_at": now - timedelta(days=2)},
+                models.OAuthCode.client_id == pending_old)
+    assert with_db(cloud_settings, purge) == (1, 0, 1)
+    assert {c.client_id for c in get_rows(cloud_settings, models.OAuthClient)} == {conn.client_id, abandoned_fresh}
+    assert register(cloud_client).status_code == 201  # sprzatniety klient rejestruje sie od nowa
 
 
 def test_retention_loop_purges_oauth_rows(cloud_client, cloud_settings, org):
@@ -604,9 +632,58 @@ def test_retention_loop_purges_oauth_rows(cloud_client, cloud_settings, org):
         finally:
             await engine.dispose()
 
-    assert run(go()) == (0, 2)
+    assert run(go()) == (0, 2, 0)
     assert tokens(cloud_settings) == []
     assert mcp_status(cloud_client, conn.access_token) == 401
+
+
+# ================================================================ caly przeplyw w jednym scenariuszu
+def test_oauth_full_flow_end_to_end(cloud_client, cloud_settings, org):
+    """Jeden scenariusz od rejestracji po odciecie (T2-01): DCR -> /authorize -> zgoda -> /token -> /mcp ->
+    odswiezenie (stara para martwa, nowa zyje) -> /revoke -> /mcp 401 -> zadne odswiezenie juz nie dziala; w bazie
+    nie ma jawnych sekretow, a audyt ma komplet zdarzen w kolejnosci."""
+    client_id = register_ok(cloud_client, scope="runs:read reports:read")["client_id"]
+    assert register(cloud_client).status_code == 201  # inny klient nie przeszkadza
+    request_id, verifier = start(cloud_client, client_id, scope="runs:read")
+    pending = read_request(cloud_client, cloud_settings, org.user_id, request_id).json()
+    assert pending["client_name"] == CLIENT_NAME and pending["redirect_host"] == "agent.example.test"
+    assert [o["org_id"] for o in pending["organizations"]] == [org.org_id]
+    code = code_from(decide(cloud_client, cloud_settings, org.user_id, request_id, org_id=org.org_id))
+
+    first = token(cloud_client, client_id, code, verifier)
+    assert first.status_code == 200, first.text
+    pair = first.json()
+    assert pair["token_type"].lower() == "bearer" and pair["scope"] == "runs:read"
+    assert pair["access_token"].startswith(ACCESS_PREFIX) and pair["refresh_token"].startswith(REFRESH_PREFIX)
+    assert mcp_status(cloud_client, pair["access_token"]) == 200
+    who = ok(call_tool(cloud_client, pair["access_token"], "whoami"))
+    assert (who["auth"], who["org_id"], who["client_id"]) == ("oauth", org.org_id, client_id)
+
+    rotated = refresh(cloud_client, client_id, pair["refresh_token"])
+    assert rotated.status_code == 200, rotated.text
+    second = rotated.json()
+    assert second["access_token"] != pair["access_token"] and second["refresh_token"] != pair["refresh_token"]
+    assert mcp_status(cloud_client, pair["access_token"]) == 401  # stara para cofnieta przez rotacje
+    assert mcp_status(cloud_client, second["access_token"]) == 200
+    assert refresh(cloud_client, client_id, pair["refresh_token"]).json()["error"] == "invalid_grant"
+
+    assert revoke(cloud_client, client_id, second["refresh_token"], hint="refresh_token").status_code == 200
+    assert mcp_status(cloud_client, second["access_token"]) == 401
+    assert refresh(cloud_client, client_id, second["refresh_token"]).json()["error"] == "invalid_grant"
+    assert cloud_client.get(f"{API}/orgs/{org.org_id}/oauth/grants",
+                            headers=user_headers(cloud_settings, org.user_id)).json() == []
+
+    rows = tokens(cloud_settings)
+    assert len(rows) == 4 and all(t.revoked_at is not None for t in rows)
+    secrets = {pair["access_token"], pair["refresh_token"], second["access_token"], second["refresh_token"], code}
+    assert {t.token_hash for t in rows} == {sha256_hex(v) for v in secrets if v != code}
+    stored = get_rows(cloud_settings, models.OAuthCode, models.OAuthCode.id == request_id)[0]
+    assert stored.status == "exchanged" and stored.code_hash == sha256_hex(code)
+    for event in get_rows(cloud_settings, models.AuditEvent):
+        assert not (secrets & set(map(str, event.meta.values()))), event.action
+    actions = [e.action for e in get_rows(cloud_settings, models.AuditEvent) if e.action.startswith("oauth.")]
+    assert actions == ["oauth.client_registered", "oauth.client_registered", "oauth.consent", "oauth.token_issued",
+                       "oauth.token_issued", "oauth.token_revoked"]
 
 
 # ================================================================ tryby i konfiguracja

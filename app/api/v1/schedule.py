@@ -69,9 +69,10 @@ async def get_schedule(ctx: OrgContext = Depends(_READ), db: AsyncSession = Depe
 
 
 @router.put("/orgs/{org_id}/schedule", response_model=ScheduleOut, summary="Save the schedule and notifications",
-            description="Replaces the whole schedule (an omitted field takes its default), except "
-                        "`notify_webhook_url`: omitted = unchanged, `null` = remove, text = set (https, public "
-                        "address, no credentials). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in "
+            description="Replaces the whole schedule (an omitted field takes its default), except the chat webhook "
+                        "pair: `notify_webhook_url` omitted = unchanged, `null` = remove, text = set (https, public "
+                        "address, no credentials); `notify_webhook_kind` omitted = unchanged. `reminder_weekday` 0-6 "
+                        "(0 = Monday), `reminder_hour` 0-23 in "
                         "`timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. "
                         "`next_reminder_at` is recomputed on every save.",
             responses={422: {"description": "Invalid weekday, hour, time zone or chat webhook address"}})
@@ -84,9 +85,12 @@ async def put_schedule(body: ScheduleIn, request: Request, ctx: OrgContext = Dep
     current = row if row is not None else sched.default_schedule(ctx.org_id)
     before = {field: getattr(current, field) for field in sched.EDITABLE_FIELDS}
     if row is None:
-        row = OrgSchedule(org_id=ctx.org_id, notify_webhook_url=None)
+        row = current  # obiekt z wartosciami domyslnymi (`default_schedule`) staje sie wierszem
         db.add(row)
-    for field, value in body.model_dump(exclude={"notify_webhook_url"}).items():
+    # para webhooka czatu nie wraca do domyslnych przy pominieciu: adres jest tylko do zapisu, a rodzaj bez adresu
+    # nie ma sensu zmieniac (klient API, ktory nie zna pary, nie przestawi Teams na format Slacka)
+    untouched = {"notify_webhook_url"} | ({"notify_webhook_kind"} - body.model_fields_set)
+    for field, value in body.model_dump(exclude=untouched).items():
         setattr(row, field, value)
     if url_sent:
         row.notify_webhook_url = url

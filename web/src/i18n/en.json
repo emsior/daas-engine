@@ -106,7 +106,7 @@
   "oauth.consent.heading": "{client} is asking for access",
   "oauth.consent.unnamed": "Unnamed application",
   "oauth.consent.lead": "Once you allow it, the application acts on your behalf in the chosen organization, only within the permissions you tick. You can disconnect it at any time in Settings.",
-  "oauth.consent.selfDeclared": "The application chose this name itself. Allow only if you started connecting from it.",
+  "oauth.consent.selfDeclared": "The application chose this name itself and nobody verified it: anyone can register an application under any name. Allow only if you started connecting from it a moment ago and recognise the return address below. Allowing from a link someone else sent you gives that person access to the organization's data.",
   "oauth.consent.redirect": "After your decision you return to: {host}",
   "oauth.consent.expires": "Decide before {time}.",
   "oauth.consent.org": "Organization",

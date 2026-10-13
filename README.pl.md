@@ -164,7 +164,7 @@ Mapper (`app/sources/csv_mapper.py`): aliasy PL/EN dla `order_id, date, product,
 
 ## Dostęp dla agentów (MCP)
 
-Asystenci AI (Claude, ChatGPT, Codex, Gemini) mogą używać DaaS Engine jak narzędzia: API ma wbudowany serwer MCP pod `POST /mcp` (Streamable HTTP, bezstanowy, odpowiedzi JSON). Łączysz go kluczem API organizacji w nagłówku `Authorization: Bearer <klucz>` i prosisz zwykłym językiem: „wgraj ten eksport, policz raport i powiedz, co spadło". 12 narzędzi obejmuje upload (tekst CSV), runy, raporty, weryfikację hasha, status artefaktów i zużycie — zawsze w organizacji klucza.
+Asystenci AI (Claude, ChatGPT, Codex, Gemini) mogą używać DaaS Engine jak narzędzia: API ma wbudowany serwer MCP pod `POST /mcp` (Streamable HTTP, bezstanowy, odpowiedzi JSON). Łączysz go kluczem API organizacji w nagłówku `Authorization: Bearer <klucz>` i prosisz zwykłym językiem: „wgraj ten eksport, policz raport i powiedz, co spadło". 13 narzędzi obejmuje upload (tekst CSV albo plik XLSX), runy (opcjonalnie za wybrany okres), raporty, weryfikację hasha, status artefaktów i zużycie — zawsze w organizacji klucza; raporty są też dostępne jako zasoby MCP, a ChatGPT lub Claude mogą połączyć się przez OAuth 2.1 zamiast kluczem.
 
 ```bash
 claude mcp add --transport http daas https://raporty.example.com/mcp --header "Authorization: Bearer $KEY"

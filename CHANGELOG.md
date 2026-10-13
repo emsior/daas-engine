@@ -61,15 +61,15 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   new cockpit screen *Data health* (`/health`) with the verdict, key figures and an 8/12/26-week table with bars.
 - **Chat notification after a run** (cloud): the schedule takes a Slack Incoming Webhook, Microsoft Teams (Workflows)
   or generic JSON address (`notify_webhook_kind`, `notify_webhook_url`; write-only secret — `GET` shows only
-  `notify_webhook_set` and a mask such as `hooks.slack.com/…XyZ9`, an omitted address stays unchanged, `null` removes
-  it). Each run then posts one message (status incl. partial, data period, report SHA-256, link to the run; no report
+  `notify_webhook_set` and a mask such as `hooks.slack.com/…XyZ9`; an omitted address or kind stays unchanged, `null`
+  removes the address). Each run then posts one message (status incl. partial, data period, report SHA-256, link to the run; no report
   content) with the SSRF rules and IP pinning of the signed webhooks, a single attempt with
   `DAAS_NOTIFY_WEBHOOK_TIMEOUT_SEC`, independent of the run e-mail, audited as `schedule.webhook_notified`; the
   cockpit section "Chat notification" sets it.
 - **Report period and XLSX over MCP.** `POST .../jobs` and the MCP tool `start_run` take `period_from`/`period_to`
-  (ISO dates, inclusive, either optional; at most 400 days, not before 2000-01-01): an `ecommerce_demo` run counts only
-  the orders dated in that range (filtered before storage and metrics; the source line names the period and the kept
-  records; a period without orders ends `no_records` and uses no run of the plan); other pipelines answer
+  (ISO dates, inclusive, either optional; at most 400 days, not before 2000-01-01, the same bounds as the self-hosted
+  `POST /run`): an `ecommerce_demo` run counts only the orders dated in that range (filtered before storage and
+  metrics; the source line names the period, the kept records and how many rows had no readable date; a period without orders ends `no_records` and uses no run of the plan); other pipelines answer
   `422 period_not_supported`. The job (`JobOut`, MCP `get_job`) keeps the requested period, `job.created` audits it and
   MCP reuses a pending job only for the same upload, pipeline and period. New MCP tool `upload_xlsx` (13 tools): an
   XLSX workbook as base64 through the same checks as the REST upload, `DAAS_MCP_MAX_UPLOAD_BYTES` counted on the
@@ -87,7 +87,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   RFC 8414 / RFC 9728 metadata, `resource_metadata` in the `401` of `/mcp`), PKCE S256 only, single-use 60-second
   codes (reuse revokes the tokens), rotating refresh tokens, tokens stored as SHA-256 and cut to the user's current
   role. `GET/DELETE /api/v1/orgs/{org_id}/oauth/grants` and Settings → Connected apps; audit `oauth.*`; settings
-  `DAAS_OAUTH_*`; Caddy routes. Guide: `docs/MCP.md`.
+  `DAAS_OAUTH_*`; Caddy routes; the retention loop also drops registrations left a day without any code or token.
+  Guide: `docs/MCP.md`.
 
 ### Fixed
 

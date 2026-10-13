@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 
@@ -172,6 +173,22 @@ def test_omitted_address_stays_and_null_removes_it(cloud_client, cloud_settings,
     assert (r.json()["notify_webhook_set"], r.json()["notify_webhook_hint"]) == (False, None)
     assert stored_url(cloud_settings, org.org_id) is None
     assert "notify_webhook_url" in events(cloud_settings, org.org_id, "schedule.updated")[-1].meta["fields"]
+
+
+def test_put_without_kind_keeps_teams(cloud_client, cloud_settings, org):
+    """`notify_webhook_kind` pominiety = bez zmian (jak adres): klient API, ktory zapisuje tylko przypomnienie,
+    nie przestawi adresu Teams na format Slacka (C2-01)."""
+    put(cloud_client, org, notify_webhook_url=TEAMS_URL, notify_webhook_kind="teams")
+    r = put(cloud_client, org, reminder_enabled=True)
+    assert r.status_code == 200, r.text
+    assert (r.json()["notify_webhook_kind"], r.json()["notify_webhook_set"]) == ("teams", True)
+    assert events(cloud_settings, org.org_id, "schedule.updated")[-1].meta == {"fields": ["reminder_enabled"]}
+    r = put(cloud_client, org, notify_webhook_kind="generic")  # jawnie wyslany rodzaj nadal zmienia
+    assert r.json()["notify_webhook_kind"] == "generic"
+    assert events(cloud_settings, org.org_id, "schedule.updated")[-1].meta["fields"] == ["notify_webhook_kind",
+                                                                                          "reminder_enabled"]
+    assert cloud_client.get(schedule_url(org.org_id), headers=user_headers(cloud_settings, org.user_id)).json()[
+        "notify_webhook_kind"] == "generic"
 
 
 def test_the_same_address_again_is_not_a_change(cloud_client, cloud_settings, org):
@@ -387,6 +404,19 @@ def test_org_name_is_sanitized_and_escaped_in_every_format():
         assert "evil" not in wire and "<!channel>" not in wire, kind
     slack = build_payload("slack", message)["blocks"][0]["text"]["text"]
     assert "*Organizacja:* Sklep !channel &amp; Co" in slack  # `<` `>` usuniete, `&` jako encja mrkdwn
+
+
+def test_markdown_link_in_the_organization_name_cannot_become_a_link_in_teams_or_slack():
+    """Adaptive Card i mrkdwn renderuja podzbior Markdown; `sanitize_org_name` usuwa kazdy URL i domene, wiec
+    `[tekst](adres)` w nazwie organizacji nie ma czego linkowac. Jedyny adres w wiadomosci to link do kokpitu (QS2-04)."""
+    settings = Settings(_env_file=None, daas_cockpit_origin="https://cockpit.example.test")
+    name = "Firma [Zaloguj ponownie](https://phish.example.test/login) [mail](mailto:x@phish.example.test) **pilne**"
+    message = _message(settings, org_name=name)
+    for kind in CHAT_KINDS:
+        wire = json.dumps(build_payload(kind, message), ensure_ascii=False)
+        assert "phish" not in wire and "](http" not in wire and "mailto" not in wire, kind
+        hosts = set(re.findall(r"https?://([^/\s\"]+)", wire)) - {"adaptivecards.io"}  # `$schema` karty Teams
+        assert hosts == {"cockpit.example.test"}, (kind, hosts)
 
 
 def test_unknown_kind_cannot_be_built():

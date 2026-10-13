@@ -566,7 +566,7 @@ export interface paths {
         get: operations["get_schedule_api_v1_orgs__org_id__schedule_get"];
         /**
          * Save the schedule and notifications
-         * @description Replaces the whole schedule (an omitted field takes its default), except `notify_webhook_url`: omitted = unchanged, `null` = remove, text = set (https, public address, no credentials). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.
+         * @description Replaces the whole schedule (an omitted field takes its default), except the chat webhook pair: `notify_webhook_url` omitted = unchanged, `null` = remove, text = set (https, public address, no credentials); `notify_webhook_kind` omitted = unchanged. `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.
          */
         put: operations["put_schedule_api_v1_orgs__org_id__schedule_put"];
         post?: never;
@@ -1608,8 +1608,9 @@ export interface components {
         };
         /**
          * ScheduleIn
-         * @description Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: adres webhooka
-         *     czatu jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres).
+         * @description Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: para webhooka
+         *     czatu - adres jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres),
+         *     a pominiety `notify_webhook_kind` tez zostaje jak zapisany (bez adresu nie ma czego przestawiac).
          */
         ScheduleIn: {
             /**
@@ -1626,7 +1627,7 @@ export interface components {
             notify_on_finish: boolean;
             /**
              * Notify Webhook Kind
-             * @description format of the chat message after a run: `slack` (Incoming Webhook), `teams` (Workflows webhook trigger) or `generic` (plain JSON); send it with every PUT
+             * @description format of the chat message after a run: `slack` (Incoming Webhook), `teams` (Workflows webhook trigger) or `generic` (plain JSON); omitted = unchanged
              * @default slack
              * @enum {string}
              */

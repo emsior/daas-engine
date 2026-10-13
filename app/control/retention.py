@@ -8,8 +8,9 @@ Co jest usuwane dla organizacji:
     * wiersze tenantowego DuckDB tych runow oraz wszystkie z `runs.started_at` starszym niz retencja (tabele
       `runs`, `cs2_matches`, `ecommerce_orders`, `uksc_hosts|checks|inventory` maja klucz `run_id`).
 Uwaga: kasowanie wierszy `uksc_*` oznacza utrate porownania "poprzedni run" dla najstarszych runow — to zamierzone.
-Petla retencji sprzata tez OAuth konektorow MCP (`purge_oauth`): zadania/kody autoryzacji dobe po wygasnieciu
-i tokeny 30 dni po wygasnieciu (w bazie leza tylko ich skroty SHA-256).
+Petla retencji sprzata tez OAuth konektorow MCP (`purge_oauth`): zadania/kody autoryzacji dobe po wygasnieciu,
+tokeny 30 dni po wygasnieciu (w bazie leza tylko ich skroty SHA-256) i klientow bez zadnego kodu ani tokenu dobe po
+rejestracji (anonimowa rejestracja `/register` nie moze rosnac bez konca).
 Zasady bezpieczenstwa: usuwane sa wylacznie pliki lezace w `uploads/` albo `reports/` danego najemcy (sciezka
 rozwiazana i sprawdzona), nazwy plikow klienta nie trafiaja do audytu. Operacja jest idempotentna; `dry_run` tylko liczy.
 Zamek per organizacja (`TenantRegistry.lock`) wyklucza rownoczesny run tej organizacji.
@@ -168,13 +169,14 @@ async def purge_all(sessionmaker: async_sessionmaker[AsyncSession], registry: Te
     return reports
 
 
-async def purge_oauth(sessionmaker: async_sessionmaker[AsyncSession]) -> tuple[int, int]:
-    """Sprzatanie OAuth konektorow MCP: wygasle zadania/kody autoryzacji i tokeny (`app.control.oauth.purge_expired`)."""
+async def purge_oauth(sessionmaker: async_sessionmaker[AsyncSession]) -> tuple[int, int, int]:
+    """Sprzatanie OAuth konektorow MCP: wygasle zadania/kody autoryzacji, tokeny i porzuceni klienci
+    (`app.control.oauth.purge_expired`)."""
     async with sessionmaker() as db:
         counts = await purge_expired(db, utcnow())
         await db.commit()
     if any(counts):
-        log.info("retention oauth codes=%d tokens=%d", *counts)
+        log.info("retention oauth codes=%d tokens=%d clients=%d", *counts)
     return counts
 
 

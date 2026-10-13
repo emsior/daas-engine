@@ -225,13 +225,20 @@ def _filter_period(src: SourceResult, start: date | None, end: date | None) -> S
     """Rekordy z data (pole `date`) w zakresie `start..end` wlacznie; None = brak granicy z tej strony.
 
     `detail` dostaje dopisek z zakresem i licznikami (bez danych klienta), np.
-    `period 2026-08-01..2026-08-07 (8 of 15 records)`."""
+    `period 2026-08-01..2026-08-07 (8 of 15 records)`; rekordy bez czytelnej daty nie moga trafic do zakresu
+    i sa liczone osobno: `(... records, 2 without a date)`."""
     total = len(src.records)
-    kept = [r for r in src.records
-            if (day := _day(r.get("date"))) is not None
-            and (start is None or day >= start) and (end is None or day <= end)]
+    undated = 0
+    kept: list[dict[str, Any]] = []
+    for record in src.records:
+        day = _day(record.get("date"))
+        if day is None:
+            undated += 1
+        elif (start is None or day >= start) and (end is None or day <= end):
+            kept.append(record)
     label = f"{start.isoformat() if start else ''}..{end.isoformat() if end else ''}"
-    note = f"period {label} ({len(kept)} of {total} records)"
+    note = f"period {label} ({len(kept)} of {total} records"
+    note += f", {undated} without a date)" if undated else ")"
     src.records = kept
     src.detail = f"{src.detail} | {note}" if src.detail else note
     return src

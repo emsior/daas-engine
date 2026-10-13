@@ -55,7 +55,7 @@ from mcp.server.auth.settings import ClientRegistrationOptions, RevocationOption
 from mcp.shared.auth import OAuthClientInformationFull
 from mcp.shared.auth import OAuthToken as TokenResponse
 from pydantic import AnyHttpUrl, AnyUrl, ConfigDict, TypeAdapter, ValidationError
-from sqlalchemy import and_, delete, select, update
+from sqlalchemy import and_, delete, exists, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -89,9 +89,12 @@ CODE_TTL = timedelta(seconds=60)
 DEFAULT_SCOPES: tuple[str, ...] = (sc.RUNS_READ, sc.REPORTS_READ, sc.USAGE_READ)
 #: Dynamiczne rejestracje klientow na minute per adres IP (niezaleznie od limitu `ip` wszystkich tras).
 REGISTER_PER_MIN = 10
-#: Sprzatanie (`purge_expired`): kody po dniu od wygasniecia, tokeny po 30 dniach (slad dla list i audytu).
+#: Sprzatanie (`purge_expired`): kody po dniu od wygasniecia, tokeny po 30 dniach (slad dla list i audytu), klienci
+#: bez zadnego kodu ani tokenu po dobie od rejestracji (rejestracja `/register` jest anonimowa: bez sprzatania tabela
+#: `oauth_clients` roslaby bez konca, do 16 KiB na wiersz).
 CODE_RETENTION = timedelta(days=1)
 TOKEN_RETENTION = timedelta(days=30)
+CLIENT_RETENTION = timedelta(days=1)
 #: `last_used_at` tokenu dostepu jest zapisywane najwyzej raz na tyle czasu (jak `LAST_USED_THROTTLE` kluczy API).
 LAST_USED_THROTTLE = timedelta(minutes=5)
 #: Nazwa zasobu w metadanych RFC 9728.
@@ -161,37 +164,39 @@ def _new_secret(prefix: str) -> tuple[str, str]:
 # ============================================================================ cofanie poddrzewa tokenow
 async def revoke_subtree(db: AsyncSession, client_id: str, root_ids: Iterable[str], now: datetime) -> int:
     """Cofa tokeny o id z `root_ids` oraz wszystkich ich potomkow po `parent_id` (korzeniem moze byc tez id wiersza
-    `oauth_codes`). Jedno zapytanie po indeksie `client_id`, potem przejscie w pamieci. Zwraca liczbe cofnietych
-    tokenow (juz cofniete nie sa liczone). Commit robi wolajacy."""
-    rows = (await db.execute(select(OAuthToken).where(OAuthToken.client_id == client_id))).scalars().all()
-    children: dict[str, list[OAuthToken]] = {}
-    by_id = {r.id: r for r in rows}
-    for row in rows:
-        if row.parent_id:
-            children.setdefault(row.parent_id, []).append(row)
-    queue = list(root_ids)
-    picked: dict[str, OAuthToken] = {rid: by_id[rid] for rid in queue if rid in by_id}
-    while queue:
-        for child in children.get(queue.pop(), ()):
-            if child.id not in picked:
-                picked[child.id] = child
-                queue.append(child.id)
-    count = 0
-    for token in picked.values():
-        if token.revoked_at is None:
-            token.revoked_at = now
-            count += 1
-    return count
+    `oauth_codes`). Poddrzewo wyznacza rekurencyjne CTE po `parent_id` (SQLite i PostgreSQL), a do pamieci trafiaja
+    tylko tokeny jeszcze niecofniete — koszt zalezy od wielkosci polaczenia, nie od liczby wszystkich tokenow klienta
+    (rotacja odswiezania zostawia cofniete wiersze do czasu `purge_expired`). Zwraca liczbe cofnietych tokenow.
+    Commit robi wolajacy."""
+    roots = [rid for rid in dict.fromkeys(root_ids) if rid]
+    if not roots:
+        return 0
+    tok = OAuthToken.__table__
+    seed = select(tok.c.id).where(tok.c.client_id == client_id, or_(tok.c.id.in_(roots), tok.c.parent_id.in_(roots)))
+    subtree = seed.cte("oauth_subtree", recursive=True)
+    subtree = subtree.union_all(select(tok.c.id).where(tok.c.client_id == client_id,
+                                                        tok.c.parent_id == subtree.c.id))
+    rows = (await db.execute(select(OAuthToken).where(OAuthToken.id.in_(select(subtree.c.id)),
+                                                      OAuthToken.revoked_at.is_(None)))).scalars().all()
+    for token in rows:
+        token.revoked_at = now
+    return len(rows)
 
 
-async def purge_expired(db: AsyncSession, now: datetime | None = None) -> tuple[int, int]:
-    """Usuwa kody/zadania autoryzacji wygasle ponad dobe temu i tokeny wygasle ponad 30 dni temu.
-    Zwraca `(kody, tokeny)`. Commit robi wolajacy (petla retencji, `app.control.retention`)."""
+async def purge_expired(db: AsyncSession, now: datetime | None = None) -> tuple[int, int, int]:
+    """Usuwa kody/zadania autoryzacji wygasle ponad dobe temu, tokeny wygasle ponad 30 dni temu i klientow
+    zarejestrowanych ponad dobe temu, ktorzy nie maja juz zadnego kodu ani tokenu (rejestracja porzucona albo
+    polaczenie, ktorego wszystkie tokeny zostaly juz sprzatniete; klient rejestruje sie wtedy od nowa, RFC 7591).
+    Zwraca `(kody, tokeny, klienci)`. Commit robi wolajacy (petla retencji, `app.control.retention`)."""
     now = now or utcnow()
     codes = await db.execute(delete(OAuthCode).where(OAuthCode.expires_at < now - CODE_RETENTION))
     tokens = await db.execute(delete(OAuthToken).where(OAuthToken.expires_at.is_not(None),
                                                        OAuthToken.expires_at < now - TOKEN_RETENTION))
-    return codes.rowcount or 0, tokens.rowcount or 0
+    has_code = exists().where(OAuthCode.client_id == OAuthClient.client_id)
+    has_token = exists().where(OAuthToken.client_id == OAuthClient.client_id)
+    clients = await db.execute(delete(OAuthClient).where(OAuthClient.created_at < now - CLIENT_RETENTION,
+                                                         ~has_code, ~has_token))
+    return codes.rowcount or 0, tokens.rowcount or 0, clients.rowcount or 0
 
 
 # ============================================================================ provider (protokol SDK)

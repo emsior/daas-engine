@@ -1,7 +1,8 @@
 """Serwer MCP (Model Context Protocol) wbudowany w API: `POST /mcp`, Streamable HTTP, klucze API organizacji.
 
 Agent AI (Claude, ChatGPT, Codex, Gemini) dodaje DaaS jako zdalny serwer MCP po HTTP z naglowkiem
-`Authorization: Bearer <klucz API>` i dostaje 12 narzedzi (`app.mcp_server.tools.SPECS`), 4 szablony zasobow
+`Authorization: Bearer <klucz API>` (albo tokenem OAuth konektora, `app/control/oauth.py`) i dostaje 13 narzedzi
+(`app.mcp_server.tools.SPECS`), 4 szablony zasobow
 (`app.mcp_server.resources.SPECS`) i 3 prompty (`app.mcp_server.prompts.SPECS`). Dokumentacja: docs/MCP.md.
 
 Decyzje wynikajace z API SDK `mcp` 2.3 (oficjalne SDK Pythona; zrodla w `site-packages/mcp/`):

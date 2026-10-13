@@ -5,7 +5,7 @@ Fixture `client_export_pl.csv`: 15 zamowien z dni 01.08.2026-14.08.2026 (dwa 01.
 tydzien 01.08-07.08 to 8 zamowien."""
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
@@ -202,3 +202,29 @@ def test_runner_filters_the_demo_fixture_inclusively(runner):
 def test_run_request_rejects_a_reversed_period():
     with pytest.raises(ValidationError, match="period_to must not be earlier than period_from"):
         RunRequest(pipeline="ecommerce_demo", period_from=date(2026, 8, 7), period_to=date(2026, 8, 1))
+
+
+def test_run_request_shares_the_period_bounds_of_the_v1_api():
+    """Selfhost `POST /run` ma te same granice co v1 `POST .../jobs`: nie przed 2000-01-01, maks. 400 dni (C2-03)."""
+    with pytest.raises(ValidationError, match="not be earlier than 2000-01-01"):
+        RunRequest(pipeline="ecommerce_demo", period_from=date(1999, 12, 31))
+    with pytest.raises(ValidationError, match="longer than 400 days"):
+        RunRequest(pipeline="ecommerce_demo", period_from=date(2025, 1, 1), period_to=date(2026, 2, 5))
+    ok = RunRequest(pipeline="ecommerce_demo", period_from=date(2025, 1, 1), period_to=date(2026, 2, 4))
+    assert (ok.period_to - ok.period_from).days + 1 == 400
+
+
+def test_filter_period_counts_records_without_a_date_separately():
+    """Rekord bez czytelnej daty nie moze nalezec do zakresu; `detail` mowi, ile takich bylo (C2-02)."""
+    from app.core.models import DataStatus
+    from app.pipelines.runner import _filter_period
+    from app.sources.cs2_source import SourceResult
+
+    # zrodla daja `date`/`datetime` (`_day`); napis albo brak pola to rekord bez czytelnej daty
+    records = [{"date": date(2026, 8, 1), "order_id": "a"}, {"date": datetime(2026, 8, 9, 10), "order_id": "b"},
+               {"date": None, "order_id": "c"}, {"date": "not a date", "order_id": "d"}]
+    src = SourceResult(records=records, data_status=DataStatus.LIVE_DATA, detail="demo")
+    out = _filter_period(src, date(2026, 8, 1), date(2026, 8, 7))
+    assert [r["order_id"] for r in out.records] == ["a"]
+    assert out.detail == "demo | period 2026-08-01..2026-08-07 (1 of 4 records, 2 without a date)"
+    assert "not a date" not in out.detail

@@ -121,7 +121,7 @@ Selfhost legacy routes (same engine, one organization): `POST /upload` → `POST
 
 ## Agent access (MCP)
 
-AI assistants (Claude, ChatGPT, Codex, Gemini) can use DaaS Engine as a tool: the API has a built-in MCP server at `POST /mcp` (Streamable HTTP, stateless, JSON). Connect it with an organization API key in `Authorization: Bearer <key>` and ask for the flow in plain language; 12 tools cover upload (CSV text), runs, reports, hash verification, artifact status and usage, always inside the key's organization.
+AI assistants (Claude, ChatGPT, Codex, Gemini) can use DaaS Engine as a tool: the API has a built-in MCP server at `POST /mcp` (Streamable HTTP, stateless, JSON). Connect it with an organization API key in `Authorization: Bearer <key>` and ask for the flow in plain language; 13 tools cover upload (CSV text or an XLSX file), runs (optionally for a chosen period), reports, hash verification, artifact status and usage, always inside the key's organization; reports are also available as MCP resources, and ChatGPT or Claude can connect with OAuth 2.1 instead of a key.
 
 ```bash
 claude mcp add --transport http daas https://reports.example.com/mcp --header "Authorization: Bearer $KEY"

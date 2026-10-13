@@ -2071,7 +2071,7 @@
         "type": "object"
       },
       "ScheduleIn": {
-        "description": "Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: adres webhooka\nczatu jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres).",
+        "description": "Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: para webhooka\nczatu - adres jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres),\na pominiety `notify_webhook_kind` tez zostaje jak zapisany (bez adresu nie ma czego przestawiac).",
         "properties": {
           "auto_run_on_upload": {
             "default": false,
@@ -2087,7 +2087,7 @@
           },
           "notify_webhook_kind": {
             "default": "slack",
-            "description": "format of the chat message after a run: `slack` (Incoming Webhook), `teams` (Workflows webhook trigger) or `generic` (plain JSON); send it with every PUT",
+            "description": "format of the chat message after a run: `slack` (Incoming Webhook), `teams` (Workflows webhook trigger) or `generic` (plain JSON); omitted = unchanged",
             "enum": [
               "slack",
               "teams",
@@ -4687,7 +4687,7 @@
         ]
       },
       "put": {
-        "description": "Replaces the whole schedule (an omitted field takes its default), except `notify_webhook_url`: omitted = unchanged, `null` = remove, text = set (https, public address, no credentials). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.",
+        "description": "Replaces the whole schedule (an omitted field takes its default), except the chat webhook pair: `notify_webhook_url` omitted = unchanged, `null` = remove, text = set (https, public address, no credentials); `notify_webhook_kind` omitted = unchanged. `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.",
         "operationId": "put_schedule_api_v1_orgs__org_id__schedule_put",
         "parameters": [
           {
