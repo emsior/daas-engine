@@ -106,6 +106,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oauth/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an authorization request
+         * @description Consent screen data for an application (ChatGPT, Claude, ...) that asked for access through OAuth: its name, the requested scopes, where the browser returns, and the signed-in user's organizations with the scopes each role can grant. Signed-in users only; an API key gets `403`.
+         */
+        get: operations["get_request_api_v1_oauth_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/requests/{request_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or deny an application
+         * @description One decision per request (CSRF header required). Deny: `redirect_to` carries `error=access_denied`. Approve: the user must be a member of `org_id`; the granted scopes are `scopes` (default: all) narrowed to what was requested and what the role allows, and `redirect_to` carries a single-use authorization code valid for 60 seconds. The connection then acts in that organization only, with those scopes, on behalf of the user.
+         */
+        post: operations["decide_api_v1_oauth_requests__request_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orgs": {
         parameters: {
             query?: never;
@@ -393,6 +433,46 @@ export interface paths {
          * @description Owner sessions only. The last owner cannot be demoted (`409 last_owner`).
          */
         patch: operations["change_role_api_v1_orgs__org_id__members__user_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/oauth/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List connected applications
+         * @description Applications (ChatGPT, Claude, ...) connected to the organization through OAuth, newest first: who approved them, the granted scopes and the last use. Token values are never returned.
+         */
+        get: operations["list_grants_api_v1_orgs__org_id__oauth_grants_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/oauth/grants/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect an application
+         * @description Revokes the connection at once: its refresh token, every access token issued from it and any later rotation. The application must ask for consent again. Disconnecting twice succeeds.
+         */
+        delete: operations["revoke_grant_api_v1_orgs__org_id__oauth_grants__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/orgs/{org_id}/runs": {
@@ -1059,6 +1139,109 @@ export interface components {
              */
             role?: ("owner" | "admin" | "member") | null;
         };
+        /** OAuthDecisionIn */
+        OAuthDecisionIn: {
+            /** Approve */
+            approve: boolean;
+            /**
+             * Org Id
+             * @description organization the connection acts in; required to approve
+             */
+            org_id?: string | null;
+            /**
+             * Scopes
+             * @description scopes to grant; default: every grantable requested scope. Scopes that were not requested or that the role cannot grant are ignored
+             */
+            scopes?: string[] | null;
+        };
+        /** OAuthDecisionOut */
+        OAuthDecisionOut: {
+            /**
+             * Redirect To
+             * @description send the browser here: the application's redirect URI with `code` and `state`, or `error=access_denied`
+             */
+            redirect_to: string;
+        };
+        /** OAuthGrantOut */
+        OAuthGrantOut: {
+            /** Client Id */
+            client_id: string;
+            /** Client Name */
+            client_name?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Last Used At */
+            last_used_at?: string | null;
+            /**
+             * Role
+             * @description that user's current role; `null` = no longer a member
+             */
+            role?: ("owner" | "admin" | "member") | null;
+            /** Scopes */
+            scopes: string[];
+            /**
+             * Token Id
+             * @description id to disconnect with `DELETE .../oauth/grants/{token_id}`; it changes when the application refreshes its tokens
+             */
+            token_id: string;
+            /**
+             * User Id
+             * @description user who approved the connection
+             */
+            user_id?: string | null;
+        };
+        /** OAuthOrgOption */
+        OAuthOrgOption: {
+            /** Name */
+            name: string;
+            /** Org Id */
+            org_id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "admin" | "member";
+            /**
+             * Scopes Grantable
+             * @description requested scopes this role can grant; others are shown disabled
+             */
+            scopes_grantable: string[];
+        };
+        /** OAuthRequestOut */
+        OAuthRequestOut: {
+            /** Client Id */
+            client_id: string;
+            /**
+             * Client Name
+             * @description name the application registered (self-declared)
+             */
+            client_name?: string | null;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description the decision must be made before this moment (UTC)
+             */
+            expires_at: string;
+            /**
+             * Organizations
+             * @description organizations of the signed-in user, oldest first
+             */
+            organizations: components["schemas"]["OAuthOrgOption"][];
+            /**
+             * Redirect Host
+             * @description host the browser returns to after the decision
+             */
+            redirect_host: string;
+            /** Request Id */
+            request_id: string;
+            /** Scopes Requested */
+            scopes_requested: string[];
+        };
         /** OrgCreate */
         OrgCreate: {
             /**
@@ -1698,6 +1881,121 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MeOut"];
                 };
+            };
+        };
+    };
+    get_request_api_v1_oauth_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Authorization request id from the `request` query parameter of the consent page */
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthRequestOut"];
+                };
+            };
+            /** @description Not a user session */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown request, or already decided */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `expired`: the request is older than DAAS_OAUTH_AUTHORIZATION_TTL_SEC */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_api_v1_oauth_requests__request_id__decision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Authorization request id from the `request` query parameter of the consent page */
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthDecisionOut"];
+                };
+            };
+            /** @description Not a user session, or not a member of `org_id` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown request */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `request_already_decided` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `expired` */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `org_id` missing, or `no_grantable_scopes` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -2444,6 +2742,76 @@ export interface operations {
             };
             /** @description The last owner cannot be demoted */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_grants_api_v1_orgs__org_id__oauth_grants_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthGrantOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_grant_api_v1_orgs__org_id__oauth_grants__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such connection in this organization */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

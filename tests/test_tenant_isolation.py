@@ -40,7 +40,7 @@ from tests.v1_helpers import (
 
 PLACEHOLDER = re.compile(r"\{([^}]+)\}")
 #: Parametry sciezki, ktore umiemy wypelnic identyfikatorami zasobow organizacji B. Nowy parametr = rozszerz mape.
-RESOURCE_PARAMS = {"job_id", "run_id", "key_id", "webhook_id", "user_id", "invitation_id"}
+RESOURCE_PARAMS = {"job_id", "run_id", "key_id", "webhook_id", "user_id", "invitation_id", "token_id"}
 KNOWN_HASH = "ab" * 32
 
 
@@ -97,7 +97,8 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
         outsider = user_headers(settings, seed_member(settings, a.org_id, "outsider@example.test", "owner"))
         key_id, _ = seed_key(settings, b.org_id, scopes=list(sc.KEY_SCOPES), name="b-extra")
         ids = {"job_id": new_ulid(), "run_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", "key_id": key_id,
-               "webhook_id": new_ulid(), "user_id": b.user_id, "invitation_id": new_ulid()}
+               "webhook_id": new_ulid(), "user_id": b.user_id, "invitation_id": new_ulid(),
+               "token_id": new_ulid()}  # polaczona aplikacja OAuth organizacji B (token odswiezania)
         upload_id = "b" * 32
 
         async def seed_b(db):
@@ -113,6 +114,13 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
             db.add(models.Upload(id=upload_id, org_id=b.org_id, kind="csv", filename="b.csv", bytes=10,
                                  sha256="1" * 64, path=f"{upload_id}.csv",
                                  retention_until=utcnow() + timedelta(days=30)))
+            db.add(models.OAuthClient(client_id="b-connector", client_name="B connector",
+                                      redirect_uris=["https://b.example.test/cb"],
+                                      info={"client_id": "b-connector", "redirect_uris": ["https://b.example.test/cb"]}))
+            await db.flush()
+            db.add(models.OAuthToken(id=ids["token_id"], kind="refresh", token_hash="3" * 64, client_id="b-connector",
+                                     org_id=b.org_id, user_id=b.user_id, scopes=["runs:read"],
+                                     expires_at=utcnow() + timedelta(days=30)))
 
         with_db(settings, seed_b)
         yield World(client, settings, a, b, outsider, ids, upload_id)
@@ -226,6 +234,8 @@ def test_nothing_of_b_changed_after_all_the_attempts(world: World):
     assert [i.id for i in get_rows(world.settings, models.Invitation,
                                    models.Invitation.org_id == world.b.org_id)] == [world.b_ids["invitation_id"]]
     assert get_rows(world.settings, models.OrgSchedule, models.OrgSchedule.org_id == world.b.org_id) == []
+    (grant,) = get_rows(world.settings, models.OAuthToken, models.OAuthToken.id == world.b_ids["token_id"])
+    assert grant.revoked_at is None
     members = get_rows(world.settings, models.Membership, models.Membership.org_id == world.b.org_id)
     assert [m.role for m in members] == ["owner"]
     assert not get_rows(world.settings, models.Membership, models.Membership.user_id.in_(

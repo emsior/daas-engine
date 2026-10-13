@@ -4,6 +4,8 @@
 #
 #   /api/*   -> api:8000   (API v1, SSE, raporty)
 #   /mcp     -> api:8000   (serwer MCP dla agentow AI, docs/MCP.md)
+#   /authorize /token /register /revoke /.well-known/oauth-*
+#            -> api:8000   (OAuth 2.1 dla konektorow MCP: ChatGPT, Claude; tylko cloud)
 #   reszta   -> web:3000   (kokpit Next.js)
 {
 	# Dziennik domyslny (m.in. bledy proxy, np. 502 przy restarcie API) niesie to samo zapytanie co dziennik dostepu,
@@ -86,6 +88,18 @@
 		reverse_proxy api:8000 {
 			header_up X-Forwarded-For {remote_host}
 			flush_interval -1
+		}
+	}
+
+	# Serwer autoryzacji OAuth 2.1 konektorow MCP (SDK `mcp` w API): rejestracja, zgoda (przekierowanie do kokpitu
+	# /oauth/consent), token, cofniecie i metadane RFC 8414 / RFC 9728. Ciala to male formularze i JSON.
+	@oauth path /authorize /token /register /revoke /.well-known/oauth-*
+	handle @oauth {
+		request_body {
+			max_size 64KiB
+		}
+		reverse_proxy api:8000 {
+			header_up X-Forwarded-For {remote_host}
 		}
 	}
 

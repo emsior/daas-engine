@@ -360,7 +360,8 @@ def test_missing_scope_is_insufficient_scope_and_audited(cloud_client, cloud_set
 # ================================================================ uwierzytelnienie na poziomie HTTP
 def _assert_401(r):
     assert r.status_code == 401, r.text
-    assert r.headers["www-authenticate"] == 'Bearer realm="daas-mcp"'
+    # w cloud z OAuth wyzwanie niesie tez `resource_metadata` (tests/test_oauth.py); realm zawsze pierwszy
+    assert r.headers["www-authenticate"].startswith('Bearer realm="daas-mcp"')
     assert r.headers["content-type"].startswith(PROBLEM)
     body = r.json()
     assert body["code"] == "unauthorized" and body["request_id"] and body["detail"]
