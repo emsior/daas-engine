@@ -125,8 +125,15 @@ def update_rows(settings: Settings, model, values: dict, *where) -> None:
 
 
 def outbox(settings: Settings, email: str | None = None) -> list[dict]:
+    """Wiadomosci z outboxa `console` (pliki `*.json`). Plik w trakcie zapisu (pusty / niepelny JSON) jest pomijany:
+    wywolujacy odpytuja outbox w petli (`wait_for`), wiec taki plik pojawi sie w nastepnej probie."""
     files = sorted(Path(settings.outbox_dir).glob("*.json")) if Path(settings.outbox_dir).exists() else []
-    mails = [json.loads(f.read_text(encoding="utf-8")) for f in files]
+    mails = []
+    for f in files:
+        try:
+            mails.append(json.loads(f.read_text(encoding="utf-8")))
+        except (json.JSONDecodeError, OSError):
+            continue
     return [m for m in mails if email is None or m["to"] == email.lower()]
 
 

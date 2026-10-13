@@ -84,6 +84,31 @@ def test_prod_console_mailer_writes_outbox_but_does_not_log_the_link(tmp_path: P
     assert_private_file(f)
 
 
+def test_console_mailer_publishes_the_file_atomically_and_leaves_no_temp(tmp_path: Path, monkeypatch):
+    """Czytelnik outboxa (`*.json`) nie moze zobaczyc pliku w polowie zapisu: zapis idzie do `*.json.tmp`,
+    a nazwa docelowa pojawia sie dopiero po zamknieciu pliku (`os.replace`)."""
+    import json
+    import os
+
+    from app.control import mailer as mailer_module
+    from app.control.mailer import ConsoleMailer, OutgoingMail
+
+    outbox = tmp_path / "outbox"
+    seen_during_write: list[list[str]] = []
+    real_replace = os.replace
+
+    def spying_replace(src, dst):
+        seen_during_write.append(sorted(p.name for p in outbox.glob("*.json")))  # tuz przed publikacja
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(mailer_module.os, "replace", spying_replace)
+    ConsoleMailer(outbox).send(OutgoingMail(to="a@example.test", subject="s", body="b", link=None))
+    assert seen_during_write == [[]]  # przed `replace` nie ma zadnego `*.json`, tylko `*.json.tmp`
+    (final,) = sorted(outbox.glob("*.json"))
+    assert list(outbox.glob("*.tmp")) == [] and json.loads(final.read_text(encoding="utf-8"))["to"] == "a@example.test"
+    assert_private_file(final)
+
+
 def test_dev_console_mailer_still_logs_the_link(tmp_path: Path, caplog: pytest.LogCaptureFixture):
     mailer = build_mailer(cloud(app_env="dev"))
     mailer.outbox_dir = tmp_path / "ob"

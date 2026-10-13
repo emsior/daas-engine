@@ -23,6 +23,7 @@ from typing import Protocol
 
 from app.core.config import Settings
 from app.core.private_files import open_private
+from app.core.upload_guard import remove_quietly
 
 log = logging.getLogger(__name__)
 
@@ -57,9 +58,17 @@ class ConsoleMailer:
         path = self.outbox_dir / name
         payload = {"to": mail.to, "subject": mail.subject, "body": mail.body, "link": mail.link,
                    "created_at": time.time()}
-        fd = open_private(path)  # 0600 na POSIX, DACL tylko wlasciciel na Windows
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            json.dump(payload, fh, ensure_ascii=False)
+        # Zapis do pliku tymczasowego i atomowa zmiana nazwy: czytelnik outboxa (`*.json`: testy, e2e, czlowiek) nigdy
+        # nie widzi pliku w polowie zapisu — na Windows miedzy utworzeniem a zapisem jest jeszcze `icacls` (ms).
+        tmp_path = path.with_name(name + ".tmp")
+        fd = open_private(tmp_path)  # 0600 na POSIX, DACL tylko wlasciciel na Windows (ACL wedruje ze zmiana nazwy)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(payload, fh, ensure_ascii=False)
+            os.replace(tmp_path, path)
+        except BaseException:
+            remove_quietly(tmp_path)
+            raise
         if self.log_link:
             log.info("console mailer: message for %s written to outbox (%s)%s", mail.to, name,
                      f" link={mail.link}" if mail.link else "")
