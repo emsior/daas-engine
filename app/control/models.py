@@ -165,6 +165,10 @@ class Job(Base):
     started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    #: Zakres dat zamowiony przez klienta (`JobCreate.period_from/period_to`, Alembic 0005); None = cale dane pliku.
+    #: Faktyczny zakres danych runu jest w `RunRecord.period_*`.
+    period_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_to: Mapped[date | None] = mapped_column(Date, nullable=True)
 
     __table_args__ = (Index("ix_jobs_org_id_created_at", "org_id", "created_at"), Index("ix_jobs_status", "status"),
                       Index("ix_jobs_org_id_id", "org_id", "id"))
@@ -257,8 +261,82 @@ class OrgSchedule(Base):
     reminder_skip_if_recent_upload: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_run_on_upload: Mapped[bool] = mapped_column(Boolean, default=False)
     notify_on_finish: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Powiadomienie o runie na czacie zespolu (Alembic 0005): webhook przychodzacy Slacka / Teams (Workflows) albo
+    #: dowolny JSON. Adres zawiera sekret: API nigdy go nie zwraca w calosci (tylko host i koncowka).
+    notify_webhook_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    notify_webhook_kind: Mapped[str] = mapped_column(String(12), default="slack")  # slack | teams | generic
     next_reminder_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     last_reminder_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     __table_args__ = (Index("ix_org_schedules_due", "reminder_enabled", "next_reminder_at"),)
+
+
+# ----------------------------------------------------------------------------- OAuth 2.1 dla konektorow MCP
+class OAuthClient(Base):
+    """Klient OAuth zarejestrowany dynamicznie (RFC 7591) przez konektor agenta (ChatGPT, Claude, ...).
+    `info` = pelne metadane rejestracji (`OAuthClientInformationFull` z SDK `mcp`) do odtworzenia w `get_client`;
+    kolumny obok sa do list, ekranu zgody i porzadkow. Sekret klienta (jesli klient nie jest publiczny) lezy
+    wylacznie w `info` — w logach i audycie wystepuje tylko `client_id`."""
+
+    __tablename__ = "oauth_clients"
+
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    redirect_uris: Mapped[list[str]] = mapped_column(JSON, default=list)
+    info: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_oauth_clients_created_at", "created_at"),)
+
+
+class OAuthCode(Base):
+    """Zadanie autoryzacji i kod autoryzacyjny w jednym wierszu: powstaje przy `/authorize` (`status=pending`,
+    bez organizacji), po zgodzie uzytkownika w kokpicie dostaje `org_id`, `user_id`, `code_hash` (`approved`),
+    po wymianie na token `exchanged`. Sam kod nie jest przechowywany — tylko SHA-256."""
+
+    __tablename__ = "oauth_codes"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    client_id: Mapped[str] = mapped_column(ForeignKey("oauth_clients.client_id", ondelete=_CASCADE))
+    org_id: Mapped[str | None] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    code_challenge: Mapped[str] = mapped_column(String(128))
+    redirect_uri: Mapped[str] = mapped_column(String(512))
+    redirect_uri_provided_explicitly: Mapped[bool] = mapped_column(Boolean, default=True)
+    state: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    resource: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status: Mapped[str] = mapped_column(String(12), default="pending")  # pending|approved|exchanged|denied|expired
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    exchanged_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_oauth_codes_client_id", "client_id"), Index("ix_oauth_codes_expires_at", "expires_at"))
+
+
+class OAuthToken(Base):
+    """Token dostepu albo odswiezania (`kind`), przechowywany jako SHA-256; organizacja i zakresy sa zamrozone
+    w chwili zgody. `parent_id` wiaze token dostepu z tokenem odswiezania, z ktorego powstal (rotacja)."""
+
+    __tablename__ = "oauth_tokens"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    kind: Mapped[str] = mapped_column(String(8))  # access | refresh
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("oauth_clients.client_id", ondelete=_CASCADE))
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    resource: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    parent_id: Mapped[str | None] = mapped_column(_ID, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_oauth_tokens_org_id_kind", "org_id", "kind"),
+                      Index("ix_oauth_tokens_client_id", "client_id"))

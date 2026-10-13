@@ -11,8 +11,10 @@ MCP = "/mcp"
 #: Wersja protokolu z handshake `initialize` (era 2025); SDK obsluguje tez 2026-07-28 bez handshake.
 PROTOCOL = "2025-11-25"
 ACCEPT = "application/json, text/event-stream"
-TOOL_NAMES = ("whoami", "list_pipelines", "list_uploads", "upload_csv", "start_run", "get_job", "list_runs",
-              "get_run", "get_report", "verify_report", "get_evidence", "get_usage")
+TOOL_NAMES = ("whoami", "list_pipelines", "list_uploads", "upload_csv", "upload_xlsx", "start_run", "get_job",
+              "list_runs", "get_run", "get_report", "verify_report", "get_evidence", "get_usage")
+#: Narzedzia, ktore zmieniaja stan (`readOnlyHint: false`); reszta tylko czyta.
+WRITE_TOOLS = ("upload_csv", "upload_xlsx", "start_run")
 
 _ids = itertools.count(1)
 

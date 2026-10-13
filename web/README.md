@@ -60,9 +60,9 @@ Cookies: sesja `HttpOnly` i `daas_csrf` ustawia API. Kokpit i API muszą być w 
 ## Struktura
 
 ```
-src/app/           trasy (App Router): (auth)/login|onboarding, (app)/ kokpit, upload, runs/[id], evidence, settings/*, dpa
+src/app/           trasy (App Router): (auth)/login|onboarding, (app)/ kokpit, upload, health, runs/[id], evidence, settings/* (w tym connected-apps), oauth/consent, dpa
 src/components/    komponenty współdzielone (opis: design/COMPONENTS.md); shell/ = nagłówek, nawigacja, bramka sesji
-src/features/      logika ekranów: upload (reducer + kreator), run (weryfikator), evidence, settings
+src/features/      logika ekranów: upload (reducer + kreator), run (weryfikator), evidence, health (pulpit zdrowia danych, weekBars), settings (harmonogram z webhookiem czatu, połączone aplikacje), oauth (ekran zgody)
 src/lib/           api/ (client, hooks, types), sse, format, hash, validation, security (CSP)
 src/i18n/          pl.json, en.json, useT()
 src/styles/        tokens/base/components/tailwind (Designer, bez zmian), app.css (uzupełnienia), globals.css (jedyny import)
@@ -80,6 +80,9 @@ e2e/               Playwright (specy, helpers, proxy.mjs, stack.sh)
 - Logowanie linkiem: gdy link z maila otwarto w innej przeglądarce niż ta, w której podano adres, API odpowiada `409 confirm_required` (z zamaskowanym `email_hint`), a `/login` pokazuje ekran „Zaloguj w tej przeglądarce jako …?”. Przycisk ponawia `POST /auth/magic-link/verify` z `confirm: true`.
 - Postęp zadania: SSE; gdy strumień ani razu się nie otworzy (np. 429 `sse_limit`), kokpit po 2 próbach przechodzi na `GET /jobs/{id}` co 3 s. „Anuluj” jest dostępne tylko dla zadania w kolejce (`queued`).
 - Zarządzanie członkami (`/settings/members`): zaproszenia (lista, cofnięcie), zmiana roli (właściciel), usunięcie z potwierdzeniem; komunikat `last_owner`.
+- Zdrowie danych (`/health`): werdykt „raport w przyszły poniedziałek”, kafelki i tabela 8/12/26 tygodni ze słupkami w CSS (bez bibliotek wykresów); dane z `GET .../data-health`.
+- Powiadomienie na czacie (`/settings`, sekcja harmonogramu): adres webhooka Slack/Teams/JSON jest tylko do zapisu — formularz wysyła `notify_webhook_url` wyłącznie po wpisaniu nowego adresu albo „Usuń” (`null`), inaczej pole jest pominięte i adres zostaje.
+- Zgoda OAuth (`/oauth/consent?request=…`): ekran dla konektorów ChatGPT/Claude — wybór organizacji i zakresów (tylko te, które pozwala rola), nazwa aplikacji oznaczona jako deklarowana przez nią, host powrotu widoczny; po decyzji przekierowanie wyłącznie na adres zwrócony przez API (`isSafeRedirect`). Niezalogowany użytkownik trafia na `/login?next=` (tylko ścieżka względna, `lib/next-path.ts`). Odłączanie: `/settings/connected-apps`.
 
 ## Testy
 

@@ -140,7 +140,9 @@ curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/<run_id>/report?fmt=ht
 
 ### Co tydzień bez klikania
 
-W kokpicie *Ustawienia → Harmonogram i powiadomienia* (albo `PUT /api/v1/orgs/{org_id}/schedule`): cotygodniowe przypomnienie e-mailem o eksporcie (np. poniedziałek 8:00 Europe/Warsaw, pomijane, gdy plik już przyszedł), automatyczne uruchomienie raportu zaraz po wgraniu pliku i e-mail z linkiem do raportu, gdy jest gotowy. W wiadomościach nie ma treści raportu — dane zostają w kokpicie. Szczegóły: [`docs/API.md`](docs/API.md#schedule-and-notifications).
+W kokpicie *Ustawienia → Harmonogram i powiadomienia* (albo `PUT /api/v1/orgs/{org_id}/schedule`): cotygodniowe przypomnienie e-mailem o eksporcie (np. poniedziałek 8:00 Europe/Warsaw, pomijane, gdy plik już przyszedł), automatyczne uruchomienie raportu zaraz po wgraniu pliku i e-mail z linkiem do raportu, gdy jest gotowy. Krótka wiadomość może też trafić na czat zespołu (Slack, Microsoft Teams albo dowolny webhook JSON): status, okres danych, skrót raportu i link. W wiadomościach nie ma treści raportu — dane zostają w kokpicie. Szczegóły: [`docs/API.md`](docs/API.md#schedule-and-notifications).
+
+Ekran *Zdrowie danych* (albo `GET /api/v1/orgs/{org_id}/data-health`) mówi, czy raport w przyszły poniedziałek jest bezpieczny: pliki, raporty i błędy tydzień po tygodniu, seria tygodni z raportem i to, co naprawić, z linkiem do właściwego ekranu ([`docs/API.md`](docs/API.md#data-health)).
 
 Tryb selfhost, trasy legacy (każda poza `/health` i `/ready` wymaga `X-API-Key` z `DAAS_API_KEY`):
 
@@ -162,7 +164,7 @@ Mapper (`app/sources/csv_mapper.py`): aliasy PL/EN dla `order_id, date, product,
 
 ## Dostęp dla agentów (MCP)
 
-Asystenci AI (Claude, ChatGPT, Codex, Gemini) mogą używać DaaS Engine jak narzędzia: API ma wbudowany serwer MCP pod `POST /mcp` (Streamable HTTP, bezstanowy, odpowiedzi JSON). Łączysz go kluczem API organizacji w nagłówku `Authorization: Bearer <klucz>` i prosisz zwykłym językiem: „wgraj ten eksport, policz raport i powiedz, co spadło". 12 narzędzi obejmuje upload (tekst CSV), runy, raporty, weryfikację hasha, status artefaktów i zużycie — zawsze w organizacji klucza.
+Asystenci AI (Claude, ChatGPT, Codex, Gemini) mogą używać DaaS Engine jak narzędzia: API ma wbudowany serwer MCP pod `POST /mcp` (Streamable HTTP, bezstanowy, odpowiedzi JSON). Łączysz go kluczem API organizacji w nagłówku `Authorization: Bearer <klucz>` i prosisz zwykłym językiem: „wgraj ten eksport, policz raport i powiedz, co spadło". 13 narzędzi obejmuje upload (tekst CSV albo plik XLSX), runy (opcjonalnie za wybrany okres), raporty, weryfikację hasha, status artefaktów i zużycie — zawsze w organizacji klucza; raporty są też dostępne jako zasoby MCP, a ChatGPT lub Claude mogą połączyć się przez OAuth 2.1 zamiast kluczem.
 
 ```bash
 claude mcp add --transport http daas https://raporty.example.com/mcp --header "Authorization: Bearer $KEY"

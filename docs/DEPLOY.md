@@ -106,6 +106,11 @@ Kolumna „Tryb": `c` = istotne w `cloud`, `s` = w `selfhost`, `cs` = w obu.
 | `DAAS_MCP_ENABLED` | `true` | serwer MCP dla agentów AI pod `POST /mcp` ([`MCP.md`](MCP.md)); `false` = trasy nie ma (`404`) |
 | `DAAS_MCP_MAX_BODY_BYTES` | `3145728` | limit ciała żądania `/mcp` (3 MiB); większe: `413` (Caddy przepuszcza do 4 MiB) |
 | `DAAS_MCP_MAX_UPLOAD_BYTES` | `2097152` | limit treści CSV narzędzia `upload_csv` (2 MiB); mniejszy niż limit ciała |
+| `DAAS_OAUTH_ENABLED` | `true` | (tylko `cloud`) serwer autoryzacji OAuth 2.1 dla konektorów MCP (ChatGPT, Claude): `/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/oauth-*` ([`MCP.md`](MCP.md#connect-from-chatgpt--claude-oauth)); `false` = tych tras nie ma (`404`), klucze API działają dalej |
+| `DAAS_OAUTH_ISSUER_URL` | `DAAS_COCKPIT_ORIGIN` | publiczny origin wdrożenia (issuer), np. `https://raporty.example.com`, bez ścieżki; `https` (http tylko dla `localhost`). Bez niego i bez `DAAS_COCKPIT_ORIGIN` OAuth jest wyłączony (ostrzeżenie w dzienniku). Kokpit i API muszą być pod tym originem: Caddy kieruje trasy OAuth do API |
+| `DAAS_OAUTH_ACCESS_TOKEN_TTL_SEC` | `3600` | ważność tokenu dostępu konektora (60-86400 s) |
+| `DAAS_OAUTH_REFRESH_TOKEN_TTL_SEC` | `2592000` | ważność tokenu odświeżania (30 dni; liczona od nowa przy każdej rotacji; 3600 s - 365 dni) |
+| `DAAS_OAUTH_AUTHORIZATION_TTL_SEC` | `600` | czas na decyzję na ekranie zgody od `/authorize` (60-3600 s); kod po zgodzie żyje 60 s |
 
 Liczniki limitów są w pamięci procesu; aplikacja działa w jednym procesie roboczym (`WEB_CONCURRENCY` lub `UVICORN_WORKERS` powyżej 1 blokuje start).
 
@@ -161,4 +166,5 @@ Kokpit czyta w czasie działania jeszcze `API_INTERNAL_ORIGIN` (adres API w siec
 - `DAAS_EMAIL_BACKEND=smtp` na produkcji; `console` zapisuje linki logowania na dysku (`runtime/outbox/`), a API z `APP_ENV=prod` odmawia z nim startu bez `DAAS_ALLOW_CONSOLE_MAIL=true`.
 - Kontenery `api` i `web` mają system plików tylko do odczytu (zapis: wolumeny i `tmpfs`), `cap_drop: ALL` i `no-new-privileges`; dziennik Caddy nie zawiera `?token=`, `Cookie` ani kluczy.
 - Metryki tylko na loopbacku z tokenem; Caddy zwraca `404` dla `/metrics`.
+- OAuth dla konektorów MCP: `deploy/Caddyfile` kieruje `/authorize`, `/token`, `/register`, `/revoke` i `/.well-known/oauth-*` do API (limit ciała 64 KiB), resztę ścieżek do kokpitu (ekran zgody `/oauth/consent`). Ze wspólnym proxy hosta przekaż te trasy do API tak samo jak `/api/*` i `/mcp`; issuer (`DAAS_OAUTH_ISSUER_URL` albo `DAAS_COCKPIT_ORIGIN`) musi być adresem, pod którym konektor widzi wdrożenie.
 - Model zagrożeń i zgłaszanie podatności: [`SECURITY.md`](SECURITY.md).

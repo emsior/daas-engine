@@ -114,6 +114,7 @@ def test_validation_errors_do_not_consume_the_limit(cloud_client, cloud_settings
     ("Acme https://evil.example/login now", "https://"),
     ("Pay at www.evil.example/x", "www."),
     ("Click evil.example/phish", "evil.example"),
+    ("Firma [napisz](mailto:ktos@evil.example) tel:+48000000000", "mailto"),
     ("Acme\nBcc: attacker@example.test", "\n"),
     ("Acme\x00\x1b[31m red", "\x1b"),
     ("<script>alert(1)</script>", "<"),

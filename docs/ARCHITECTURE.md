@@ -39,7 +39,7 @@ The mode changes which routes and credentials exist; pipelines, reports and the 
                           │          └─► listeners: usage, audit, webhook delivery (HMAC), run e-mail          │
                           │   SchedulerLoop (cloud, every DAAS_SCHEDULER_TICK_SEC) ─► weekly export reminders  │
                           └────────────────────────────────────────────────────────────────────────────────────┘
-        outbound only: SMTP (sign-in links, reminders, run e-mails), webhooks you register, optional LLM provider
+        outbound only: SMTP (sign-in links, reminders, run e-mails), webhooks you register, the chat webhook of the schedule, optional LLM provider
 ```
 
 **Control plane** (`app/control/`): who may do what, and the trace of what happened. Models in `models.py`, migrations in `alembic/versions/` (`0001_initial` the schema, `0002_run_period` the data period of a run, `0003_retention_loginnonce_indexes` the report-purge marker, the sign-in link nonce and listing indexes, `0004_schedules` the per-organization schedule; applied at start with `DAAS_AUTO_MIGRATE`, or by hand with `python -m app.cli migrate`). It stores metadata only: no customer file or report content. API keys, sign-in tokens and invitation tokens exist only as SHA-256 hashes. `RunRecord` keeps the SHA-256 of each report so `POST .../verify` can answer "is this one of ours" without reading the report.
@@ -75,7 +75,7 @@ One `org_schedules` row per organization (created on the first `PUT .../schedule
 
 - **Reminder.** `SchedulerLoop` starts with the application in `cloud` mode when `DAAS_SCHEDULER_ENABLED=true` (default) and wakes every `DAAS_SCHEDULER_TICK_SEC` seconds (default 60, minimum 5; the first pass runs right after the start). One pass selects `reminder_enabled AND next_reminder_at <= now` and handles each organization in its own transactions; an error in one organization is logged and the others go on. `send_reminder` first claims the slot with a conditional `UPDATE` (moves `next_reminder_at` to the next week and sets `last_reminder_at`), then mails the members: two passes or a restart in the middle never send twice (at most once). `compute_next_reminder` uses `zoneinfo`, so the local hour survives clock changes.
 - **Auto-run.** The v1 upload handler, after storing the upload, calls `queue_job` (the same function as `POST .../jobs`) for `suggested_pipeline` under the conditions of a manual run (uploader has `runs:write`, plan limit, per-key run limit) and only for a file with recognised rows; none of these, nor any error, fails the already committed upload (audit `schedule.auto_run_skipped`).
-- **Run e-mail.** `RunNotifier` is a second `run.finished` listener next to the webhook dispatcher: one e-mail batch per run, sent in a background task.
+- **Run e-mail and chat message.** `RunNotifier` is a second `run.finished` listener next to the webhook dispatcher: one e-mail batch per run and, when `notify_webhook_url` is set, one chat message (`app/control/chat_messages.py` builds the Slack, Teams or `generic` payload; `post_json` from `app/control/webhooks.py` sends it once with the SSRF checks and IP pinning of the signed webhooks; audit `schedule.webhook_notified`), each in its own background task.
 
 The loop lives in the API process. Like rate limits and the job queue it assumes **one worker** (`workers=1`): with several processes each would run its own loop (the conditional `UPDATE` still prevents a duplicate reminder, but the design is not meant for it). `selfhost` has no loop; there n8n schedules runs.
 
@@ -136,7 +136,7 @@ job   ─► pipelines/runner (PipelineRunner)
 
 ## Cockpit (`web/`)
 
-Next.js 16 (App Router, React 19, TypeScript strict, Tailwind 4, TanStack Query). No external CDN or fonts. `src/proxy.ts` sets a nonce-based CSP and redirects to `/login` when `GET /api/v1/me` answers `401`. The browser talks to the API at the same origin (`/api/*`, through Caddy) with the session cookie and the CSRF header; the report is shown in a sandboxed iframe; the "check yourself" box computes SHA-256 locally in the browser (Web Crypto) and sends nothing. Screens: login, onboarding (DPA), dashboard, upload wizard with live progress, run/report, evidence, API keys, members, settings. Details: [`web/README.md`](../web/README.md).
+Next.js 16 (App Router, React 19, TypeScript strict, Tailwind 4, TanStack Query). No external CDN or fonts. `src/proxy.ts` sets a nonce-based CSP and redirects to `/login` when `GET /api/v1/me` answers `401`. The browser talks to the API at the same origin (`/api/*`, through Caddy) with the session cookie and the CSRF header; the report is shown in a sandboxed iframe; the "check yourself" box computes SHA-256 locally in the browser (Web Crypto) and sends nothing. Screens: login, onboarding (DPA), dashboard, upload wizard with live progress, data health (verdict on next Monday's report, key figures and an 8/12/26-week table from `GET .../data-health`, computed on the fly from the control database), run/report, evidence, API keys, members, settings. Details: [`web/README.md`](../web/README.md).
 
 ## Deployment
 

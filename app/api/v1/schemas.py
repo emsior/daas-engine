@@ -5,10 +5,11 @@ import re
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from app.control import scopes as sc
 from app.control.service import is_valid_email, normalize_email
+from app.core.models import PERIOD_MAX_DAYS, check_period_date, check_period_range
 
 Locale = Literal["pl", "en"]
 RoleName = Literal["owner", "admin", "member"]
@@ -16,6 +17,9 @@ JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 PipelineId = Literal["cs2_demo", "ecommerce_demo", "uksc_evidence"]
 UploadKind = Literal["csv", "xlsx", "package"]
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
+#: Zakres dat runu (`JobCreate.period_from/period_to`): najwczesniejsza dozwolona data i najdluzszy zakres w dniach
+#: (oba konce wlacznie). Starsze daty i dluzsze zakresy to niemal zawsze pomylka w formacie albo w roku.
 
 
 class Out(BaseModel):
@@ -208,6 +212,28 @@ class JobCreate(BaseModel):
     upload_id: str | None = Field(default=None, pattern=r"^[0-9a-f]{32}$")
     force_mock: bool = False
     client_name: str | None = Field(default=None, max_length=200)
+    period_from: date | None = Field(
+        default=None, examples=["2026-08-01"],
+        description="first day of the requested report period (ISO `YYYY-MM-DD`, inclusive; not before 2000-01-01); "
+                    "only rows dated on or after it are counted. `ecommerce_demo` only; `null` = no lower bound")
+    period_to: date | None = Field(
+        default=None, examples=["2026-08-07"],
+        description="last day of the requested report period (ISO `YYYY-MM-DD`, inclusive); not before `period_from` "
+                    f"and at most {PERIOD_MAX_DAYS} days after it counting both ends. `ecommerce_demo` only; "
+                    "`null` = no upper bound")
+
+    # granice wspolne z selfhost `RunRequest` (`app.core.models`): ten sam kontrakt w obu trybach
+    @field_validator("period_from", "period_to")
+    @classmethod
+    def _period_dates(cls, value: date | None) -> date | None:
+        return check_period_date(value)
+
+    @field_validator("period_to")
+    @classmethod
+    def _period_order(cls, value: date | None, info: ValidationInfo) -> date | None:
+        """Kolejnosc i dlugosc zakresu; blad ma `loc` = `period_to` (pole `period_from` jest juz zwalidowane)."""
+        check_period_range(info.data.get("period_from"), value)
+        return value
 
 
 class JobOut(BaseModel):
@@ -222,6 +248,10 @@ class JobOut(BaseModel):
     created_at: datetime
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    period_from: date | None = Field(default=None, description="requested first day of the report period "
+                                                               "(`JobCreate.period_from`); `null` = no lower bound")
+    period_to: date | None = Field(default=None, description="requested last day of the report period "
+                                                             "(`JobCreate.period_to`); `null` = no upper bound")
 
 
 class JobPage(BaseModel):
@@ -378,8 +408,13 @@ class WebhookPingOut(BaseModel):
 
 
 # ----------------------------------------------------------------------------- harmonogram i powiadomienia (12.10)
+ChatWebhookKind = Literal["slack", "teams", "generic"]
+
+
 class ScheduleIn(BaseModel):
-    """Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna)."""
+    """Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: para webhooka
+    czatu - adres jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres),
+    a pominiety `notify_webhook_kind` tez zostaje jak zapisany (bez adresu nie ma czego przestawiac)."""
 
     reminder_enabled: bool = Field(default=False, description="cotygodniowe przypomnienie e-mail o eksporcie")
     reminder_weekday: int = Field(default=0, ge=0, le=6, description="dzien tygodnia: 0 = poniedzialek, 6 = niedziela")
@@ -392,6 +427,14 @@ class ScheduleIn(BaseModel):
                                                                 "`suggested_pipeline`")
     notify_on_finish: bool = Field(default=False, description="e-mail do czlonkow po zakonczeniu runu "
                                                               "(sukces i blad)")
+    notify_webhook_kind: ChatWebhookKind = Field(
+        default="slack", description="format of the chat message after a run: `slack` (Incoming Webhook), `teams` "
+                                     "(Workflows webhook trigger) or `generic` (plain JSON); omitted = unchanged")
+    notify_webhook_url: str | None = Field(  # max_length = kolumna `org_schedules.notify_webhook_url`
+        default=None, max_length=512, examples=["https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX"],
+        description="chat webhook address (write-only secret, never returned). Omitted = unchanged, `null` = remove "
+                    "the address, text = set it: `https` and a public address (outside dev), no credentials; an "
+                    "invalid address answers `422 validation_error` naming this field")
 
     @field_validator("timezone")
     @classmethod
@@ -412,7 +455,65 @@ class ScheduleOut(BaseModel):
     reminder_skip_if_recent_upload: bool
     auto_run_on_upload: bool
     notify_on_finish: bool
+    notify_webhook_kind: ChatWebhookKind = Field(..., description="format of the chat message after a run")
+    notify_webhook_set: bool = Field(..., description="a chat webhook address is saved (the address itself is never "
+                                                      "returned)")
+    notify_webhook_hint: str | None = Field(
+        default=None, examples=["hooks.slack.com/\u2026XyZ9"],
+        description="masked saved address: host and the last 4 characters of a long path (no query); `null` = none")
     next_reminder_at: datetime | None = Field(default=None, description="najblizsze przypomnienie (UTC); "
                                                                         "`null` = przypomnienie wylaczone")
     last_reminder_at: datetime | None = Field(default=None, description="ostatnia proba przypomnienia (UTC)")
     updated_at: datetime | None = Field(default=None, description="`null` = ustawienia domyslne, nigdy nie zapisane")
+
+
+# ----------------------------------------------------------------------------- zdrowie danych (pulpit, 13.10)
+HealthIssueCode = Literal["last_run_failed", "plan_limit_reached", "stale_upload", "plan_limit_near",
+                          "partial_reports", "no_uploads_yet", "reminder_off", "auto_run_off"]
+HealthSeverity = Literal["error", "warning", "info"]
+
+
+class WeekHealth(BaseModel):
+    week_start: date = Field(..., description="Monday of the ISO week (local date in `timezone`)")
+    partial: bool = Field(..., description="`true` for the current week, which is still running")
+    uploads: int = Field(..., ge=0, description="files uploaded in the week")
+    upload_bytes: int = Field(..., ge=0, description="bytes uploaded in the week")
+    runs_succeeded: int = Field(..., ge=0, description="jobs that finished `succeeded` in the week")
+    runs_failed: int = Field(..., ge=0, description="jobs that finished `failed` in the week (`no_records` included)")
+    reports: int = Field(..., ge=0, description="reports delivered in the week: runs `SUCCESS` or `PARTIAL` "
+                                                "whose job did not fail")
+    avg_run_seconds: float | None = Field(..., description="mean `finished_at - started_at` of the finished jobs "
+                                                           "(seconds); `null` = no finished job")
+    last_report_at: datetime | None = Field(..., description="latest report of the week; `null` = none")
+
+
+class DataHealthSummary(BaseModel):
+    last_upload_at: datetime | None = Field(..., description="latest upload still on record; `null` = none")
+    last_success_at: datetime | None = Field(..., description="latest job that finished `succeeded`")
+    last_failure_at: datetime | None = Field(..., description="latest job that finished `failed`")
+    last_error_code: str | None = Field(..., description="`error_code` of that failed job")
+    streak_weeks: int = Field(..., ge=0, description="finished weeks in a row with at least one report, counted back "
+                                                     "from last week (the current week is not counted; at most 25)")
+    reminder_enabled: bool = Field(..., description="weekly export reminder (schedule)")
+    next_reminder_at: datetime | None = Field(..., description="next reminder (UTC); `null` = reminder off")
+    auto_run_on_upload: bool = Field(..., description="a job starts right after each upload (schedule)")
+    notify_on_finish: bool = Field(..., description="members get an e-mail when a run finishes (schedule)")
+    plan: str = Field(..., description="plan of the organization")
+    runs_used: int = Field(..., ge=0, description="runs counted this calendar month (UTC)")
+    runs_limit: int | None = Field(..., description="monthly run limit of the plan; `null` = unlimited")
+    retention_days: int = Field(..., description="how long uploaded files are kept")
+
+
+class HealthIssue(BaseModel):
+    code: HealthIssueCode
+    severity: HealthSeverity
+    since: datetime | None = Field(..., description="when the condition started, if known")
+    link: str = Field(..., description="cockpit path that explains or fixes the issue, e.g. `/upload`")
+
+
+class DataHealthOut(BaseModel):
+    generated_at: datetime
+    timezone: str = Field(..., description="IANA zone of the schedule; weeks start on Monday 00:00 there")
+    weeks: list[WeekHealth] = Field(..., description="oldest first; the last one is the current, partial week")
+    summary: DataHealthSummary
+    issues: list[HealthIssue] = Field(..., description="most severe first: `error`, `warning`, `info`")

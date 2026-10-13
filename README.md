@@ -109,7 +109,9 @@ curl -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/<run_id>/report?fmt=html"
 
 ### Every week without clicks
 
-In the cockpit, *Settings → Schedule and notifications* (or `PUT /api/v1/orgs/{org_id}/schedule`): a weekly e-mail reminder to export (for example Monday 8:00 Europe/Warsaw, skipped when the file already came in), an automatic run right after the upload and an e-mail with a link to the report when it is ready. The e-mails carry no report content; the data stays in the cockpit. Details: [`docs/API.md`](docs/API.md#schedule-and-notifications).
+In the cockpit, *Settings → Schedule and notifications* (or `PUT /api/v1/orgs/{org_id}/schedule`): a weekly e-mail reminder to export (for example Monday 8:00 Europe/Warsaw, skipped when the file already came in), an automatic run right after the upload and an e-mail with a link to the report when it is ready. A short message can also go to the team chat (Slack, Microsoft Teams or any JSON webhook) with the status, data period, report hash and the link. The messages carry no report content; the data stays in the cockpit. Details: [`docs/API.md`](docs/API.md#schedule-and-notifications).
+
+The *Data health* screen (or `GET /api/v1/orgs/{org_id}/data-health`) tells whether next Monday's report is safe: files, reports and failures week by week, the streak of weeks with a report and what to fix, each item linked to the right screen ([`docs/API.md`](docs/API.md#data-health)).
 
 Selfhost legacy routes (same engine, one organization): `POST /upload` → `POST /run` → `GET /reports/{pipeline}/latest`, each with `X-API-Key: $DAAS_API_KEY`.
 
@@ -119,7 +121,7 @@ Selfhost legacy routes (same engine, one organization): `POST /upload` → `POST
 
 ## Agent access (MCP)
 
-AI assistants (Claude, ChatGPT, Codex, Gemini) can use DaaS Engine as a tool: the API has a built-in MCP server at `POST /mcp` (Streamable HTTP, stateless, JSON). Connect it with an organization API key in `Authorization: Bearer <key>` and ask for the flow in plain language; 12 tools cover upload (CSV text), runs, reports, hash verification, artifact status and usage, always inside the key's organization.
+AI assistants (Claude, ChatGPT, Codex, Gemini) can use DaaS Engine as a tool: the API has a built-in MCP server at `POST /mcp` (Streamable HTTP, stateless, JSON). Connect it with an organization API key in `Authorization: Bearer <key>` and ask for the flow in plain language; 13 tools cover upload (CSV text or an XLSX file), runs (optionally for a chosen period), reports, hash verification, artifact status and usage, always inside the key's organization; reports are also available as MCP resources, and ChatGPT or Claude can connect with OAuth 2.1 instead of a key.
 
 ```bash
 claude mcp add --transport http daas https://reports.example.com/mcp --header "Authorization: Bearer $KEY"

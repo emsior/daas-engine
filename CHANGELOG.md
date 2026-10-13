@@ -52,6 +52,43 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   is never sent twice; a stored time zone that is no longer known disables that reminder with an audit entry instead
   of failing every tick. Migration `0004` adds `org_schedules`; the cockpit has a "Schedule and notifications" section
   in Settings (read only for members).
+- **Data health dashboard** ("is next Monday's report safe?", cloud): `GET /api/v1/orgs/{org_id}/data-health`
+  (`runs:read`; `weeks` 1-26, default 12) with uploads, finished jobs, reports and the mean run time per ISO week in
+  the time zone of the schedule (Monday 00:00 local, DST-safe; the current week is partial), a summary (last upload,
+  success and failure with its error code, streak of weeks with a report, schedule settings, plan usage) and issues
+  with cockpit links, most severe first (`last_run_failed`, `plan_limit_reached`, `stale_upload`, `plan_limit_near`,
+  `partial_reports`, `no_uploads_yet`, `reminder_off`, `auto_run_off`). Computed on the fly, read-only, not audited;
+  new cockpit screen *Data health* (`/health`) with the verdict, key figures and an 8/12/26-week table with bars.
+- **Chat notification after a run** (cloud): the schedule takes a Slack Incoming Webhook, Microsoft Teams (Workflows)
+  or generic JSON address (`notify_webhook_kind`, `notify_webhook_url`; write-only secret — `GET` shows only
+  `notify_webhook_set` and a mask such as `hooks.slack.com/…XyZ9`; an omitted address or kind stays unchanged, `null`
+  removes the address). Each run then posts one message (status incl. partial, data period, report SHA-256, link to the run; no report
+  content) with the SSRF rules and IP pinning of the signed webhooks, a single attempt with
+  `DAAS_NOTIFY_WEBHOOK_TIMEOUT_SEC`, independent of the run e-mail, audited as `schedule.webhook_notified`; the
+  cockpit section "Chat notification" sets it.
+- **Report period and XLSX over MCP.** `POST .../jobs` and the MCP tool `start_run` take `period_from`/`period_to`
+  (ISO dates, inclusive, either optional; at most 400 days, not before 2000-01-01, the same bounds as the self-hosted
+  `POST /run`): an `ecommerce_demo` run counts only the orders dated in that range (filtered before storage and
+  metrics; the source line names the period, the kept records and how many rows had no readable date; a period without orders ends `no_records` and uses no run of the plan); other pipelines answer
+  `422 period_not_supported`. The job (`JobOut`, MCP `get_job`) keeps the requested period, `job.created` audits it and
+  MCP reuses a pending job only for the same upload, pipeline and period. New MCP tool `upload_xlsx` (13 tools): an
+  XLSX workbook as base64 through the same checks as the REST upload, `DAAS_MCP_MAX_UPLOAD_BYTES` counted on the
+  decoded file.
+- **MCP resources and prompts:** four resource templates (`daas://runs/{run_id}/report.md`, `.../report.json`,
+  `.../evidence.json`, `daas://uploads/{upload_id}/summary.json`) with the same content and SHA-256 as
+  `get_report` / `get_evidence`, `resources/list` with the 20 newest reports of the key's organization, and three
+  prompts (`weekly_summary`, `compare_runs`, `data_quality_check`) that tell the assistant which tools to call, to
+  treat their output as data and to change nothing without the user's confirmation. Scopes and tenant isolation as
+  for the tools (a foreign id is `not_found`); audit `mcp.resource` (template without the id) and `mcp.prompt`;
+  errors are JSON-RPC errors with `code: message` that never echo the URI or argument values. Guide: `docs/MCP.md`.
+- **OAuth 2.1 for MCP connectors** (cloud): ChatGPT and Claude connectors add `https://<host>/mcp` by URL, register
+  themselves (RFC 7591) and get a token after the user approves them in the cockpit (`/oauth/consent`: organization,
+  scopes narrowed to the role). Authorization server from the MCP SDK (`/authorize`, `/token`, `/register`, `/revoke`,
+  RFC 8414 / RFC 9728 metadata, `resource_metadata` in the `401` of `/mcp`), PKCE S256 only, single-use 60-second
+  codes (reuse revokes the tokens), rotating refresh tokens, tokens stored as SHA-256 and cut to the user's current
+  role. `GET/DELETE /api/v1/orgs/{org_id}/oauth/grants` and Settings → Connected apps; audit `oauth.*`; settings
+  `DAAS_OAUTH_*`; Caddy routes; the retention loop also drops registrations left a day without any code or token.
+  Guide: `docs/MCP.md`.
 
 ### Fixed
 

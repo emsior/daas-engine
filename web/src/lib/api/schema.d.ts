@@ -106,6 +106,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/oauth/requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read an authorization request
+         * @description Consent screen data for an application (ChatGPT, Claude, ...) that asked for access through OAuth: its name, the requested scopes, where the browser returns, and the signed-in user's organizations with the scopes each role can grant. Signed-in users only; an API key gets `403`.
+         */
+        get: operations["get_request_api_v1_oauth_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/oauth/requests/{request_id}/decision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve or deny an application
+         * @description One decision per request (CSRF header required). Deny: `redirect_to` carries `error=access_denied`. Approve: the user must be a member of `org_id`; the granted scopes are `scopes` (default: all) narrowed to what was requested and what the role allows, and `redirect_to` carries a single-use authorization code valid for 60 seconds. The connection then acts in that organization only, with those scopes, on behalf of the user.
+         */
+        post: operations["decide_api_v1_oauth_requests__request_id__decision_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orgs": {
         parameters: {
             query?: never;
@@ -215,6 +255,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orgs/{org_id}/data-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data health dashboard
+         * @description Is next Monday's report safe? Per ISO week in the time zone of the organization's schedule (Monday 00:00 local; the last week is the current, partial one): uploads, finished jobs, reports and the mean run time. The summary has the last upload, success and failure, the streak of finished weeks with a report, the reminder and auto-run settings and the plan usage; `issues` lists what to fix, most severe first, each with a cockpit link. Computed on the fly, read-only. `weeks` (1-26, default 12) only limits the `weeks` list: the summary and the issues always look at the last 26 weeks.
+         */
+        get: operations["get_data_health_api_v1_orgs__org_id__data_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orgs/{org_id}/evidence": {
         parameters: {
             query?: never;
@@ -288,7 +348,7 @@ export interface paths {
         put?: never;
         /**
          * Start a job
-         * @description Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with `GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time.
+         * @description Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with `GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time. `period_from`/`period_to` (inclusive, either may be omitted) limit an `ecommerce_demo` run to the orders dated in that range; other pipelines answer `422 period_not_supported`.
          */
         post: operations["create_job_api_v1_orgs__org_id__jobs_post"];
         delete?: never;
@@ -395,6 +455,46 @@ export interface paths {
         patch: operations["change_role_api_v1_orgs__org_id__members__user_id__patch"];
         trace?: never;
     };
+    "/api/v1/orgs/{org_id}/oauth/grants": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List connected applications
+         * @description Applications (ChatGPT, Claude, ...) connected to the organization through OAuth, newest first: who approved them, the granted scopes and the last use. Token values are never returned.
+         */
+        get: operations["list_grants_api_v1_orgs__org_id__oauth_grants_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/orgs/{org_id}/oauth/grants/{token_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Disconnect an application
+         * @description Revokes the connection at once: its refresh token, every access token issued from it and any later rotation. The application must ask for consent again. Disconnecting twice succeeds.
+         */
+        delete: operations["revoke_grant_api_v1_orgs__org_id__oauth_grants__token_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orgs/{org_id}/runs": {
         parameters: {
             query?: never;
@@ -461,12 +561,12 @@ export interface paths {
         };
         /**
          * Get the schedule and notifications
-         * @description Weekly export reminder, auto-run after upload and the e-mail when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`).
+         * @description Weekly export reminder, auto-run after upload, the e-mail and the chat message when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`). The chat webhook address is never returned: `notify_webhook_set` and the masked `notify_webhook_hint` say whether and which one is saved.
          */
         get: operations["get_schedule_api_v1_orgs__org_id__schedule_get"];
         /**
          * Save the schedule and notifications
-         * @description Replaces the whole schedule (an omitted field takes its default). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.
+         * @description Replaces the whole schedule (an omitted field takes its default), except the chat webhook pair: `notify_webhook_url` omitted = unchanged, `null` = remove, text = set (https, public address, no credentials); `notify_webhook_kind` omitted = unchanged. `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.
          */
         put: operations["put_schedule_api_v1_orgs__org_id__schedule_put"];
         post?: never;
@@ -797,6 +897,98 @@ export interface components {
             /** Sheet */
             sheet?: string | null;
         };
+        /** DataHealthOut */
+        DataHealthOut: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /**
+             * Issues
+             * @description most severe first: `error`, `warning`, `info`
+             */
+            issues: components["schemas"]["HealthIssue"][];
+            summary: components["schemas"]["DataHealthSummary"];
+            /**
+             * Timezone
+             * @description IANA zone of the schedule; weeks start on Monday 00:00 there
+             */
+            timezone: string;
+            /**
+             * Weeks
+             * @description oldest first; the last one is the current, partial week
+             */
+            weeks: components["schemas"]["WeekHealth"][];
+        };
+        /** DataHealthSummary */
+        DataHealthSummary: {
+            /**
+             * Auto Run On Upload
+             * @description a job starts right after each upload (schedule)
+             */
+            auto_run_on_upload: boolean;
+            /**
+             * Last Error Code
+             * @description `error_code` of that failed job
+             */
+            last_error_code: string | null;
+            /**
+             * Last Failure At
+             * @description latest job that finished `failed`
+             */
+            last_failure_at: string | null;
+            /**
+             * Last Success At
+             * @description latest job that finished `succeeded`
+             */
+            last_success_at: string | null;
+            /**
+             * Last Upload At
+             * @description latest upload still on record; `null` = none
+             */
+            last_upload_at: string | null;
+            /**
+             * Next Reminder At
+             * @description next reminder (UTC); `null` = reminder off
+             */
+            next_reminder_at: string | null;
+            /**
+             * Notify On Finish
+             * @description members get an e-mail when a run finishes (schedule)
+             */
+            notify_on_finish: boolean;
+            /**
+             * Plan
+             * @description plan of the organization
+             */
+            plan: string;
+            /**
+             * Reminder Enabled
+             * @description weekly export reminder (schedule)
+             */
+            reminder_enabled: boolean;
+            /**
+             * Retention Days
+             * @description how long uploaded files are kept
+             */
+            retention_days: number;
+            /**
+             * Runs Limit
+             * @description monthly run limit of the plan; `null` = unlimited
+             */
+            runs_limit: number | null;
+            /**
+             * Runs Used
+             * @description runs counted this calendar month (UTC)
+             */
+            runs_used: number;
+            /**
+             * Streak Weeks
+             * @description finished weeks in a row with at least one report, counted back from last week (the current week is not counted; at most 25)
+             */
+            streak_weeks: number;
+        };
         /** EvidenceCheck */
         EvidenceCheck: {
             /** Artifact */
@@ -837,6 +1029,29 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HealthIssue */
+        HealthIssue: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "last_run_failed" | "plan_limit_reached" | "stale_upload" | "plan_limit_near" | "partial_reports" | "no_uploads_yet" | "reminder_off" | "auto_run_off";
+            /**
+             * Link
+             * @description cockpit path that explains or fixes the issue, e.g. `/upload`
+             */
+            link: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "error" | "warning" | "info";
+            /**
+             * Since
+             * @description when the condition started, if known
+             */
+            since: string | null;
         };
         /**
          * HealthResponse
@@ -920,6 +1135,18 @@ export interface components {
              */
             force_mock: boolean;
             /**
+             * Period From
+             * @description first day of the requested report period (ISO `YYYY-MM-DD`, inclusive; not before 2000-01-01); only rows dated on or after it are counted. `ecommerce_demo` only; `null` = no lower bound
+             * @example 2026-08-01
+             */
+            period_from?: string | null;
+            /**
+             * Period To
+             * @description last day of the requested report period (ISO `YYYY-MM-DD`, inclusive); not before `period_from` and at most 400 days after it counting both ends. `ecommerce_demo` only; `null` = no upper bound
+             * @example 2026-08-07
+             */
+            period_to?: string | null;
+            /**
              * Pipeline
              * @example ecommerce_demo
              * @enum {string}
@@ -943,6 +1170,16 @@ export interface components {
             id: string;
             /** Message */
             message?: string | null;
+            /**
+             * Period From
+             * @description requested first day of the report period (`JobCreate.period_from`); `null` = no lower bound
+             */
+            period_from?: string | null;
+            /**
+             * Period To
+             * @description requested last day of the report period (`JobCreate.period_to`); `null` = no upper bound
+             */
+            period_to?: string | null;
             /** Pipeline */
             pipeline: string;
             /** Progress */
@@ -1058,6 +1295,109 @@ export interface components {
              * @description rola uzytkownika; brak dla klucza API
              */
             role?: ("owner" | "admin" | "member") | null;
+        };
+        /** OAuthDecisionIn */
+        OAuthDecisionIn: {
+            /** Approve */
+            approve: boolean;
+            /**
+             * Org Id
+             * @description organization the connection acts in; required to approve
+             */
+            org_id?: string | null;
+            /**
+             * Scopes
+             * @description scopes to grant; default: every grantable requested scope. Scopes that were not requested or that the role cannot grant are ignored
+             */
+            scopes?: string[] | null;
+        };
+        /** OAuthDecisionOut */
+        OAuthDecisionOut: {
+            /**
+             * Redirect To
+             * @description send the browser here: the application's redirect URI with `code` and `state`, or `error=access_denied`
+             */
+            redirect_to: string;
+        };
+        /** OAuthGrantOut */
+        OAuthGrantOut: {
+            /** Client Id */
+            client_id: string;
+            /** Client Name */
+            client_name?: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Last Used At */
+            last_used_at?: string | null;
+            /**
+             * Role
+             * @description that user's current role; `null` = no longer a member
+             */
+            role?: ("owner" | "admin" | "member") | null;
+            /** Scopes */
+            scopes: string[];
+            /**
+             * Token Id
+             * @description id to disconnect with `DELETE .../oauth/grants/{token_id}`; it changes when the application refreshes its tokens
+             */
+            token_id: string;
+            /**
+             * User Id
+             * @description user who approved the connection
+             */
+            user_id?: string | null;
+        };
+        /** OAuthOrgOption */
+        OAuthOrgOption: {
+            /** Name */
+            name: string;
+            /** Org Id */
+            org_id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "owner" | "admin" | "member";
+            /**
+             * Scopes Grantable
+             * @description requested scopes this role can grant; others are shown disabled
+             */
+            scopes_grantable: string[];
+        };
+        /** OAuthRequestOut */
+        OAuthRequestOut: {
+            /** Client Id */
+            client_id: string;
+            /**
+             * Client Name
+             * @description name the application registered (self-declared)
+             */
+            client_name?: string | null;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description the decision must be made before this moment (UTC)
+             */
+            expires_at: string;
+            /**
+             * Organizations
+             * @description organizations of the signed-in user, oldest first
+             */
+            organizations: components["schemas"]["OAuthOrgOption"][];
+            /**
+             * Redirect Host
+             * @description host the browser returns to after the decision
+             */
+            redirect_host: string;
+            /** Request Id */
+            request_id: string;
+            /** Scopes Requested */
+            scopes_requested: string[];
         };
         /** OrgCreate */
         OrgCreate: {
@@ -1268,7 +1608,9 @@ export interface components {
         };
         /**
          * ScheduleIn
-         * @description Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna).
+         * @description Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: para webhooka
+         *     czatu - adres jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres),
+         *     a pominiety `notify_webhook_kind` tez zostaje jak zapisany (bez adresu nie ma czego przestawiac).
          */
         ScheduleIn: {
             /**
@@ -1283,6 +1625,19 @@ export interface components {
              * @default false
              */
             notify_on_finish: boolean;
+            /**
+             * Notify Webhook Kind
+             * @description format of the chat message after a run: `slack` (Incoming Webhook), `teams` (Workflows webhook trigger) or `generic` (plain JSON); omitted = unchanged
+             * @default slack
+             * @enum {string}
+             */
+            notify_webhook_kind: "slack" | "teams" | "generic";
+            /**
+             * Notify Webhook Url
+             * @description chat webhook address (write-only secret, never returned). Omitted = unchanged, `null` = remove the address, text = set it: `https` and a public address (outside dev), no credentials; an invalid address answers `422 validation_error` naming this field
+             * @example https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX
+             */
+            notify_webhook_url?: string | null;
             /**
              * Reminder Enabled
              * @description cotygodniowe przypomnienie e-mail o eksporcie
@@ -1330,6 +1685,23 @@ export interface components {
             next_reminder_at?: string | null;
             /** Notify On Finish */
             notify_on_finish: boolean;
+            /**
+             * Notify Webhook Hint
+             * @description masked saved address: host and the last 4 characters of a long path (no query); `null` = none
+             * @example hooks.slack.com/…XyZ9
+             */
+            notify_webhook_hint?: string | null;
+            /**
+             * Notify Webhook Kind
+             * @description format of the chat message after a run
+             * @enum {string}
+             */
+            notify_webhook_kind: "slack" | "teams" | "generic";
+            /**
+             * Notify Webhook Set
+             * @description a chat webhook address is saved (the address itself is never returned)
+             */
+            notify_webhook_set: boolean;
             /** Reminder Enabled */
             reminder_enabled: boolean;
             /** Reminder Hour */
@@ -1554,6 +1926,55 @@ export interface components {
              */
             status_class: "2xx" | "3xx" | "4xx" | "5xx" | "error";
         };
+        /** WeekHealth */
+        WeekHealth: {
+            /**
+             * Avg Run Seconds
+             * @description mean `finished_at - started_at` of the finished jobs (seconds); `null` = no finished job
+             */
+            avg_run_seconds: number | null;
+            /**
+             * Last Report At
+             * @description latest report of the week; `null` = none
+             */
+            last_report_at: string | null;
+            /**
+             * Partial
+             * @description `true` for the current week, which is still running
+             */
+            partial: boolean;
+            /**
+             * Reports
+             * @description reports delivered in the week: runs `SUCCESS` or `PARTIAL` whose job did not fail
+             */
+            reports: number;
+            /**
+             * Runs Failed
+             * @description jobs that finished `failed` in the week (`no_records` included)
+             */
+            runs_failed: number;
+            /**
+             * Runs Succeeded
+             * @description jobs that finished `succeeded` in the week
+             */
+            runs_succeeded: number;
+            /**
+             * Upload Bytes
+             * @description bytes uploaded in the week
+             */
+            upload_bytes: number;
+            /**
+             * Uploads
+             * @description files uploaded in the week
+             */
+            uploads: number;
+            /**
+             * Week Start
+             * Format: date
+             * @description Monday of the ISO week (local date in `timezone`)
+             */
+            week_start: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -1698,6 +2119,121 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MeOut"];
                 };
+            };
+        };
+    };
+    get_request_api_v1_oauth_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Authorization request id from the `request` query parameter of the consent page */
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthRequestOut"];
+                };
+            };
+            /** @description Not a user session */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown request, or already decided */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `expired`: the request is older than DAAS_OAUTH_AUTHORIZATION_TTL_SEC */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    decide_api_v1_oauth_requests__request_id__decision_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Authorization request id from the `request` query parameter of the consent page */
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthDecisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthDecisionOut"];
+                };
+            };
+            /** @description Not a user session, or not a member of `org_id` */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown request */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `request_already_decided` */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `expired` */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description `org_id` missing, or `no_grantable_scopes` */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -1976,6 +2512,39 @@ export interface operations {
             };
         };
     };
+    get_data_health_api_v1_orgs__org_id__data_health_get: {
+        parameters: {
+            query?: {
+                /** @description how many weeks to return, the current one included (1-26) */
+                weeks?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataHealthOut"];
+                };
+            };
+            /** @description `weeks` outside 1-26 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     evidence_api_v1_orgs__org_id__evidence_get: {
         parameters: {
             query?: never;
@@ -2203,7 +2772,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Pipeline and upload do not match */
+            /** @description Pipeline and upload do not match, or the period is invalid or not supported */
             422: {
                 headers: {
                     [name: string]: unknown;
@@ -2460,6 +3029,76 @@ export interface operations {
             };
         };
     };
+    list_grants_api_v1_orgs__org_id__oauth_grants_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthGrantOut"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_grant_api_v1_orgs__org_id__oauth_grants__token_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token_id: string;
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description No such connection in this organization */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_runs_api_v1_orgs__org_id__runs_get: {
         parameters: {
             query?: {
@@ -2638,7 +3277,7 @@ export interface operations {
                     "application/json": components["schemas"]["ScheduleOut"];
                 };
             };
-            /** @description Invalid weekday, hour or time zone */
+            /** @description Invalid weekday, hour, time zone or chat webhook address */
             422: {
                 headers: {
                     [name: string]: unknown;

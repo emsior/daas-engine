@@ -8,6 +8,9 @@ Co jest usuwane dla organizacji:
     * wiersze tenantowego DuckDB tych runow oraz wszystkie z `runs.started_at` starszym niz retencja (tabele
       `runs`, `cs2_matches`, `ecommerce_orders`, `uksc_hosts|checks|inventory` maja klucz `run_id`).
 Uwaga: kasowanie wierszy `uksc_*` oznacza utrate porownania "poprzedni run" dla najstarszych runow — to zamierzone.
+Petla retencji sprzata tez OAuth konektorow MCP (`purge_oauth`): zadania/kody autoryzacji dobe po wygasnieciu,
+tokeny 30 dni po wygasnieciu (w bazie leza tylko ich skroty SHA-256) i klientow bez zadnego kodu ani tokenu dobe po
+rejestracji (anonimowa rejestracja `/register` nie moze rosnac bez konca).
 Zasady bezpieczenstwa: usuwane sa wylacznie pliki lezace w `uploads/` albo `reports/` danego najemcy (sciezka
 rozwiazana i sprawdzona), nazwy plikow klienta nie trafiaja do audytu. Operacja jest idempotentna; `dry_run` tylko liczy.
 Zamek per organizacja (`TenantRegistry.lock`) wyklucza rownoczesny run tej organizacji.
@@ -26,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.control.audit import record_event
 from app.control.executor import effective_llm
 from app.control.models import Job, Org, RunRecord, Upload
+from app.control.oauth import purge_expired
 from app.control.report_paths import resolve_report
 from app.control.tenancy import InvalidOrgId, TenantPaths, TenantRegistry
 from app.control.types import utcnow
@@ -165,6 +169,17 @@ async def purge_all(sessionmaker: async_sessionmaker[AsyncSession], registry: Te
     return reports
 
 
+async def purge_oauth(sessionmaker: async_sessionmaker[AsyncSession]) -> tuple[int, int, int]:
+    """Sprzatanie OAuth konektorow MCP: wygasle zadania/kody autoryzacji, tokeny i porzuceni klienci
+    (`app.control.oauth.purge_expired`)."""
+    async with sessionmaker() as db:
+        counts = await purge_expired(db, utcnow())
+        await db.commit()
+    if any(counts):
+        log.info("retention oauth codes=%d tokens=%d clients=%d", *counts)
+    return counts
+
+
 async def retention_loop(sessionmaker, registry, settings: Settings, *, interval_sec: float) -> None:
     """Petla w lifespanie (tylko cloud): pierwszy przebieg po jednym interwale, bledy sa logowane i nie przerywaja petli."""
     while True:
@@ -175,3 +190,9 @@ async def retention_loop(sessionmaker, registry, settings: Settings, *, interval
             raise
         except Exception:  # noqa: BLE001
             log.exception("retention cycle failed")
+        try:
+            await purge_oauth(sessionmaker)
+        except asyncio.CancelledError:
+            raise
+        except Exception:  # noqa: BLE001
+            log.exception("oauth retention failed")

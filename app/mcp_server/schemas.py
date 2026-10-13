@@ -18,15 +18,27 @@ class WhoAmIOut(BaseModel):
     org_id: str
     org_name: str
     mode: Literal["cloud", "selfhost"]
-    key_prefix: str | None = Field(default=None, description="visible key prefix; null for the deployment key")
+    auth: Literal["api_key", "oauth", "deployment_key"] = Field(
+        ..., description="credential of this request: an organization API key, an OAuth access token of a "
+                         "connector (ChatGPT, Claude, ...) or the selfhost deployment key")
+    key_prefix: str | None = Field(default=None, description="visible key prefix; null for the deployment key and "
+                                                             "OAuth tokens")
+    client_id: str | None = Field(default=None, description="OAuth client (connector) the token was issued to; "
+                                                            "null for API keys")
     scopes: list[str]
     server_version: str
     protocol: str = Field(..., description="MCP protocol version of this request")
 
 
+FileKind = Literal["csv", "xlsx", "json"]
+
+
 class PipelineInput(BaseModel):
-    kind: Literal["csv", "xlsx", "json"] | None = Field(
-        ..., description="file kind the pipeline reads; null = synthetic data only")
+    kind: FileKind | None = Field(
+        ..., description="main file kind the pipeline reads (the first of `kinds`); null = synthetic data only")
+    kinds: list[FileKind] = Field(
+        default_factory=list, description="every file kind the pipeline reads: csv (upload_csv), xlsx "
+                                          "(upload_xlsx), json (REST API only); empty = synthetic data only")
     required_columns: list[str] = Field(default_factory=list,
                                         description="canonical columns the column mapper must find")
 
@@ -61,9 +73,13 @@ class StartRunOut(BaseModel):
     job_id: str
     status: JobStatus
     run_id: str | None = None
-    reused: bool = Field(default=False, description="true when a queued or running job for the same upload and "
-                                                    "pipeline already existed (e.g. auto-run after upload_csv) and "
-                                                    "no new job was created")
+    reused: bool = Field(default=False, description="true when a queued or running job for the same upload, "
+                                                    "pipeline and period already existed (e.g. auto-run after an "
+                                                    "upload) and no new job was created")
+    period_from: date | None = Field(default=None, description="requested first day of the report period "
+                                                               "(inclusive); null = no lower bound")
+    period_to: date | None = Field(default=None, description="requested last day of the report period "
+                                                             "(inclusive); null = no upper bound")
 
 
 class JobInfo(BaseModel):
@@ -73,6 +89,10 @@ class JobInfo(BaseModel):
     error_code: str | None = None
     created_at: datetime
     finished_at: datetime | None = None
+    period_from: date | None = Field(default=None, description="requested first day of the report period "
+                                                               "(inclusive); null = no lower bound")
+    period_to: date | None = Field(default=None, description="requested last day of the report period "
+                                                             "(inclusive); null = no upper bound")
 
 
 class RunItem(BaseModel):

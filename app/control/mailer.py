@@ -122,14 +122,16 @@ def magic_link_mail(settings: Settings, to: str, token: str, locale: str) -> Out
     return OutgoingMail(to=to, subject=subject, body=body, link=link)
 
 
-_URL_RE = re.compile(r"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.)\S*")
+#: Adresy ze schematem `x://`, `www.` oraz `mailto:`/`tel:` (bez `//`, a w Markdown Teams/Slacka tez robia link).
+_URL_RE = re.compile(r"(?i)\b(?:[a-z][a-z0-9+.-]*://|www\.|mailto:|tel:)\S*")
 _DOMAIN_RE = re.compile(r"(?i)\b[\w-]+(?:\.[\w-]+)*\.[a-z]{2,}(?:/\S*)?")
 ORG_NAME_MAX = 80
 
 
 def sanitize_org_name(name: str) -> str:
-    """Nazwa organizacji do tresci maila: bez adresow URL i domen (nie da sie wstrzyknac wlasnego linku do maila
-    wysylanego z naszej domeny), bez znakow sterujacych i formatujacych (nowa linia, bidi), bez `<` i `>`,
+    """Nazwa organizacji do tresci maila i wiadomosci na czacie: bez adresow URL (takze `mailto:`/`tel:`) i domen
+    (nie da sie wstrzyknac wlasnego linku do maila wysylanego z naszej domeny ani do karty Teams/Slacka, gdzie
+    `[tekst](adres)` jest Markdownem), bez znakow sterujacych i formatujacych (nowa linia, bidi), bez `<` i `>`,
     przycieta do 80 znakow. Pusty wynik -> `organization`."""
     text = _URL_RE.sub(" ", name)
     text = _DOMAIN_RE.sub(" ", text)

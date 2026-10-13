@@ -88,6 +88,9 @@ export interface UploadPreview {
 export interface CreateJobRequest {
   pipeline: KnownPipeline;
   upload_id: string;
+  /** Zamówiony okres raportu (ISO `YYYY-MM-DD`, włącznie; tylko `ecommerce_demo`); pominięty = bez granicy. */
+  period_from?: string | null;
+  period_to?: string | null;
 }
 
 export type JobStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled";
@@ -104,6 +107,9 @@ export interface Job {
   started_at: string | null;
   finished_at: string | null;
   error_code: string | null;
+  /** Okres zamówiony przy starcie zadania (ISO `YYYY-MM-DD`, włącznie); null = bez granicy z tej strony. */
+  period_from?: string | null;
+  period_to?: string | null;
 }
 
 /** Zdarzenia SSE z `GET /orgs/{id}/jobs/{job_id}/events`. */
@@ -256,6 +262,9 @@ export interface WebhookPingResult {
   status_class: PingStatusClass;
 }
 
+/** Format wiadomości na czacie zespołu po runie (`notify_webhook_kind`): Slack, Microsoft Teams albo zwykły JSON. */
+export type ChatWebhookKind = "slack" | "teams" | "generic";
+
 /** Harmonogram i powiadomienia organizacji (`GET/PUT /orgs/{id}/schedule`). Godzina jest lokalna w `timezone`. */
 export interface ScheduleSettings {
   reminder_enabled: boolean;
@@ -268,9 +277,24 @@ export interface ScheduleSettings {
   reminder_skip_if_recent_upload: boolean;
   auto_run_on_upload: boolean;
   notify_on_finish: boolean;
+  /** Format powiadomienia na czacie; pominięty w PUT = `slack` (PUT zastępuje cały harmonogram). */
+  notify_webhook_kind?: ChatWebhookKind;
+  /**
+   * Adres webhooka czatu, tylko do zapisu (API nigdy go nie zwraca): pominięty = bez zmian,
+   * `null` = usuń zapisany adres, tekst = zapisz nowy (https, adres publiczny).
+   */
+  notify_webhook_url?: string | null;
 }
 
-export interface Schedule extends ScheduleSettings {
+export interface Schedule extends Omit<
+  ScheduleSettings,
+  "notify_webhook_kind" | "notify_webhook_url"
+> {
+  notify_webhook_kind: ChatWebhookKind;
+  /** Czy zapisano adres webhooka czatu. */
+  notify_webhook_set: boolean;
+  /** Zamaskowany zapisany adres, np. `hooks.slack.com/…XyZ9`; null = brak adresu. */
+  notify_webhook_hint: string | null;
   /** Najbliższe przypomnienie (UTC, ISO); null = przypomnienie wyłączone. */
   next_reminder_at: string | null;
   last_reminder_at: string | null;
@@ -286,6 +310,73 @@ export interface Usage {
   upload_bytes_limit?: number | null;
 }
 
+/* --- pulpit „Zdrowie danych” (`GET /orgs/{id}/data-health`) --- */
+
+export type HealthIssueCode =
+  | "last_run_failed"
+  | "plan_limit_reached"
+  | "stale_upload"
+  | "plan_limit_near"
+  | "partial_reports"
+  | "no_uploads_yet"
+  | "reminder_off"
+  | "auto_run_off";
+export type HealthSeverity = "error" | "warning" | "info";
+
+/** Jeden tydzień ISO w strefie harmonogramu organizacji (poniedziałek 00:00 czasu lokalnego). */
+export interface WeekHealth {
+  /** Poniedziałek tygodnia: data lokalna `YYYY-MM-DD` (bez godziny i strefy). */
+  week_start: string;
+  /** Bieżący, jeszcze trwający tydzień. */
+  partial: boolean;
+  uploads: number;
+  upload_bytes: number;
+  runs_succeeded: number;
+  /** Zadania zakończone błędem, w tym `no_records`. */
+  runs_failed: number;
+  /** Raporty SUCCESS i PARTIAL, których zadanie nie zakończyło się błędem. */
+  reports: number;
+  /** Średni czas uruchomienia (sekundy); null = brak zakończonych zadań. */
+  avg_run_seconds: number | null;
+  last_report_at: string | null;
+}
+
+export interface DataHealthSummary {
+  last_upload_at: string | null;
+  last_success_at: string | null;
+  last_failure_at: string | null;
+  last_error_code: string | null;
+  /** Pełne tygodnie z rzędu z co najmniej jednym raportem (bez bieżącego). */
+  streak_weeks: number;
+  reminder_enabled: boolean;
+  next_reminder_at: string | null;
+  auto_run_on_upload: boolean;
+  notify_on_finish: boolean;
+  plan: string;
+  runs_used: number;
+  /** null = plan bez limitu. */
+  runs_limit: number | null;
+  retention_days: number;
+}
+
+export interface HealthIssue {
+  code: HealthIssueCode;
+  severity: HealthSeverity;
+  since: string | null;
+  /** Ścieżka w kokpicie, która wyjaśnia albo naprawia problem (np. `/upload`). */
+  link: string;
+}
+
+/** Problemy są posortowane od najpoważniejszych; tygodnie od najstarszego do bieżącego. */
+export interface DataHealth {
+  generated_at: string;
+  /** Strefa IANA harmonogramu, w której liczone są tygodnie. */
+  timezone: string;
+  weeks: WeekHealth[];
+  summary: DataHealthSummary;
+  issues: HealthIssue[];
+}
+
 export interface VerifyResult {
   known: boolean;
   run_id?: string | null;
@@ -293,6 +384,72 @@ export interface VerifyResult {
   pipeline?: PipelineName | null;
   /** Format pliku raportu, do którego pasuje skrót. */
   format?: ReportFormat | null;
+}
+
+/* --- OAuth: konektory MCP (ChatGPT, Claude) --- */
+
+/** Zakresy, o które aplikacja może poprosić przez OAuth (`KEY_SCOPES` backendu). */
+export const OAUTH_SCOPES = [
+  "org:read",
+  "org:manage",
+  "members:manage",
+  "keys:manage",
+  "uploads:write",
+  "runs:read",
+  "runs:write",
+  "reports:read",
+  "usage:read",
+  "audit:read",
+  "webhooks:manage",
+] as const;
+export type OAuthScope = (typeof OAUTH_SCOPES)[number];
+
+/** Organizacja użytkownika na ekranie zgody: zakresy, których jego rola może udzielić. */
+export interface OAuthOrgOption {
+  org_id: string;
+  name: string;
+  role: Role;
+  scopes_grantable: string[];
+}
+
+/** `GET /oauth/requests/{id}`: prośba aplikacji o dostęp (ekran zgody). */
+export interface OAuthRequest {
+  request_id: string;
+  client_id: string;
+  /** Nazwa podana przez samą aplikację przy rejestracji; null = bez nazwy. */
+  client_name: string | null;
+  scopes_requested: string[];
+  /** Host, na który przeglądarka wróci po decyzji. */
+  redirect_host: string;
+  expires_at: string;
+  organizations: OAuthOrgOption[];
+}
+
+export interface OAuthDecisionRequest {
+  approve: boolean;
+  org_id?: string | null;
+  /** Zakresy do nadania; brak = wszystkie możliwe. */
+  scopes?: string[] | null;
+}
+
+/** Odpowiedź decyzji: adres powrotu do aplikacji (z kodem albo `error=access_denied`). */
+export interface OAuthDecision {
+  redirect_to: string;
+}
+
+/** Połączona aplikacja organizacji (`GET /orgs/{id}/oauth/grants`). */
+export interface OAuthGrant {
+  token_id: string;
+  client_id: string;
+  client_name: string | null;
+  /** Kto udzielił zgody; null = konto usunięte. */
+  user_id: string | null;
+  /** Bieżąca rola tej osoby; null = już nie należy do organizacji. */
+  role: Role | null;
+  scopes: string[];
+  created_at: string;
+  last_used_at: string | null;
+  expires_at: string | null;
 }
 
 /** Ciało błędu `application/problem+json` (RFC 9457) z rozszerzeniem `request_id`. */

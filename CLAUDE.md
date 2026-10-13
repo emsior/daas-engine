@@ -39,9 +39,9 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 | Kokpit `web/` | Next.js 16 (App Router), React 19, TypeScript strict, Tailwind 4, TanStack Query, zod; Vitest + Testing Library; Playwright (e2e) |
 | Wdrożenie | Docker Compose (`deploy/`), Caddy (TLS), obrazy `api` (korzeń repo) i `web` (`web/Dockerfile`) |
 | Zależności Pythona | `requirements.lock`, `requirements-dev.lock` (pip-tools, hashe SHA-256; `--require-hashes`); wpisy tylko-Windows/poza-Windows dopisuje `tools/lock_windows_pins.py` |
-| Agenci AI (MCP) | `mcp` 2.3 (oficjalne SDK): `POST /mcp`, Streamable HTTP bezstanowy + JSON, klucz API jako Bearer, 12 narzędzi w `app/mcp_server/`; `docs/MCP.md` |
-| Harmonogram | `app/control/schedule.py` (pętla w lifespanie, tylko cloud), `app/control/notifications.py` (mail po runie), `GET/PUT /orgs/{id}/schedule`, Alembic `0004` |
-| Testy | pytest — 1777 przypadków (1776 passed, 1 skipped; stan 13.10.2026, po MCP, harmonogramie, poprawkach QA i scaleniu poprawki lifespanu), pełny przebieg 5–8 min; Linux (3.13) zielone; Windows (3.12): 1627/0 przed MCP i harmonogramem, pełny przebieg po scaleniu w `bundle\pytest_windows_2026-10-13.log` warsztatu; Vitest w `web/` (150) |
+| Agenci AI (MCP) | `mcp` 2.3 (oficjalne SDK): `POST /mcp`, Streamable HTTP bezstanowy + JSON, klucz API jako Bearer, 13 narzędzi (w tym `upload_xlsx` — skoroszyt jako base64 — i `start_run` z okresem `period_from`/`period_to`) + 4 zasoby (szablony `daas://`, `resources/list` z 20 najnowszymi raportami) + 3 prompty w `app/mcp_server/`; OAuth 2.1 dla konektorów ChatGPT/Claude (serwer autoryzacji z SDK + `app/control/oauth.py`, zgoda w kokpicie `/oauth/consent`, tylko cloud); `docs/MCP.md` |
+| Harmonogram | `app/control/schedule.py` (pętla w lifespanie, tylko cloud), `app/control/notifications.py` (mail i wiadomość na czacie po runie: Slack / Teams / JSON, payloady w `app/control/chat_messages.py`, wysyłka `post_json` z `webhooks.py` z ochroną SSRF), `GET/PUT /orgs/{id}/schedule` (adres webhooka czatu tylko do zapisu, w odpowiedzi maska), Alembic `0004`, `0005` |
+| Testy | pytest — ok. 2090 przypadków (2086 passed + 1 skipped po scaleniu pięciu przyrostów P-12 13.10.2026, plus testy poprawek audytu Wave 2), pełny przebieg 8–10 min; Linux (3.13) zielone; Windows (3.12): 1777/0 przed P-12, pełny przebieg po P-12 w `bundle\pytest_windows_2026-10-13b.log` warsztatu; Vitest w `web/` (210) |
 | CI | GitHub Actions: `test` (3.11, 3.12, 3.13), `security` (gitleaks, semgrep, zizmor, pip-audit), `web`, `e2e`, `lighthouse`, `docker`; Dependabot (pip, actions, docker, npm); akcje przypięte do SHA |
 
 ⚠ **Od 2.0 w repo jest JavaScript**: `web/` ma własny `package.json` i `package-lock.json`. Reszta repo (poza `web/`) to Python.
@@ -123,9 +123,25 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
 - Harmonogram i powiadomienia (12.10.2026): `GET/PUT /orgs/{id}/schedule`, tabela `org_schedules` (Alembic `0004`), cotygodniowe
   przypomnienie o eksporcie (`app/control/schedule.py`, pętla `SchedulerLoop` w lifespanie, tylko cloud, `DAAS_SCHEDULER_*`),
   auto-uruchomienie po uploadzie (`queue_job` wspólne z `POST /jobs`, pole `auto_job_id`), e-mail po runie
-  (`app/control/notifications.py`, listener `run.finished`), sekcja w Ustawieniach kokpitu.
-- Kokpit `web/` (8 ekranów, PL/EN, jasny/ciemny motyw), `deploy/` (compose, Caddy, backup, restore, smoke), `docs/API.md`, `docs/SECURITY.md`.
-- Serwer MCP pod `/mcp` (12 narzędzi, te same funkcje serwisowe co API v1, audyt `mcp.tool`), `docs/MCP.md`.
+  (`app/control/notifications.py`, listener `run.finished`), sekcja w Ustawieniach kokpitu. Powiadomienie na czacie
+  (13.10.2026): `notify_webhook_kind`/`notify_webhook_url` (Slack Incoming Webhook, Teams Workflows, dowolny JSON; adres tylko
+  do zapisu — pominięty = bez zmian, `null` = usuń, podobnie rodzaj; maska w `notify_webhook_hint`), payloady w
+  `app/control/chat_messages.py`, wysyłka `post_json` z SSRF i pinowaniem IP, audyt `schedule.webhook_notified`.
+- Pulpit zdrowia danych (13.10.2026): `GET /orgs/{id}/data-health?weeks=` (`runs:read`; tygodnie ISO w strefie
+  harmonogramu, podsumowanie, problemy z linkami do kokpitu; liczone w locie z control plane, bez audytu,
+  `app/api/v1/data_health.py`), ekran `/health` w kokpicie (werdykt, wskaźniki, tabela 8/12/26 tygodni).
+- OAuth 2.1 dla konektorów MCP (13.10.2026, tylko cloud): serwer autoryzacji z SDK `mcp` (`app/control/oauth.py`: `/authorize`,
+  `/token`, `/register`, `/revoke`, metadane RFC 8414/9728; tabele `oauth_clients|codes|tokens`, Alembic `0005`), zgoda w kokpicie
+  (`/oauth/consent`, `app/api/v1/oauth.py`), token `daas_oat_` w `/mcp` jak klucz organizacji zgody obcięty do bieżącej roli,
+  granty `GET/DELETE /orgs/{id}/oauth/grants` + ekran „Połączone aplikacje”, retencja kodów/tokenów/porzuconych klientów.
+- Kokpit `web/` (11 ekranów: kokpit, upload, zdrowie danych, run, evidence, ustawienia ×4, zgoda OAuth, DPA; PL/EN, jasny/ciemny motyw),
+  `deploy/` (compose, Caddy, backup, restore, smoke), `docs/API.md`, `docs/SECURITY.md`.
+- Serwer MCP pod `/mcp` (13 narzędzi, w tym `upload_xlsx` jako base64; te same funkcje serwisowe co API v1, audyt `mcp.tool`), `docs/MCP.md`; zasoby
+  (`app/mcp_server/resources.py`: raport MD/JSON, status artefaktów, podsumowanie uploadu; audyt `mcp.resource`) i prompty
+  (`app/mcp_server/prompts.py`: `weekly_summary`, `compare_runs`, `data_quality_check`; audyt `mcp.prompt`).
+- Zakres dat runu (13.10.2026): `period_from`/`period_to` w `POST /jobs` i MCP `start_run` (kolumny `Job.period_*`, Alembic `0005`);
+  runner filtruje rekordy `ecommerce_demo` po dacie zamówienia przed zapisem i metrykami (rekordy bez daty liczone osobno w `detail`),
+  inne pipeline'y: `422 period_not_supported`; granice (od 2000-01-01, maks. 400 dni) wspólne z selfhost `POST /run` (`app/core/models.py`).
 - DevSecOps: ruff, gitleaks, semgrep, zizmor, pip-audit, Dependabot, pre-commit, kontenery bez roota.
 - README ze screenshotem i wideo demo `docs/daas_demo.mp4`; materiały pilota w `docs/pilot/`.
 - Poza repo: landing ofertowy na prochpc.pl i wzór umowy powierzenia danych (RODO art. 28); w repo szkic `docs/DPA_v1_PL.md` do przeglądu prawnego.

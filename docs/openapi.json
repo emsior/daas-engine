@@ -329,6 +329,182 @@
         "title": "Body_create_upload_api_v1_orgs__org_id__uploads_post",
         "type": "object"
       },
+      "DataHealthOut": {
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "issues": {
+            "description": "most severe first: `error`, `warning`, `info`",
+            "items": {
+              "$ref": "#/components/schemas/HealthIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DataHealthSummary"
+          },
+          "timezone": {
+            "description": "IANA zone of the schedule; weeks start on Monday 00:00 there",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "weeks": {
+            "description": "oldest first; the last one is the current, partial week",
+            "items": {
+              "$ref": "#/components/schemas/WeekHealth"
+            },
+            "title": "Weeks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at",
+          "timezone",
+          "weeks",
+          "summary",
+          "issues"
+        ],
+        "title": "DataHealthOut",
+        "type": "object"
+      },
+      "DataHealthSummary": {
+        "properties": {
+          "auto_run_on_upload": {
+            "description": "a job starts right after each upload (schedule)",
+            "title": "Auto Run On Upload",
+            "type": "boolean"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`error_code` of that failed job",
+            "title": "Last Error Code"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest job that finished `failed`",
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest job that finished `succeeded`",
+            "title": "Last Success At"
+          },
+          "last_upload_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest upload still on record; `null` = none",
+            "title": "Last Upload At"
+          },
+          "next_reminder_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "next reminder (UTC); `null` = reminder off",
+            "title": "Next Reminder At"
+          },
+          "notify_on_finish": {
+            "description": "members get an e-mail when a run finishes (schedule)",
+            "title": "Notify On Finish",
+            "type": "boolean"
+          },
+          "plan": {
+            "description": "plan of the organization",
+            "title": "Plan",
+            "type": "string"
+          },
+          "reminder_enabled": {
+            "description": "weekly export reminder (schedule)",
+            "title": "Reminder Enabled",
+            "type": "boolean"
+          },
+          "retention_days": {
+            "description": "how long uploaded files are kept",
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "runs_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "monthly run limit of the plan; `null` = unlimited",
+            "title": "Runs Limit"
+          },
+          "runs_used": {
+            "description": "runs counted this calendar month (UTC)",
+            "minimum": 0.0,
+            "title": "Runs Used",
+            "type": "integer"
+          },
+          "streak_weeks": {
+            "description": "finished weeks in a row with at least one report, counted back from last week (the current week is not counted; at most 25)",
+            "minimum": 0.0,
+            "title": "Streak Weeks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "last_upload_at",
+          "last_success_at",
+          "last_failure_at",
+          "last_error_code",
+          "streak_weeks",
+          "reminder_enabled",
+          "next_reminder_at",
+          "auto_run_on_upload",
+          "notify_on_finish",
+          "plan",
+          "runs_used",
+          "runs_limit",
+          "retention_days"
+        ],
+        "title": "DataHealthSummary",
+        "type": "object"
+      },
       "EvidenceCheck": {
         "properties": {
           "artifact": {
@@ -471,6 +647,59 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HealthIssue": {
+        "properties": {
+          "code": {
+            "enum": [
+              "last_run_failed",
+              "plan_limit_reached",
+              "stale_upload",
+              "plan_limit_near",
+              "partial_reports",
+              "no_uploads_yet",
+              "reminder_off",
+              "auto_run_off"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "link": {
+            "description": "cockpit path that explains or fixes the issue, e.g. `/upload`",
+            "title": "Link",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "when the condition started, if known",
+            "title": "Since"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "since",
+          "link"
+        ],
+        "title": "HealthIssue",
+        "type": "object"
+      },
       "HealthResponse": {
         "description": "Publiczny, zredagowany status: bez sciezek, bez konfiguracji, bez mapy sekretow.",
         "properties": {
@@ -609,6 +838,38 @@
             "title": "Force Mock",
             "type": "boolean"
           },
+          "period_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "first day of the requested report period (ISO `YYYY-MM-DD`, inclusive; not before 2000-01-01); only rows dated on or after it are counted. `ecommerce_demo` only; `null` = no lower bound",
+            "examples": [
+              "2026-08-01"
+            ],
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "last day of the requested report period (ISO `YYYY-MM-DD`, inclusive); not before `period_from` and at most 400 days after it counting both ends. `ecommerce_demo` only; `null` = no upper bound",
+            "examples": [
+              "2026-08-07"
+            ],
+            "title": "Period To"
+          },
           "pipeline": {
             "enum": [
               "cs2_demo",
@@ -684,6 +945,32 @@
               }
             ],
             "title": "Message"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "requested first day of the report period (`JobCreate.period_from`); `null` = no lower bound",
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "requested last day of the report period (`JobCreate.period_to`); `null` = no upper bound",
+            "title": "Period To"
           },
           "pipeline": {
             "title": "Pipeline",
@@ -982,6 +1269,258 @@
           "org_slug"
         ],
         "title": "MembershipOut",
+        "type": "object"
+      },
+      "OAuthDecisionIn": {
+        "properties": {
+          "approve": {
+            "title": "Approve",
+            "type": "boolean"
+          },
+          "org_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "organization the connection acts in; required to approve",
+            "title": "Org Id"
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 40,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "scopes to grant; default: every grantable requested scope. Scopes that were not requested or that the role cannot grant are ignored",
+            "title": "Scopes"
+          }
+        },
+        "required": [
+          "approve"
+        ],
+        "title": "OAuthDecisionIn",
+        "type": "object"
+      },
+      "OAuthDecisionOut": {
+        "properties": {
+          "redirect_to": {
+            "description": "send the browser here: the application's redirect URI with `code` and `state`, or `error=access_denied`",
+            "title": "Redirect To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_to"
+        ],
+        "title": "OAuthDecisionOut",
+        "type": "object"
+      },
+      "OAuthGrantOut": {
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Name"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "owner",
+                  "admin",
+                  "member"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "that user's current role; `null` = no longer a member",
+            "title": "Role"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "token_id": {
+            "description": "id to disconnect with `DELETE .../oauth/grants/{token_id}`; it changes when the application refreshes its tokens",
+            "title": "Token Id",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "user who approved the connection",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "token_id",
+          "client_id",
+          "scopes",
+          "created_at"
+        ],
+        "title": "OAuthGrantOut",
+        "type": "object"
+      },
+      "OAuthOrgOption": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "scopes_grantable": {
+            "description": "requested scopes this role can grant; others are shown disabled",
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes Grantable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "org_id",
+          "name",
+          "role",
+          "scopes_grantable"
+        ],
+        "title": "OAuthOrgOption",
+        "type": "object"
+      },
+      "OAuthRequestOut": {
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "name the application registered (self-declared)",
+            "title": "Client Name"
+          },
+          "expires_at": {
+            "description": "the decision must be made before this moment (UTC)",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "organizations": {
+            "description": "organizations of the signed-in user, oldest first",
+            "items": {
+              "$ref": "#/components/schemas/OAuthOrgOption"
+            },
+            "title": "Organizations",
+            "type": "array"
+          },
+          "redirect_host": {
+            "description": "host the browser returns to after the decision",
+            "title": "Redirect Host",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "scopes_requested": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes Requested",
+            "type": "array"
+          }
+        },
+        "required": [
+          "request_id",
+          "client_id",
+          "scopes_requested",
+          "redirect_host",
+          "expires_at",
+          "organizations"
+        ],
+        "title": "OAuthRequestOut",
         "type": "object"
       },
       "OrgCreate": {
@@ -1532,7 +2071,7 @@
         "type": "object"
       },
       "ScheduleIn": {
-        "description": "Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna).",
+        "description": "Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: para webhooka\nczatu - adres jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres),\na pominiety `notify_webhook_kind` tez zostaje jak zapisany (bez adresu nie ma czego przestawiac).",
         "properties": {
           "auto_run_on_upload": {
             "default": false,
@@ -1545,6 +2084,33 @@
             "description": "e-mail do czlonkow po zakonczeniu runu (sukces i blad)",
             "title": "Notify On Finish",
             "type": "boolean"
+          },
+          "notify_webhook_kind": {
+            "default": "slack",
+            "description": "format of the chat message after a run: `slack` (Incoming Webhook), `teams` (Workflows webhook trigger) or `generic` (plain JSON); omitted = unchanged",
+            "enum": [
+              "slack",
+              "teams",
+              "generic"
+            ],
+            "title": "Notify Webhook Kind",
+            "type": "string"
+          },
+          "notify_webhook_url": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "chat webhook address (write-only secret, never returned). Omitted = unchanged, `null` = remove the address, text = set it: `https` and a public address (outside dev), no credentials; an invalid address answers `422 validation_error` naming this field",
+            "examples": [
+              "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX"
+            ],
+            "title": "Notify Webhook Url"
           },
           "reminder_enabled": {
             "default": false,
@@ -1622,6 +2188,36 @@
             "title": "Notify On Finish",
             "type": "boolean"
           },
+          "notify_webhook_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "masked saved address: host and the last 4 characters of a long path (no query); `null` = none",
+            "examples": [
+              "hooks.slack.com/…XyZ9"
+            ],
+            "title": "Notify Webhook Hint"
+          },
+          "notify_webhook_kind": {
+            "description": "format of the chat message after a run",
+            "enum": [
+              "slack",
+              "teams",
+              "generic"
+            ],
+            "title": "Notify Webhook Kind",
+            "type": "string"
+          },
+          "notify_webhook_set": {
+            "description": "a chat webhook address is saved (the address itself is never returned)",
+            "title": "Notify Webhook Set",
+            "type": "boolean"
+          },
           "reminder_enabled": {
             "title": "Reminder Enabled",
             "type": "boolean"
@@ -1667,7 +2263,9 @@
           "timezone",
           "reminder_skip_if_recent_upload",
           "auto_run_on_upload",
-          "notify_on_finish"
+          "notify_on_finish",
+          "notify_webhook_kind",
+          "notify_webhook_set"
         ],
         "title": "ScheduleOut",
         "type": "object"
@@ -2234,6 +2832,89 @@
         ],
         "title": "WebhookPingOut",
         "type": "object"
+      },
+      "WeekHealth": {
+        "properties": {
+          "avg_run_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "mean `finished_at - started_at` of the finished jobs (seconds); `null` = no finished job",
+            "title": "Avg Run Seconds"
+          },
+          "last_report_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest report of the week; `null` = none",
+            "title": "Last Report At"
+          },
+          "partial": {
+            "description": "`true` for the current week, which is still running",
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "reports": {
+            "description": "reports delivered in the week: runs `SUCCESS` or `PARTIAL` whose job did not fail",
+            "minimum": 0.0,
+            "title": "Reports",
+            "type": "integer"
+          },
+          "runs_failed": {
+            "description": "jobs that finished `failed` in the week (`no_records` included)",
+            "minimum": 0.0,
+            "title": "Runs Failed",
+            "type": "integer"
+          },
+          "runs_succeeded": {
+            "description": "jobs that finished `succeeded` in the week",
+            "minimum": 0.0,
+            "title": "Runs Succeeded",
+            "type": "integer"
+          },
+          "upload_bytes": {
+            "description": "bytes uploaded in the week",
+            "minimum": 0.0,
+            "title": "Upload Bytes",
+            "type": "integer"
+          },
+          "uploads": {
+            "description": "files uploaded in the week",
+            "minimum": 0.0,
+            "title": "Uploads",
+            "type": "integer"
+          },
+          "week_start": {
+            "description": "Monday of the ISO week (local date in `timezone`)",
+            "format": "date",
+            "title": "Week Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "week_start",
+          "partial",
+          "uploads",
+          "upload_bytes",
+          "runs_succeeded",
+          "runs_failed",
+          "reports",
+          "avg_run_seconds",
+          "last_report_at"
+        ],
+        "title": "WeekHealth",
+        "type": "object"
       }
     }
   },
@@ -2390,6 +3071,124 @@
         "summary": "Who am I",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/oauth/requests/{request_id}": {
+      "get": {
+        "description": "Consent screen data for an application (ChatGPT, Claude, ...) that asked for access through OAuth: its name, the requested scopes, where the browser returns, and the signed-in user's organizations with the scopes each role can grant. Signed-in users only; an API key gets `403`.",
+        "operationId": "get_request_api_v1_oauth_requests__request_id__get",
+        "parameters": [
+          {
+            "description": "Authorization request id from the `request` query parameter of the consent page",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "description": "Authorization request id from the `request` query parameter of the consent page",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Not a user session"
+          },
+          "404": {
+            "description": "Unknown request, or already decided"
+          },
+          "410": {
+            "description": "`expired`: the request is older than DAAS_OAUTH_AUTHORIZATION_TTL_SEC"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read an authorization request",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/oauth/requests/{request_id}/decision": {
+      "post": {
+        "description": "One decision per request (CSRF header required). Deny: `redirect_to` carries `error=access_denied`. Approve: the user must be a member of `org_id`; the granted scopes are `scopes` (default: all) narrowed to what was requested and what the role allows, and `redirect_to` carries a single-use authorization code valid for 60 seconds. The connection then acts in that organization only, with those scopes, on behalf of the user.",
+        "operationId": "decide_api_v1_oauth_requests__request_id__decision_post",
+        "parameters": [
+          {
+            "description": "Authorization request id from the `request` query parameter of the consent page",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "description": "Authorization request id from the `request` query parameter of the consent page",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthDecisionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "description": "Not a user session, or not a member of `org_id`"
+          },
+          "404": {
+            "description": "Unknown request"
+          },
+          "409": {
+            "description": "`request_already_decided`"
+          },
+          "410": {
+            "description": "`expired`"
+          },
+          "422": {
+            "description": "`org_id` missing, or `no_grantable_scopes`"
+          }
+        },
+        "summary": "Approve or deny an application",
+        "tags": [
+          "oauth"
         ]
       }
     },
@@ -2783,6 +3582,58 @@
         ]
       }
     },
+    "/api/v1/orgs/{org_id}/data-health": {
+      "get": {
+        "description": "Is next Monday's report safe? Per ISO week in the time zone of the organization's schedule (Monday 00:00 local; the last week is the current, partial one): uploads, finished jobs, reports and the mean run time. The summary has the last upload, success and failure, the streak of finished weeks with a report, the reminder and auto-run settings and the plan usage; `issues` lists what to fix, most severe first, each with a cockpit link. Computed on the fly, read-only. `weeks` (1-26, default 12) only limits the `weeks` list: the summary and the issues always look at the last 26 weeks.",
+        "operationId": "get_data_health_api_v1_orgs__org_id__data_health_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "how many weeks to return, the current one included (1-26)",
+            "in": "query",
+            "name": "weeks",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "description": "how many weeks to return, the current one included (1-26)",
+              "maximum": 26,
+              "minimum": 1,
+              "title": "Weeks",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataHealthOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "`weeks` outside 1-26"
+          }
+        },
+        "summary": "Data health dashboard",
+        "tags": [
+          "data-health"
+        ]
+      }
+    },
     "/api/v1/orgs/{org_id}/evidence": {
       "get": {
         "description": "Control -> requirement -> status -> artifact (source and SHA-256) from the latest successful `uksc_evidence` run. `run_status` is `SUCCESS` or `PARTIAL` (an incomplete package). Artifact contents are not returned.",
@@ -3081,7 +3932,7 @@
         ]
       },
       "post": {
-        "description": "Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with `GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time.",
+        "description": "Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with `GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time. `period_from`/`period_to` (inclusive, either may be omitted) limit an `ecommerce_demo` run to the orders dated in that range; other pipelines answer `422 period_not_supported`.",
         "operationId": "create_job_api_v1_orgs__org_id__jobs_post",
         "parameters": [
           {
@@ -3124,7 +3975,7 @@
             "description": "Queue full"
           },
           "422": {
-            "description": "Pipeline and upload do not match"
+            "description": "Pipeline and upload do not match, or the period is invalid or not supported"
           }
         },
         "summary": "Start a job",
@@ -3472,6 +4323,106 @@
         ]
       }
     },
+    "/api/v1/orgs/{org_id}/oauth/grants": {
+      "get": {
+        "description": "Applications (ChatGPT, Claude, ...) connected to the organization through OAuth, newest first: who approved them, the granted scopes and the last use. Token values are never returned.",
+        "operationId": "list_grants_api_v1_orgs__org_id__oauth_grants_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OAuthGrantOut"
+                  },
+                  "title": "Response List Grants Api V1 Orgs  Org Id  Oauth Grants Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List connected applications",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/oauth/grants/{token_id}": {
+      "delete": {
+        "description": "Revokes the connection at once: its refresh token, every access token issued from it and any later rotation. The application must ask for consent again. Disconnecting twice succeeds.",
+        "operationId": "revoke_grant_api_v1_orgs__org_id__oauth_grants__token_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "title": "Token Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "description": "No such connection in this organization"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Disconnect an application",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
     "/api/v1/orgs/{org_id}/runs": {
       "get": {
         "operationId": "list_runs_api_v1_orgs__org_id__runs_get",
@@ -3693,7 +4644,7 @@
     },
     "/api/v1/orgs/{org_id}/schedule": {
       "get": {
-        "description": "Weekly export reminder, auto-run after upload and the e-mail when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`).",
+        "description": "Weekly export reminder, auto-run after upload, the e-mail and the chat message when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`). The chat webhook address is never returned: `notify_webhook_set` and the masked `notify_webhook_hint` say whether and which one is saved.",
         "operationId": "get_schedule_api_v1_orgs__org_id__schedule_get",
         "parameters": [
           {
@@ -3736,7 +4687,7 @@
         ]
       },
       "put": {
-        "description": "Replaces the whole schedule (an omitted field takes its default). `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.",
+        "description": "Replaces the whole schedule (an omitted field takes its default), except the chat webhook pair: `notify_webhook_url` omitted = unchanged, `null` = remove, text = set (https, public address, no credentials); `notify_webhook_kind` omitted = unchanged. `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.",
         "operationId": "put_schedule_api_v1_orgs__org_id__schedule_put",
         "parameters": [
           {
@@ -3773,7 +4724,7 @@
             "description": "Successful Response"
           },
           "422": {
-            "description": "Invalid weekday, hour or time zone"
+            "description": "Invalid weekday, hour, time zone or chat webhook address"
           }
         },
         "summary": "Save the schedule and notifications",

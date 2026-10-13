@@ -42,7 +42,7 @@ There are no passwords. Sign-in is a single-use link sent by e-mail (`POST /auth
 | `members:manage` | add members, invite | | x | x | yes |
 | `keys:manage` | list, create, revoke keys | | x | x | yes |
 | `uploads:write` | upload files | x | x | x | yes |
-| `runs:read` | list and read jobs and runs, SSE | x | x | x | yes |
+| `runs:read` | list and read jobs and runs, SSE, data health | x | x | x | yes |
 | `runs:write` | start and cancel jobs | x | x | x | yes |
 | `reports:read` | download reports, verify hashes, artifact status | x | x | x | yes |
 | `usage:read` | usage and plan limits | x | x | x | yes |
@@ -81,7 +81,7 @@ Validation errors (`422`, `code: validation_error`) list `errors[]` with `loc`, 
 | 410 | `report_expired` | the report files were removed by the retention job; the run record and its SHA-256 stay (`POST .../verify` still works) |
 | 413 | `file_too_large`, `quota_exceeded` | file or upload quota too large |
 | 415 | `extension_not_allowed` | file type not accepted |
-| 422 | `validation_error`, `dpa_required`, `upload_required` (cloud: a pipeline that reads files needs `upload_id`, or `force_mock` for synthetic data), `mock_required`, `upload_kind_mismatch`, `upload_not_applicable`, `events_required` (webhook without events), `webhook_url_invalid`, `invalid_cursor`, upload checks (`schema_mismatch`, `decode_failed`, `header_missing`, `too_many_records`, `xlsx_invalid`) | invalid content |
+| 422 | `validation_error`, `dpa_required`, `upload_required` (cloud: a pipeline that reads files needs `upload_id`, or `force_mock` for synthetic data), `mock_required`, `upload_kind_mismatch`, `upload_not_applicable`, `period_not_supported` (`period_from`/`period_to` for a pipeline other than `ecommerce_demo`), `events_required` (webhook without events), `webhook_url_invalid`, `invalid_cursor`, upload checks (`schema_mismatch`, `decode_failed`, `header_missing`, `too_many_records`, `xlsx_invalid`) | invalid content |
 | 429 | `rate_limited`, `plan_limit`, `invitation_limit`, `sse_limit` | too many requests (header `Retry-After`), a monthly plan limit is used up, the invitation limit (20 per organization per 24 h, 5 per minute per caller) or the open event-stream limit is reached |
 | 500 | `report_integrity_error` | the stored report no longer matches its recorded SHA-256; it is not served |
 | 503 | `sessions_unavailable`, `webhooks_unavailable`, `shutting_down`, `unavailable` | the server lacks a required setting, is not ready, or is shutting down (`shutting_down` on a new event stream: retry after `Retry-After`) |
@@ -116,7 +116,7 @@ Rate limits are per client address and per key and are kept in process memory; r
 | POST | `/api/v1/orgs/{org_id}/api-keys` | `keys:manage` | 201 | 403, 409, 422 | create a key; the full key appears once |
 | DELETE | `/api/v1/orgs/{org_id}/api-keys/{key_id}` | `keys:manage` | 204 | 403, 404 | revoke a key (immediate) |
 | POST | `/api/v1/orgs/{org_id}/uploads` | `uploads:write` | 201 | 413, 415, 422, 429 | upload CSV, XLSX or a collector package (`.json`); `auto_job_id` when the schedule auto-runs it |
-| POST | `/api/v1/orgs/{org_id}/jobs` | `runs:write` | 202 | 404, 409, 422, 429 | start a pipeline run (`Location` header) |
+| POST | `/api/v1/orgs/{org_id}/jobs` | `runs:write` | 202 | 404, 409, 422, 429 | start a pipeline run (`Location` header); optional report period `period_from`/`period_to` |
 | GET | `/api/v1/orgs/{org_id}/jobs` | `runs:read` | 200 | 404 | list jobs; filter `status` |
 | GET | `/api/v1/orgs/{org_id}/jobs/{job_id}` | `runs:read` | 200 | 404 | job state and progress |
 | POST | `/api/v1/orgs/{org_id}/jobs/{job_id}/cancel` | `runs:write` | 200 | 404, 409 | cancel a queued job |
@@ -127,9 +127,14 @@ Rate limits are per client address and per key and are kept in process memory; r
 | POST | `/api/v1/orgs/{org_id}/verify` | `reports:read` | 200 | 422 | does this SHA-256 belong to one of your reports |
 | GET | `/api/v1/orgs/{org_id}/evidence` | `reports:read` | 200 | 404 | artifact status of the latest collector run |
 | GET | `/api/v1/orgs/{org_id}/usage` | `usage:read` | 200 | 404 | monthly usage and plan limits |
+| GET | `/api/v1/orgs/{org_id}/data-health?weeks=12` | `runs:read` | 200 | 404, 422 | weekly rhythm (uploads, reports, failures), summary and issues to fix |
 | GET | `/api/v1/orgs/{org_id}/audit` | `audit:read` | 200 | 422 | audit log, newest first |
-| GET | `/api/v1/orgs/{org_id}/schedule` | `org:read` | 200 | 404 | schedule and notifications (defaults when never saved) |
-| PUT | `/api/v1/orgs/{org_id}/schedule` | `org:manage` | 200 | 403, 404, 422 | save the schedule; recomputes `next_reminder_at` |
+| GET | `/api/v1/orgs/{org_id}/schedule` | `org:read` | 200 | 404 | schedule and notifications (defaults when never saved; the chat webhook address only masked) |
+| PUT | `/api/v1/orgs/{org_id}/schedule` | `org:manage` | 200 | 403, 404, 422 | save the schedule; recomputes `next_reminder_at`; an omitted `notify_webhook_url` stays unchanged |
+| GET | `/api/v1/oauth/requests/{request_id}` | S | 200 | 403, 404, 410 | consent screen of an OAuth connector: application, requested scopes, return host, the user's organizations with the scopes each role can grant |
+| POST | `/api/v1/oauth/requests/{request_id}/decision` | S | 200 | 403, 404, 409, 410, 422 | approve (`org_id`, optional `scopes`) or deny; answers `{redirect_to}` for the browser |
+| GET | `/api/v1/orgs/{org_id}/oauth/grants` | `org:manage` | 200 | 403, 404 | connected applications (OAuth) |
+| DELETE | `/api/v1/orgs/{org_id}/oauth/grants/{token_id}` | `org:manage` | 204 | 403, 404 | disconnect an application (revokes its tokens at once) |
 | GET | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 200 | 403 | list webhooks |
 | POST | `/api/v1/orgs/{org_id}/webhooks` | `webhooks:manage` | 201 | 409, 422, 503 | register an HTTPS endpoint; the signing secret appears once |
 | DELETE | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}` | `webhooks:manage` | 204 | 404 | delete |
@@ -171,6 +176,22 @@ curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/c0a8.../report?fmt=ht
 The upload answer carries `warnings[]` (Polish text, not error codes) about what the mapper did with the data: numbers it could not read or read from an ambiguous thousand/decimal separator, rows with a negative revenue kept as corrections, rows skipped for an unreadable date or missing revenue, duplicate order ids (first one kept), a missing cost column, a numeric cell longer than 64 characters (not parsed; counted among the unreadable numbers), and for XLSX the cells with formulas that have no stored value ("N komórek z formułami bez zapisanych wartości — zapisz plik ponownie w Excelu/LibreOffice"; such cells are read as empty because formulas are never evaluated). The XLSX warning appears in the v1 upload answer and in the legacy `POST /upload` of `selfhost`. The same file always gives the same warnings; the upload is still `ready` when they appear.
 
 Limits: CSV and XLSX up to 10 MiB (CSV at most 100 000 rows; XLSX without macros, at most 200 000 rows, 20 sheets and 256 columns); a collector package up to 5 MiB. A job is accepted for at most 20 queued or running jobs per organization; one run per organization executes at a time.
+
+### Report for a date range
+
+`POST .../jobs` accepts `period_from` and `period_to` (ISO `YYYY-MM-DD`, both inclusive; leave one out for an open range). An `ecommerce_demo` run then counts only the orders dated in that range, so a quarterly export gives the report for one week without cutting the file:
+
+```bash
+curl -sS -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"pipeline":"ecommerce_demo","upload_id":"3f2a...","period_from":"2026-08-01","period_to":"2026-08-07"}' \
+  "$DAAS/api/v1/orgs/$ORG/jobs"
+# {"id":"01J...","status":"queued","period_from":"2026-08-01","period_to":"2026-08-07",...}
+```
+
+- Validation (`422 validation_error`, `loc` names the field): `period_to` not before `period_from`, at most 400 days counting both ends, no date before 2000-01-01; a value that is not a `YYYY-MM-DD` date (`01.08.2026`, `2026-02-30`) is rejected too. Other pipelines (`uksc_evidence`, `cs2_demo`) answer `422 period_not_supported`.
+- The orders are filtered before they are stored and before the metrics, so the report, the week-over-week figures and the stored rows describe the same records. The job (`JobOut`: answer, list, SSE snapshots) carries the requested `period_from`/`period_to`; `period_from`/`period_to` of the run (`GET .../runs/{run_id}`) stay the first and last order date actually in the report, and `source_detail` (also the source line of the report) says how many records were kept: `period 2026-08-01..2026-08-07 (8 of 15 records)`.
+- A period without orders ends the job `failed` with `error_code: no_records`; such a run does not count towards the plan's run limit.
+- The audit event `job.created` records `period_from`/`period_to` when they are set. A job queued automatically after an upload (schedule) has no period.
 
 ### Report integrity (verify)
 
@@ -261,12 +282,15 @@ Test call: `POST .../webhooks/{webhook_id}/ping` sends one signed `ping` event (
 curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/schedule"
 # {"reminder_enabled":false,"reminder_weekday":0,"reminder_hour":8,"timezone":"Europe/Warsaw",
 #  "reminder_skip_if_recent_upload":true,"auto_run_on_upload":false,"notify_on_finish":false,
+#  "notify_webhook_kind":"slack","notify_webhook_set":false,"notify_webhook_hint":null,
 #  "next_reminder_at":null,"last_reminder_at":null,"updated_at":null}
 
 curl -s -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" "$DAAS/api/v1/orgs/$ORG/schedule" \
   -d '{"reminder_enabled":true,"reminder_weekday":0,"reminder_hour":8,"timezone":"Europe/Warsaw",
-       "reminder_skip_if_recent_upload":true,"auto_run_on_upload":true,"notify_on_finish":true}'
-# {..., "next_reminder_at":"2026-10-19T06:00:00Z", "updated_at":"..."}
+       "reminder_skip_if_recent_upload":true,"auto_run_on_upload":true,"notify_on_finish":true,
+       "notify_webhook_kind":"slack","notify_webhook_url":"https://hooks.slack.com/services/T000/B000/XXXX"}'
+# {..., "notify_webhook_set":true, "notify_webhook_hint":"hooks.slack.com/…XXXX",
+#  "next_reminder_at":"2026-10-19T06:00:00Z", "updated_at":"..."}
 ```
 
 | Field | Default | Meaning |
@@ -278,13 +302,49 @@ curl -s -X PUT -H "X-API-Key: $KEY" -H "Content-Type: application/json" "$DAAS/a
 | `reminder_skip_if_recent_upload` | `true` | no reminder when the organization uploaded a file in the last 6 days (the date still moves one week) |
 | `auto_run_on_upload` | `false` | after `POST .../uploads` a job for `suggested_pipeline` is queued the same way as `POST .../jobs` |
 | `notify_on_finish` | `false` | e-mail to the members when a run finishes, success or failure |
+| `notify_webhook_kind` | `slack` | format of the chat message after a run: `slack` (Slack Incoming Webhook), `teams` (Microsoft Teams Workflows, trigger "When a Teams webhook request is received") or `generic` (plain JSON for any receiver, e.g. n8n); omitted = unchanged (like the address) |
+| `notify_webhook_url` | not set | write only (the address is a secret): omitted = unchanged, `null` = remove, text = set; at most 512 characters, `https`, a public address, no credentials (`http` and local addresses only with `APP_ENV=dev`); never returned |
+| `notify_webhook_set`, `notify_webhook_hint` | `false`, `null` | read only: an address is saved, and its mask — host plus the last 4 characters of a long path, never the query (`hooks.slack.com/…XyZ9`) |
 | `next_reminder_at`, `last_reminder_at` | `null` | read only, UTC; `next_reminder_at` is `null` while the reminder is off |
 | `updated_at` | `null` | read only; `null` = defaults, never saved |
 
-- `GET` needs `org:read` (every role), `PUT` needs `org:manage` (owner, admin). `PUT` replaces the whole schedule: an omitted field takes its default. A weekday outside 0-6, an hour outside 0-23 or an unknown zone answers `422 validation_error` with the field in `errors[].loc` (the value sent is not echoed). Every save is audited as `schedule.updated` with the names of the changed fields.
+- `GET` needs `org:read` (every role), `PUT` needs `org:manage` (owner, admin). `PUT` replaces the whole schedule: an omitted field takes its default — except the chat webhook pair: `notify_webhook_url` stays as saved when omitted (the client cannot read it back to resend it) and so does `notify_webhook_kind` (a client that does not manage the chat webhook cannot switch a Teams address to the Slack format by accident). A weekday outside 0-6, an hour outside 0-23, an unknown zone or kind, or a chat webhook address that is too long, not `https`, points to a local or private address, or carries credentials answers `422 validation_error` with the field in `errors[].loc` (the value sent is not echoed; for the address `errors[].type` is `https_required`, `private_address`, `credentials_in_url`, `url_malformed` or `string_too_long`). Every save is audited as `schedule.updated` with the names of the changed fields only (never the address).
 - Auto-run: the upload answer carries `auto_job_id` (the queued job; follow it like any job). The job is created on behalf of the uploader (`created_by`, audit actor) under the same conditions as `POST .../jobs`: the uploader needs `runs:write` (a key with `uploads:write` only never starts runs), the plan run limit and the per-key run rate limit apply. When any of them stops the run, when the queue is full, or when the file has no recognised rows (`ready: false`), the upload still succeeds (`201`), `auto_job_id` is `null` and the audit log gets `schedule.auto_run_skipped` with the code in `meta.reason` (`insufficient_scope`, `plan_limit`, `rate_limited`, `queue_full`, `upload_not_ready`, ...). Start the job by hand later. Over MCP, `start_run` on an upload whose auto-run job is still queued or running returns that job (`reused: true`) instead of a second one.
 - Reminder e-mail: a fixed text and a link to the upload screen of the cockpit (no token; the member signs in as usual). Run e-mail: pipeline, status, data period, SHA-256 of the HTML report, error code on failure and a link to the run in the cockpit; never report content or customer data. Jobs that fail before the run starts (for example `SOURCE_UNAVAILABLE`) do not send it. Audit: `schedule.reminder` (`meta`: `sent`, `recipients`, `skipped_reason`), `schedule.notified`.
+- Chat message (when `notify_webhook_url` is set; independent of `notify_on_finish` — both can be on, and a failure of one does not stop the other or the run): the same facts as the run e-mail (organization name without links, pipeline, status — a `PARTIAL` run is called partial —, data period, SHA-256 of the HTML report, error code on failure, finish time) and a button / link to the run in the cockpit; never report content or customer data. Texts are Polish. Shapes: Slack `{"text": "<one line>", "blocks": [section (mrkdwn facts), actions (button "Otwórz run")]}`; Teams `{"type": "message", "attachments": [{"contentType": "application/vnd.microsoft.card.adaptive", "content": <Adaptive Card 1.4: TextBlock, FactSet, Action.OpenUrl>}]}`; `generic`:
+
+  ```json
+  {"event": "run.finished", "org_id": "01J...", "job_id": "01J...", "run_id": "7c9e...", "pipeline": "ecommerce_demo",
+   "status": "succeeded", "run_status": "SUCCESS", "finished_at": "2026-10-19T06:03:12+00:00", "organization": "Acme",
+   "period_from": "2026-10-12", "period_to": "2026-10-18", "report_sha256": "9f2c...", "error_code": null,
+   "link": "https://reports.example.com/runs/7c9e..."}
+  ```
+
+  Delivery: one `POST` (`Content-Type: application/json`, UTF-8), no retries, timeout `DAAS_NOTIFY_WEBHOOK_TIMEOUT_SEC` (10 s), the same SSRF rules as the signed webhooks (public addresses only, the resolved IP is pinned, redirects are not followed); a `2xx` answer counts as sent. The `generic` body is **not signed**: the address itself is the secret — use the signed webhooks above when the receiver must verify the sender. Audit: `schedule.webhook_notified` (`meta`: `run_id`, `job_id`, `status` = run status `SUCCESS`/`PARTIAL`/`FAILED`, `channel` = kind, `sent`, `status_code` when the receiver answered, `error_type` on failure, e.g. `http_status`, `private_address`, `dns_failed`, `ReadTimeout`).
 - Reminders are sent by a loop inside the API process (cloud mode only, see `docs/DEPLOY.md`); a reminder that fell due while the server was down goes out once after the start, the next one is computed from that moment.
+
+## Connected applications (OAuth)
+
+In `cloud` mode AI assistants (ChatGPT and Claude connectors) connect to `/mcp` through OAuth 2.1 instead of an API key; the flow and the endpoints of the authorization server (`/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/oauth-authorization-server`, `/.well-known/oauth-protected-resource/mcp`, outside `/api/v1` and outside `openapi.json`) are in [`MCP.md`](MCP.md#connect-from-chatgpt--claude-oauth). The API part is the consent screen of the cockpit and the list of connections:
+
+```bash
+# consent (user session + X-CSRF-Token); the id comes from /oauth/consent?request=<id>
+curl -s -b cookies.txt "$DAAS/api/v1/oauth/requests/$REQUEST"
+# {"request_id":"01J...","client_id":"6f1c...","client_name":"ChatGPT","scopes_requested":["runs:read","reports:read"],
+#  "redirect_host":"chatgpt.com","expires_at":"...","organizations":[{"org_id":"01J...","name":"Acme","role":"owner",
+#  "scopes_grantable":["runs:read","reports:read"]}]}
+curl -s -b cookies.txt -H "X-CSRF-Token: $CSRF" -H "Content-Type: application/json" \
+  -d '{"approve":true,"org_id":"01J...","scopes":["runs:read"]}' "$DAAS/api/v1/oauth/requests/$REQUEST/decision"
+# {"redirect_to":"https://chatgpt.com/...?code=...&state=..."}
+
+curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/oauth/grants"
+# [{"token_id":"01J...","client_id":"6f1c...","client_name":"ChatGPT","user_id":"01J...","role":"owner",
+#   "scopes":["runs:read"],"created_at":"...","last_used_at":"...","expires_at":"..."}]
+```
+
+- The consent routes accept only a signed-in user (an API key gets `403 user_session_required`); the decision needs the CSRF header. A request that is not pending answers `404`, an expired one `410 expired`, a second decision `409 request_already_decided`.
+- Approve: the user must be a member of `org_id` (`403` otherwise, `422` when `org_id` is missing). Granted scopes = `scopes` (default: all) narrowed to the requested ones and to what the role allows; nothing left = `422 no_grantable_scopes`. `redirect_to` keeps the query of the registered redirect URI and adds `code` (single use, 60 seconds) and `state`; deny adds `error=access_denied`. Audit: `oauth.consent` (`client_id`, `scopes`).
+- Grants: one item per connection (its active refresh token); `token_id` changes when the application refreshes. `user_id` and `role` name who approved it (`role: null` = no longer a member); no e-mail and no token value. `DELETE` revokes the refresh token and every access token issued from it, also when the id came from a list made before a refresh. Audit: `oauth.token_revoked` (`reason: disconnected`).
 
 ## Usage and plan limits
 
@@ -316,9 +376,46 @@ When a limit is used up, `POST .../jobs` and `POST .../uploads` answer `429` wit
 
 `resource` is `runs` or `upload_bytes`. Queued and running jobs count towards the run limit. The upload check uses the declared `Content-Length`, so it is approximate. A caller without access to the organization gets `404`/`403`, never `429`. There is no online payment in 2.0.
 
+## Data health
+
+`GET /api/v1/orgs/{org_id}/data-health?weeks=12` (scope `runs:read`, every role) answers one question: is next Monday's report safe, and if not, what to fix. It is computed on the fly from uploads, jobs, runs, the schedule and the plan usage; nothing is stored and reading it is not audited.
+
+```bash
+curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/data-health?weeks=8"
+# {"generated_at":"2026-10-14T10:00:00Z","timezone":"Europe/Warsaw",
+#  "weeks":[{"week_start":"2026-08-24","partial":false,"uploads":1,"upload_bytes":48211,"runs_succeeded":1,
+#            "runs_failed":0,"reports":1,"avg_run_seconds":4.2,"last_report_at":"2026-08-24T06:12:09Z"}, ...,
+#           {"week_start":"2026-10-12","partial":true, ...}],
+#  "summary":{"last_upload_at":"...","last_success_at":"...","last_failure_at":null,"last_error_code":null,
+#             "streak_weeks":7,"reminder_enabled":true,"next_reminder_at":"2026-10-19T06:00:00Z",
+#             "auto_run_on_upload":true,"notify_on_finish":true,"plan":"free","runs_used":9,"runs_limit":20,
+#             "retention_days":90},
+#  "issues":[]}
+```
+
+- **Weeks** are ISO weeks in the time zone of the schedule (`Europe/Warsaw` when the schedule was never saved or its zone is no longer known): a week starts on Monday 00:00 local time, so a file uploaded on a summer Sunday at 23:30 UTC (Monday 01:30 in Warsaw) counts for the new week, and the weeks with a clock change last 167 or 169 hours. The list runs from the oldest week to the current one, which is still running (`partial: true`). `weeks` is 1-26 (default 12); any other value answers `422 validation_error` with `loc: ["query", "weeks"]`.
+- Per week: `uploads` and `upload_bytes` (by upload time); `runs_succeeded` and `runs_failed` (jobs, by the time they finished; `failed` includes `no_records`); `reports` = runs `SUCCESS` or `PARTIAL` whose job did not fail (a source without records is a failure, not a report); `avg_run_seconds` = mean `finished_at - started_at` of the finished jobs (`null` = none); `last_report_at`.
+- `summary`: the last upload still on record (retention removes old upload records), the last job that finished `succeeded` and the last one that finished `failed` with its `error_code`, `streak_weeks` = finished weeks in a row with at least one report, counted back from last week (the current week neither extends nor breaks it; at most 25), the reminder, auto-run and run e-mail settings of the schedule, and the runs of the current calendar month (UTC) with the plan limit (`null` = unlimited).
+- `weeks` only limits the list: the summary and the issues always look at the last 26 weeks, so switching between 8, 12 and 26 weeks in the cockpit never changes the verdict.
+
+`issues` come most severe first (`error`, `warning`, `info`); `since` is when the condition started (`null` when unknown) and `link` is a path in the cockpit:
+
+| `code` | `severity` | When | `link` |
+|---|---|---|---|
+| `last_run_failed` | `error` | the latest finished job failed (`since` = when it finished; the code is `summary.last_error_code`) | `/runs/{run_id}`, or `/upload` when the job has no run |
+| `plan_limit_reached` | `error` | runs this month reached the plan limit (new jobs answer `429 plan_limit`) | `/settings` |
+| `stale_upload` | `warning` | no upload for 7 days or more (`since` = the last upload; `null` when retention already removed its record) | `/upload` |
+| `plan_limit_near` | `warning` | runs this month reached 80 % of the plan limit (16 of 20 on `free`) | `/settings` |
+| `partial_reports` | `warning` | at least one `PARTIAL` report in the last 4 weeks, the current one included (`since` = the first of them) | `/` |
+| `no_uploads_yet` | `info` | the organization never uploaded a file | `/upload` |
+| `reminder_off` | `info` | the weekly export reminder is off | `/settings` |
+| `auto_run_off` | `info` | a job does not start automatically after an upload | `/settings` |
+
+The cockpit screen *Data health* (`/health`) turns the list into a verdict: any `error` = at risk (red), only `warning` = at risk (yellow), no file yet = no data, otherwise safe (green).
+
 ## Audit log
 
-`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (scope `audit:read`; `limit` 1-200, default 50). Ordered by `(ts, id)` descending. The response is `{"items": [...], "next_cursor": "..." | null}`; the cursor is an opaque base64url value (an encoded `[ts, id]` pair): pass it back unchanged. A malformed cursor answers `422 invalid_cursor`. Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `schedule.updated`, `schedule.reminder`, `schedule.auto_run_skipped`, `schedule.notified`, `auth.login`, `auth.logout`, `auth_denied`, `mcp.tool` (one per MCP tool call: `tool`, `ok`, `duration_ms`, `key_id`; never the arguments). `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
+`GET /api/v1/orgs/{org_id}/audit?limit=50&cursor=...` (scope `audit:read`; `limit` 1-200, default 50). Ordered by `(ts, id)` descending. The response is `{"items": [...], "next_cursor": "..." | null}`; the cursor is an opaque base64url value (an encoded `[ts, id]` pair): pass it back unchanged. A malformed cursor answers `422 invalid_cursor`. Events: `org.created`, `org.updated`, `org.deleted`, `member.added`, `member.invited`, `key.created`, `key.revoked`, `upload.created`, `job.created`, `job.cancelled`, `run.finished`, `webhook.created`, `webhook.deleted`, `webhook.delivered`, `webhook.failed`, `schedule.updated`, `schedule.reminder`, `schedule.auto_run_skipped`, `schedule.notified`, `schedule.webhook_notified`, `auth.login`, `auth.logout`, `auth_denied`, `mcp.tool` (one per MCP tool call: `tool`, `ok`, `duration_ms`, `key_id`; never the arguments). `meta` holds allow-listed technical fields only; file names, e-mail addresses and keys are never recorded.
 
 ## Metrics
 
