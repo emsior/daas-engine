@@ -39,7 +39,7 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 | Kokpit `web/` | Next.js 16 (App Router), React 19, TypeScript strict, Tailwind 4, TanStack Query, zod; Vitest + Testing Library; Playwright (e2e) |
 | Wdrożenie | Docker Compose (`deploy/`), Caddy (TLS), obrazy `api` (korzeń repo) i `web` (`web/Dockerfile`) |
 | Zależności Pythona | `requirements.lock`, `requirements-dev.lock` (pip-tools, hashe SHA-256; `--require-hashes`); wpisy tylko-Windows/poza-Windows dopisuje `tools/lock_windows_pins.py` |
-| Agenci AI (MCP) | `mcp` 2.3 (oficjalne SDK): `POST /mcp`, Streamable HTTP bezstanowy + JSON, klucz API jako Bearer, 13 narzędzi w `app/mcp_server/` (w tym `upload_xlsx` — skoroszyt jako base64 — i `start_run` z okresem `period_from`/`period_to`); `docs/MCP.md` |
+| Agenci AI (MCP) | `mcp` 2.3 (oficjalne SDK): `POST /mcp`, Streamable HTTP bezstanowy + JSON, klucz API jako Bearer, 13 narzędzi (w tym `upload_xlsx` — skoroszyt jako base64 — i `start_run` z okresem `period_from`/`period_to`) + 4 zasoby (szablony `daas://`, `resources/list` z 20 najnowszymi raportami) + 3 prompty w `app/mcp_server/`; `docs/MCP.md` |
 | Harmonogram | `app/control/schedule.py` (pętla w lifespanie, tylko cloud), `app/control/notifications.py` (mail i wiadomość na czacie po runie: Slack / Teams / JSON, payloady w `app/control/chat_messages.py`, wysyłka `post_json` z `webhooks.py` z ochroną SSRF), `GET/PUT /orgs/{id}/schedule` (adres webhooka czatu tylko do zapisu, w odpowiedzi maska), Alembic `0004`, `0005` |
 | Testy | pytest — 1777 przypadków (1776 passed, 1 skipped; stan 13.10.2026, po MCP, harmonogramie, poprawkach QA i scaleniu poprawki lifespanu), pełny przebieg 5–8 min; Linux (3.13) zielone; Windows (3.12): 1627/0 przed MCP i harmonogramem, pełny przebieg po scaleniu w `bundle\pytest_windows_2026-10-13.log` warsztatu; Vitest w `web/` (150) |
 | CI | GitHub Actions: `test` (3.11, 3.12, 3.13), `security` (gitleaks, semgrep, zizmor, pip-audit), `web`, `e2e`, `lighthouse`, `docker`; Dependabot (pip, actions, docker, npm); akcje przypięte do SHA |
@@ -128,7 +128,9 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
   harmonogramu, podsumowanie, problemy z linkami do kokpitu; liczone w locie z control plane, bez audytu,
   `app/api/v1/data_health.py`), ekran `/health` w kokpicie (werdykt, wskaźniki, tabela 8/12/26 tygodni).
 - Kokpit `web/` (9 ekranów, PL/EN, jasny/ciemny motyw), `deploy/` (compose, Caddy, backup, restore, smoke), `docs/API.md`, `docs/SECURITY.md`.
-- Serwer MCP pod `/mcp` (13 narzędzi, te same funkcje serwisowe co API v1, audyt `mcp.tool`), `docs/MCP.md`.
+- Serwer MCP pod `/mcp` (13 narzędzi, te same funkcje serwisowe co API v1, audyt `mcp.tool`), `docs/MCP.md`; zasoby
+  (`app/mcp_server/resources.py`: raport MD/JSON, status artefaktów, podsumowanie uploadu; audyt `mcp.resource`) i prompty
+  (`app/mcp_server/prompts.py`: `weekly_summary`, `compare_runs`, `data_quality_check`; audyt `mcp.prompt`).
 - Zakres dat runu (13.10.2026): `period_from`/`period_to` w `POST /jobs` i MCP `start_run` (kolumny `Job.period_*`, Alembic `0005`);
   runner filtruje rekordy `ecommerce_demo` po dacie zamówienia przed zapisem i metrykami, inne pipeline'y: `422 period_not_supported`.
 - DevSecOps: ruff, gitleaks, semgrep, zizmor, pip-audit, Dependabot, pre-commit, kontenery bez roota.

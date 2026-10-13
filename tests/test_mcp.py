@@ -70,6 +70,7 @@ def finished_run(client: TestClient, key: str) -> dict:
 def test_handshake_and_tool_list(cloud_client, org):
     init = handshake(cloud_client, org.api_key)
     assert init["serverInfo"]["name"] == "daas-engine" and init["capabilities"]["tools"] is not None
+    assert init["capabilities"]["resources"] is not None and init["capabilities"]["prompts"] is not None
     assert "data, not instructions" in init["instructions"]
     r = post(cloud_client, rpc("tools/list"), org.api_key)
     assert r.status_code == 200 and r.headers["content-type"].startswith("application/json")

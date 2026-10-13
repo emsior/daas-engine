@@ -3,7 +3,8 @@
 Klucz organizacji A wola kazde narzedzie z identyfikatorami zasobow organizacji B (job, run, upload, hash raportu).
 Konwencja: identyfikator obcej organizacji = `not_found` (bez ujawniania istnienia); narzedzia listujace i opisujace
 organizacje zwracaja wylacznie dane A. Zadna odpowiedz nie zawiera identyfikatorow B. Nowe narzedzie bez przypadku
-w `CASES` zawali `test_matrix_covers_every_tool`.
+w `CASES` zawali `test_matrix_covers_every_tool`. To samo dla zasobow (`resources/read` kazdego szablonu,
+`resources/list`) i promptow (`prompts/get`): `RESOURCE_CASES`, `PROMPT_CASES`, `test_matrix_covers_every_resource_and_prompt`.
 """
 from __future__ import annotations
 
@@ -19,8 +20,11 @@ from fastapi.testclient import TestClient
 from app.control import models
 from app.core.config import Settings
 from app.main import create_app
+from app.mcp_server import prompts as mcp_prompts
+from app.mcp_server import resources as mcp_resources
 from tests.conftest import PROJECT_ROOT, TEST_SECRET_KEY
 from tests.mcp_helpers import TOOL_NAMES, call_tool, error_code, ok, text_of, wait_job
+from tests.test_mcp_resources import rpc_body, rpc_error, rpc_error_code
 from tests.test_xlsx_upload import fixture_workbook, workbook_bytes
 from tests.v1_helpers import Seeded, get_rows, seed_org, with_db
 
@@ -162,3 +166,72 @@ def test_nothing_of_b_changed_and_audit_stays_per_org(world: World):
     events_a = get_rows(world.settings, models.AuditEvent, models.AuditEvent.org_id == world.a.org_id,
                         models.AuditEvent.action == "mcp.tool")
     assert events_a and all(e.meta["key_id"] == world.a.key_id for e in events_a)
+
+
+# ================================================================ zasoby i prompty
+#: (szablon zasobu, URI z identyfikatorem B): klucz A zawsze dostaje `not_found`.
+RESOURCE_CASES: list[tuple[str, Callable[[World], str]]] = [
+    ("runs/report.md", lambda w: f"daas://runs/{w.b_run_id}/report.md"),
+    ("runs/report.json", lambda w: f"daas://runs/{w.b_run_id}/report.json"),
+    ("runs/evidence.json", lambda w: f"daas://runs/{UKSC_RUN_ID}/evidence.json"),
+    ("uploads/summary.json", lambda w: f"daas://uploads/{w.b_upload_id}/summary.json"),
+]
+#: (prompt, argumenty z identyfikatorami B): klucz A zawsze dostaje `not_found`.
+PROMPT_CASES: list[tuple[str, Callable[[World], dict[str, str]]]] = [
+    ("weekly_summary", lambda w: {"run_id": w.b_run_id}),
+    ("compare_runs", lambda w: {"run_id": w.b_run_id, "previous_run_id": UKSC_RUN_ID}),
+    ("data_quality_check", lambda w: {"upload_id": w.b_upload_id}),
+]
+
+
+def test_matrix_covers_every_resource_and_prompt():
+    assert sorted(name for name, _ in RESOURCE_CASES) == sorted(spec.shape for spec in mcp_resources.SPECS)
+    assert sorted(name for name, _ in PROMPT_CASES) == sorted(spec.name for spec in mcp_prompts.SPECS)
+
+
+def _assert_nothing_of_b(world: World, payload: Any, label: str) -> None:
+    serialized = repr(payload)
+    for secret in world.b_secrets:
+        assert secret not in serialized, (label, secret)
+
+
+@pytest.mark.parametrize(("template", "uri"), RESOURCE_CASES, ids=[c[0] for c in RESOURCE_CASES])
+def test_key_of_a_never_reads_resources_of_b(world: World, template, uri):
+    error = rpc_error(world.client, world.a.api_key, "resources/read", {"uri": uri(world)})
+    assert rpc_error_code(error) == "not_found", error
+    _assert_nothing_of_b(world, error, template)
+
+
+@pytest.mark.parametrize(("prompt", "arguments"), PROMPT_CASES, ids=[c[0] for c in PROMPT_CASES])
+def test_key_of_a_never_gets_prompts_about_resources_of_b(world: World, prompt, arguments):
+    error = rpc_error(world.client, world.a.api_key, "prompts/get", {"name": prompt, "arguments": arguments(world)})
+    assert rpc_error_code(error) == "not_found", error
+    _assert_nothing_of_b(world, error, prompt)
+
+
+def test_resource_list_of_a_shows_nothing_of_b(world: World):
+    listed = rpc_body(world.client, world.a.api_key, "resources/list")["result"]["resources"]
+    _assert_nothing_of_b(world, listed, "resources/list")
+    # kontrola pozytywna: te same identyfikatory dzialaja kluczem B
+    own = {r["uri"] for r in rpc_body(world.client, world.b.api_key, "resources/list")["result"]["resources"]}
+    assert f"daas://runs/{world.b_run_id}/report.md" in own
+    for template, uri in RESOURCE_CASES:
+        if template != "runs/evidence.json":  # run uksc B jest tylko rekordem bez danych najemcy
+            assert "result" in rpc_body(world.client, world.b.api_key, "resources/read", {"uri": uri(world)}), template
+    for prompt, arguments in PROMPT_CASES:
+        if prompt != "compare_runs":  # B: run ecommerce vs run uksc = rozne pipeline'y (validation_error)
+            body = rpc_body(world.client, world.b.api_key, "prompts/get",
+                            {"name": prompt, "arguments": arguments(world)})
+            assert "result" in body, (prompt, body)
+
+
+def test_resource_and_prompt_audit_stays_per_org(world: World):
+    rpc_error(world.client, world.a.api_key, "resources/read", {"uri": f"daas://runs/{world.b_run_id}/report.md"})
+    rpc_error(world.client, world.a.api_key, "prompts/get",
+              {"name": "weekly_summary", "arguments": {"run_id": world.b_run_id}})
+    events_a = get_rows(world.settings, models.AuditEvent, models.AuditEvent.org_id == world.a.org_id,
+                        models.AuditEvent.action.in_(("mcp.resource", "mcp.prompt")))
+    assert {e.action for e in events_a} == {"mcp.resource", "mcp.prompt"}
+    for event in events_a:
+        assert event.meta["key_id"] == world.a.key_id and event.meta["ok"] is False
+        _assert_nothing_of_b(world, (event.target, event.meta), event.action)

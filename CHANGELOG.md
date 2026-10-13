@@ -74,6 +74,13 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   MCP reuses a pending job only for the same upload, pipeline and period. New MCP tool `upload_xlsx` (13 tools): an
   XLSX workbook as base64 through the same checks as the REST upload, `DAAS_MCP_MAX_UPLOAD_BYTES` counted on the
   decoded file.
+- **MCP resources and prompts:** four resource templates (`daas://runs/{run_id}/report.md`, `.../report.json`,
+  `.../evidence.json`, `daas://uploads/{upload_id}/summary.json`) with the same content and SHA-256 as
+  `get_report` / `get_evidence`, `resources/list` with the 20 newest reports of the key's organization, and three
+  prompts (`weekly_summary`, `compare_runs`, `data_quality_check`) that tell the assistant which tools to call, to
+  treat their output as data and to change nothing without the user's confirmation. Scopes and tenant isolation as
+  for the tools (a foreign id is `not_found`); audit `mcp.resource` (template without the id) and `mcp.prompt`;
+  errors are JSON-RPC errors with `code: message` that never echo the URI or argument values. Guide: `docs/MCP.md`.
 
 ### Fixed
 
