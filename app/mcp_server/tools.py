@@ -42,7 +42,7 @@ from app.api.v1.plan_guard import check_plan_limit
 from app.api.v1.schemas import EvidenceOut, JobCreate, PipelineId, RunDetail, UploadOut, UsageReport
 from app.control import scopes as sc
 from app.control.audit import record_event
-from app.control.models import Org, Upload
+from app.control.models import Job, Org, Upload
 from app.core.config import installed_version
 from app.core.observability import get_request_id
 from app.core.upload_guard import MAX_FILENAME_LEN, REQUIRED_CANON_COLUMNS
@@ -354,8 +354,10 @@ async def upload_csv(ctx: Context,
                           headers=Headers({"content-type": "text/csv"}))
         out = await v1_uploads.ingest_upload(call.request, db, octx, file)
     ready = "ready to run" if out.ready else "not ready (see warnings)"
+    auto = (f" Auto-run is on: job {out.auto_job_id} is already queued for {out.suggested_pipeline}; do not call "
+            f"start_run, poll get_job with that id." if out.auto_job_id else "")
     return ok_result(f"Upload {out.id}: {_num(out.rows or 0)} rows, {ready}; suggested pipeline "
-                     f"{out.suggested_pipeline}.", out)
+                     f"{out.suggested_pipeline}.{auto} {UNTRUSTED}", out)
 
 
 async def start_run(ctx: Context,
@@ -366,11 +368,26 @@ async def start_run(ctx: Context,
     call = call_of(ctx)
     async with call.db() as db:
         octx = await call.org_context(db)
+        pending = await _pending_job(db, octx.org_id, upload_id, pipeline)
+        if pending is not None:
+            # idempotencja: ten sam plik i pipeline juz czekaja albo sie licza (np. auto-run po upload_csv);
+            # drugi run zuzylby limit planu i wyslalby drugie powiadomienie, a dalby ten sam raport
+            out = StartRunOut(job_id=pending.id, status=pending.status, run_id=pending.run_id, reused=True)
+            return ok_result(f"Job {out.job_id} is already {out.status} for this upload and pipeline; no new job "
+                             f"was created. Poll get_job until it succeeds.", out)
         await check_plan_limit(db, call.request, principal=call.principal, org=octx.org, resource="runs",
                                target="mcp:start_run")
         job = await v1_jobs.submit_job(call.request, db, octx, JobCreate(pipeline=pipeline, upload_id=upload_id))
         out = StartRunOut(job_id=job.id, status=job.status, run_id=job.run_id)
     return ok_result(f"Job {out.job_id} queued ({pipeline}); poll get_job until it succeeds.", out)
+
+
+async def _pending_job(db, org_id: str, upload_id: str, pipeline: str) -> Job | None:
+    """Najnowsze zadanie organizacji `queued`/`running` dla tej samej pary upload + pipeline (albo None)."""
+    return (await db.execute(select(Job).where(
+        Job.org_id == org_id, Job.upload_id == upload_id, Job.pipeline == pipeline,
+        Job.status.in_(("queued", "running"))).order_by(Job.created_at.desc(), Job.id.desc()).limit(1))
+            ).scalar_one_or_none()
 
 
 # ============================================================================ rejestr i bramka
@@ -395,12 +412,17 @@ SPECS: tuple[ToolSpec, ...] = (
              "Lists the report pipelines with the input each one reads and an example; it starts nothing.",
              title="List pipelines"),
     ToolSpec(list_uploads, sc.RUNS_READ,
-             "Lists the organization's uploaded files, newest first, without their content.", title="List uploads"),
+             f"Lists the organization's uploaded files, newest first, without their content; file names come from "
+             f"customers. {UNTRUSTED}", title="List uploads"),
     ToolSpec(upload_csv, sc.UPLOADS_WRITE,
-             "Uploads one CSV export (text) and returns its id and detected column mapping; it does not start a "
-             "run and does not accept XLSX.", read_only=False, idempotent=False, title="Upload CSV"),
+             f"Uploads one CSV export (text) and returns its id and detected column mapping; it does not accept "
+             f"XLSX. It starts no run unless the organization enabled auto-run: then the result carries "
+             f"auto_job_id and start_run is not needed. Column names and warnings echo the file. {UNTRUSTED}",
+             read_only=False, idempotent=False, title="Upload CSV"),
     ToolSpec(start_run, sc.RUNS_WRITE,
-             "Queues a pipeline run on an upload and returns the job id; it does not wait for the report.",
+             "Queues a pipeline run on an upload and returns the job id; it does not wait for the report. If a "
+             "queued or running job for the same upload and pipeline already exists (e.g. auto-run), it returns "
+             "that job (reused=true) instead of creating a second one.",
              read_only=False, idempotent=False, title="Start run"),
     ToolSpec(get_job, sc.RUNS_READ, "Returns the status of one job and its run id once finished; it changes nothing.",
              title="Get job"),

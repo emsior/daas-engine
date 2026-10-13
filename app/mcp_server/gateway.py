@@ -1,4 +1,5 @@
-"""Brama HTTP przed transportem MCP (`POST /mcp`): limit per IP -> uwierzytelnienie -> metoda -> limit ciala -> SDK.
+"""Brama HTTP przed transportem MCP (`POST /mcp`): limit IP -> uwierzytelnienie -> limit per klucz -> metoda -> limit
+ciala -> SDK.
 
 Czysta aplikacja ASGI zamontowana jako trasa `/mcp` w aplikacji FastAPI, wiec obejmuja ja middleware aplikacji
 (request-id, naglowki bezpieczenstwa, metryki, CORS z listy `cors_origins`). Kazda odpowiedz bramy jest
@@ -9,8 +10,9 @@ Kolejnosc kontroli (zadna nie czyta ciala przed uwierzytelnieniem):
     2. klucz z `Authorization: Bearer <klucz>` albo `X-API-Key` (ta sama weryfikacja co v1: prefiks + SHA-256,
        `revoked_at`, `expires_at`, audyt `auth_denied`); cookie sesji NIE jest akceptowane (brak CSRF z przegladarki)
        -> 401 + `WWW-Authenticate: Bearer realm="daas-mcp"`,
-    3. tylko `POST` (tryb bezstanowy: brak strumienia GET i sesji do zamkniecia DELETE) -> 405 + `Allow: POST`,
-    4. `Content-Length` i faktycznie odebrane bajty <= `DAAS_MCP_MAX_BODY_BYTES` -> 413.
+    3. limit `mcp` per klucz (`DAAS_RATE_LIMIT_MCP_PER_MIN`; kazde zadanie, takze `tools/list`) -> 429 + `Retry-After`,
+    4. tylko `POST` (tryb bezstanowy: brak strumienia GET i sesji do zamkniecia DELETE) -> 405 + `Allow: POST`,
+    5. `Content-Length` i faktycznie odebrane bajty <= `DAAS_MCP_MAX_BODY_BYTES` -> 413.
 Podmiot trafia do `scope["state"]["principal"]`; narzedzia czytaja go z `Request` przekazanego przez SDK
 (`ctx.request_context.request.state.principal`) — bez stanu wspoldzielonego miedzy zadaniami.
 """
@@ -72,6 +74,12 @@ class McpGateway:
         principal_or_response = await self._authenticate(request)
         if not isinstance(principal_or_response, Principal):
             await principal_or_response(scope, receive, send)
+            return
+
+        wait = state.limiter.hit("mcp", principal_or_response.actor_tag or f"ip:{client_ip(request)}",
+                                 state.settings.daas_rate_limit_mcp_per_min)
+        if wait > 0:
+            await self._too_many(request, wait)(scope, receive, send)
             return
 
         if request.method != "POST":

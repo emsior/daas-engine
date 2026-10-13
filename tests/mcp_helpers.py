@@ -98,5 +98,5 @@ def wait_job(client: TestClient, key: str, job_id: str, timeout: float = 30.0) -
         job = ok(call_tool(client, key, "get_job", {"job_id": job_id}))
         if job["status"] in ("succeeded", "failed", "cancelled"):
             return job
-        time.sleep(0.05)
+        time.sleep(0.2)  # ponizej limitu per klucz (DAAS_RATE_LIMIT_MCP_PER_MIN) takze przy dlugim zadaniu
     raise AssertionError(f"job {job_id} did not finish: {job}")

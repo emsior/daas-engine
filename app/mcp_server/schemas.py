@@ -61,6 +61,9 @@ class StartRunOut(BaseModel):
     job_id: str
     status: JobStatus
     run_id: str | None = None
+    reused: bool = Field(default=False, description="true when a queued or running job for the same upload and "
+                                                    "pipeline already existed (e.g. auto-run after upload_csv) and "
+                                                    "no new job was created")
 
 
 class JobInfo(BaseModel):

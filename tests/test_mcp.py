@@ -83,8 +83,9 @@ def test_handshake_and_tool_list(cloud_client, org):
         assert hints["openWorldHint"] is False and hints["destructiveHint"] is False
         assert hints["readOnlyHint"] is (tool["name"] not in ("upload_csv", "start_run"))
     by_name = {t["name"]: t for t in tools}
-    for name in ("get_report", "get_run", "get_evidence"):
+    for name in ("get_report", "get_run", "get_evidence", "list_uploads", "upload_csv"):  # tresc z plikow klienta
         assert mcp_tools.UNTRUSTED in by_name[name]["description"], name
+    assert "auto_job_id" in by_name["upload_csv"]["description"] and "reused" in by_name["start_run"]["description"]
     assert by_name["list_uploads"]["inputSchema"]["properties"]["limit"]["maximum"] == 100
     assert by_name["upload_csv"]["inputSchema"]["properties"]["filename"]["maxLength"] == 128
 
@@ -212,6 +213,30 @@ def test_long_report_is_truncated_with_a_note(cloud_client, org, monkeypatch):
     assert len(report["content"]) < 400 and len(report["sha256"]) == 64
 
 
+def test_truncation_boundary_and_json_flag(cloud_client, org, monkeypatch):
+    done = finished_run(cloud_client, org.api_key)
+    args = {"run_id": done["run_id"], "format": "json"}
+    full = ok(call_tool(cloud_client, org.api_key, "get_report", args))
+    length = len(full["content"])
+    assert full["truncated"] is False and length > 100
+    monkeypatch.setattr(mcp_tools, "MAX_REPORT_CHARS", length)
+    assert ok(call_tool(cloud_client, org.api_key, "get_report", args))["content"] == full["content"]
+    monkeypatch.setattr(mcp_tools, "MAX_REPORT_CHARS", length - 1)
+    cut = ok(call_tool(cloud_client, org.api_key, "get_report", args))
+    assert cut["truncated"] is True and cut["sha256"] == full["sha256"]  # hash zawsze calego pliku
+    assert cut["content"].startswith(full["content"][: length - 1]) and "[truncated:" in cut["content"]
+
+
+def test_every_pipeline_has_an_mcp_doc_entry():
+    from app.pipelines.runner import PIPELINES
+
+    assert set(PIPELINES) <= set(mcp_tools._PIPELINE_DOCS), "describe the new pipeline for agents in _PIPELINE_DOCS"
+    for name, (description, spec, example) in mcp_tools._PIPELINE_DOCS.items():
+        kinds = mcp_tools.v1_jobs.PIPELINE_UPLOAD_KINDS[name]
+        assert description.endswith(".") and example, name
+        assert (spec.kind is None) == (kinds is None), name  # zgodnosc z rejestrem rodzajow uploadu
+
+
 def test_expired_report_is_report_expired(cloud_client, cloud_settings, org):
     done = finished_run(cloud_client, org.api_key)
     update_rows(cloud_settings, models.RunRecord, {"report_purged_at": utcnow()},
@@ -278,6 +303,42 @@ def test_plan_limit_blocks_start_run(cloud_client, cloud_settings, org):
     assert error_code(result) == "plan_limit"
     denied = mcp_events(cloud_settings, org.org_id, "auth_denied")
     assert denied[-1].meta["reason"] == "plan_limit" and denied[-1].target == "mcp:start_run"
+
+
+def test_upload_csv_with_auto_run_reports_the_job_and_start_run_reuses_it(cloud_client, cloud_settings, org):
+    cloud_client.app.state.executor.submit = lambda job_id, org_id: None  # zadanie zostaje `queued`
+    schedule = {"reminder_enabled": False, "auto_run_on_upload": True}
+    r = cloud_client.put(f"{API}/orgs/{org.org_id}/schedule", json=schedule, headers=key_headers(org.api_key))
+    assert r.status_code == 200, r.text
+
+    uploaded = call_tool(cloud_client, org.api_key, "upload_csv", {"filename": "eksport.csv", "content": CSV_TEXT})
+    up = ok(uploaded)
+    assert up["auto_job_id"] and "do not call start_run" in text_of(uploaded)
+    (job,) = get_rows(cloud_settings, models.Job)
+    assert job.id == up["auto_job_id"] and job.status == "queued"
+
+    # agent, ktory mimo to wola start_run (przeplyw z INSTRUCTIONS), dostaje to samo zadanie zamiast drugiego runu
+    started = call_tool(cloud_client, org.api_key, "start_run", {"upload_id": up["id"], "pipeline": "ecommerce_demo"})
+    same = ok(started)
+    assert same == {"job_id": up["auto_job_id"], "status": "queued", "run_id": None, "reused": True}
+    assert "already queued" in text_of(started) and len(get_rows(cloud_settings, models.Job)) == 1
+
+    # po zakonczeniu tamtego zadania start_run tworzy nowe (ponowne przeliczenie jest dozwolone)
+    update_rows(cloud_settings, models.Job, {"status": "succeeded"}, models.Job.id == job.id)
+    again = ok(call_tool(cloud_client, org.api_key, "start_run", {"upload_id": up["id"], "pipeline": "ecommerce_demo"}))
+    assert again["reused"] is False and again["job_id"] != job.id
+    assert len(get_rows(cloud_settings, models.Job)) == 2
+
+
+def test_start_run_is_rate_limited_per_key(cloud_factory):
+    client, settings = cloud_factory(DAAS_RATE_LIMIT_RUN_PER_MIN=1)
+    seeded = seed_org(settings)
+    client.app.state.executor.submit = lambda job_id, org_id: None
+    first, second = (upload(client, seeded.api_key) for _ in range(2))
+    assert ok(call_tool(client, seeded.api_key, "start_run", {"upload_id": first["id"], "pipeline": "ecommerce_demo"}))
+    result = call_tool(client, seeded.api_key, "start_run", {"upload_id": second["id"], "pipeline": "ecommerce_demo"})
+    assert error_code(result) == "rate_limited", text_of(result)
+    assert len(get_rows(settings, models.Job, models.Job.org_id == seeded.org_id)) == 1
 
 
 # ================================================================ zakresy
@@ -360,6 +421,18 @@ def test_ip_rate_limit_applies_to_mcp(cloud_factory):
     assert codes == [200, 200, 429]
     r = post(client, rpc("tools/list"), seeded.api_key)
     assert r.json()["code"] == "rate_limited" and r.headers["retry-after"]
+
+
+def test_per_key_rate_limit_applies_to_every_mcp_request(cloud_factory):
+    client, settings = cloud_factory(DAAS_RATE_LIMIT_MCP_PER_MIN=2)
+    seeded = seed_org(settings)
+    other = seed_org(settings, name="Other", owner_email="other@example.test")
+    codes = [post(client, rpc("tools/list"), seeded.api_key).status_code for _ in range(3)]
+    assert codes == [200, 200, 429]
+    r = post(client, rpc("tools/list"), seeded.api_key)
+    assert r.json()["code"] == "rate_limited" and r.headers["retry-after"]
+    assert post(client, rpc("tools/list"), other.api_key).status_code == 200  # kubelek per klucz, nie per adres
+    assert post(client, rpc("tools/list"), None).status_code == 401  # bez klucza nadal 401, nie 429
 
 
 def test_security_headers_and_no_cors_for_foreign_origins(cloud_client, org):

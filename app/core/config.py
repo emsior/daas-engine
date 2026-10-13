@@ -125,6 +125,9 @@ class Settings(BaseSettings):
     daas_mcp_max_body_bytes: int = Field(default=3 * 1024 * 1024, ge=64 * 1024, le=64 * 1024 * 1024)
     #: Limit tresci CSV narzedzia `upload_csv` (bajty UTF-8); wieksze -> blad narzedzia, bez zapisu na dysk.
     daas_mcp_max_upload_bytes: int = Field(default=2 * 1024 * 1024, ge=1, le=10 * 1024 * 1024)
+    #: Zadania POST /mcp na minute per klucz API (po uwierzytelnieniu; 0 = bez limitu): 4/s miesci agenta odpytujacego
+    #: `get_job` co 250 ms, a ogranicza przyrost audytu `mcp.tool` z jednego klucza; limit per adres IP obowiazuje niezaleznie.
+    daas_rate_limit_mcp_per_min: int = Field(default=240, ge=0, description="POST /mcp, per klucz API")
 
     # CORS domyslnie wylaczony: n8n i klienci API wolaja serwer-serwer, przegladarka niepotrzebna.
     # Wlaczenie: CORS_ORIGINS='["https://prochpc.pl"]' w .env
