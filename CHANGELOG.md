@@ -88,6 +88,7 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - **Client address.** `deploy/Caddyfile` overwrites `X-Forwarded-For` explicitly (`header_up X-Forwarded-For {remote_host}`); verified on Caddy 2.10.2 that a forged header does not reach the API. `docs/SECURITY.md` explains when `FORWARDED_ALLOW_IPS=*` is safe.
 - **API schema.** Unused `UsageOut`, `UsageRow`, `WebhookPing` and `WebhookPingResult` removed from the OpenAPI document (the ping answer is `WebhookPingOut`).
 - **OPSEC.** Remaining owner name and statute references removed from the repository; the CI guard rejects more patterns (round 3 and `d0b1bb2`).
+- **Gitleaks.** 8 synthetic test values in the history of `tests/` are excluded by their fingerprints in `.gitleaksignore` (owner decision of 2026-10-13; no path or regex allowlist, so any new finding still fails CI). The fingerprints depend on commit hashes: merge the PR with a merge commit, not squash or rebase. The `security` job now gets past gitleaks and runs semgrep, zizmor and pip-audit again.
 
 ### Known limitations
 
