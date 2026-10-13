@@ -329,6 +329,182 @@
         "title": "Body_create_upload_api_v1_orgs__org_id__uploads_post",
         "type": "object"
       },
+      "DataHealthOut": {
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "issues": {
+            "description": "most severe first: `error`, `warning`, `info`",
+            "items": {
+              "$ref": "#/components/schemas/HealthIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DataHealthSummary"
+          },
+          "timezone": {
+            "description": "IANA zone of the schedule; weeks start on Monday 00:00 there",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "weeks": {
+            "description": "oldest first; the last one is the current, partial week",
+            "items": {
+              "$ref": "#/components/schemas/WeekHealth"
+            },
+            "title": "Weeks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at",
+          "timezone",
+          "weeks",
+          "summary",
+          "issues"
+        ],
+        "title": "DataHealthOut",
+        "type": "object"
+      },
+      "DataHealthSummary": {
+        "properties": {
+          "auto_run_on_upload": {
+            "description": "a job starts right after each upload (schedule)",
+            "title": "Auto Run On Upload",
+            "type": "boolean"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`error_code` of that failed job",
+            "title": "Last Error Code"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest job that finished `failed`",
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest job that finished `succeeded`",
+            "title": "Last Success At"
+          },
+          "last_upload_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest upload still on record; `null` = none",
+            "title": "Last Upload At"
+          },
+          "next_reminder_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "next reminder (UTC); `null` = reminder off",
+            "title": "Next Reminder At"
+          },
+          "notify_on_finish": {
+            "description": "members get an e-mail when a run finishes (schedule)",
+            "title": "Notify On Finish",
+            "type": "boolean"
+          },
+          "plan": {
+            "description": "plan of the organization",
+            "title": "Plan",
+            "type": "string"
+          },
+          "reminder_enabled": {
+            "description": "weekly export reminder (schedule)",
+            "title": "Reminder Enabled",
+            "type": "boolean"
+          },
+          "retention_days": {
+            "description": "how long uploaded files are kept",
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "runs_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "monthly run limit of the plan; `null` = unlimited",
+            "title": "Runs Limit"
+          },
+          "runs_used": {
+            "description": "runs counted this calendar month (UTC)",
+            "minimum": 0.0,
+            "title": "Runs Used",
+            "type": "integer"
+          },
+          "streak_weeks": {
+            "description": "finished weeks in a row with at least one report, counted back from last week (the current week is not counted; at most 25)",
+            "minimum": 0.0,
+            "title": "Streak Weeks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "last_upload_at",
+          "last_success_at",
+          "last_failure_at",
+          "last_error_code",
+          "streak_weeks",
+          "reminder_enabled",
+          "next_reminder_at",
+          "auto_run_on_upload",
+          "notify_on_finish",
+          "plan",
+          "runs_used",
+          "runs_limit",
+          "retention_days"
+        ],
+        "title": "DataHealthSummary",
+        "type": "object"
+      },
       "EvidenceCheck": {
         "properties": {
           "artifact": {
@@ -469,6 +645,59 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "HealthIssue": {
+        "properties": {
+          "code": {
+            "enum": [
+              "last_run_failed",
+              "plan_limit_reached",
+              "stale_upload",
+              "plan_limit_near",
+              "partial_reports",
+              "no_uploads_yet",
+              "reminder_off",
+              "auto_run_off"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "link": {
+            "description": "cockpit path that explains or fixes the issue, e.g. `/upload`",
+            "title": "Link",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "when the condition started, if known",
+            "title": "Since"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "since",
+          "link"
+        ],
+        "title": "HealthIssue",
         "type": "object"
       },
       "HealthResponse": {
@@ -2234,6 +2463,89 @@
         ],
         "title": "WebhookPingOut",
         "type": "object"
+      },
+      "WeekHealth": {
+        "properties": {
+          "avg_run_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "mean `finished_at - started_at` of the finished jobs (seconds); `null` = no finished job",
+            "title": "Avg Run Seconds"
+          },
+          "last_report_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest report of the week; `null` = none",
+            "title": "Last Report At"
+          },
+          "partial": {
+            "description": "`true` for the current week, which is still running",
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "reports": {
+            "description": "reports delivered in the week: runs `SUCCESS` or `PARTIAL` whose job did not fail",
+            "minimum": 0.0,
+            "title": "Reports",
+            "type": "integer"
+          },
+          "runs_failed": {
+            "description": "jobs that finished `failed` in the week (`no_records` included)",
+            "minimum": 0.0,
+            "title": "Runs Failed",
+            "type": "integer"
+          },
+          "runs_succeeded": {
+            "description": "jobs that finished `succeeded` in the week",
+            "minimum": 0.0,
+            "title": "Runs Succeeded",
+            "type": "integer"
+          },
+          "upload_bytes": {
+            "description": "bytes uploaded in the week",
+            "minimum": 0.0,
+            "title": "Upload Bytes",
+            "type": "integer"
+          },
+          "uploads": {
+            "description": "files uploaded in the week",
+            "minimum": 0.0,
+            "title": "Uploads",
+            "type": "integer"
+          },
+          "week_start": {
+            "description": "Monday of the ISO week (local date in `timezone`)",
+            "format": "date",
+            "title": "Week Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "week_start",
+          "partial",
+          "uploads",
+          "upload_bytes",
+          "runs_succeeded",
+          "runs_failed",
+          "reports",
+          "avg_run_seconds",
+          "last_report_at"
+        ],
+        "title": "WeekHealth",
+        "type": "object"
       }
     }
   },
@@ -2780,6 +3092,58 @@
         "summary": "Audit log (newest first)",
         "tags": [
           "audit"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/data-health": {
+      "get": {
+        "description": "Is next Monday's report safe? Per ISO week in the time zone of the organization's schedule (Monday 00:00 local; the last week is the current, partial one): uploads, finished jobs, reports and the mean run time. The summary has the last upload, success and failure, the streak of finished weeks with a report, the reminder and auto-run settings and the plan usage; `issues` lists what to fix, most severe first, each with a cockpit link. Computed on the fly, read-only. `weeks` (1-26, default 12) only limits the `weeks` list: the summary and the issues always look at the last 26 weeks.",
+        "operationId": "get_data_health_api_v1_orgs__org_id__data_health_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "how many weeks to return, the current one included (1-26)",
+            "in": "query",
+            "name": "weeks",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "description": "how many weeks to return, the current one included (1-26)",
+              "maximum": 26,
+              "minimum": 1,
+              "title": "Weeks",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataHealthOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "`weeks` outside 1-26"
+          }
+        },
+        "summary": "Data health dashboard",
+        "tags": [
+          "data-health"
         ]
       }
     },

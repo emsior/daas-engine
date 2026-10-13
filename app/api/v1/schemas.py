@@ -416,3 +416,55 @@ class ScheduleOut(BaseModel):
                                                                         "`null` = przypomnienie wylaczone")
     last_reminder_at: datetime | None = Field(default=None, description="ostatnia proba przypomnienia (UTC)")
     updated_at: datetime | None = Field(default=None, description="`null` = ustawienia domyslne, nigdy nie zapisane")
+
+
+# ----------------------------------------------------------------------------- zdrowie danych (pulpit, 13.10)
+HealthIssueCode = Literal["last_run_failed", "plan_limit_reached", "stale_upload", "plan_limit_near",
+                          "partial_reports", "no_uploads_yet", "reminder_off", "auto_run_off"]
+HealthSeverity = Literal["error", "warning", "info"]
+
+
+class WeekHealth(BaseModel):
+    week_start: date = Field(..., description="Monday of the ISO week (local date in `timezone`)")
+    partial: bool = Field(..., description="`true` for the current week, which is still running")
+    uploads: int = Field(..., ge=0, description="files uploaded in the week")
+    upload_bytes: int = Field(..., ge=0, description="bytes uploaded in the week")
+    runs_succeeded: int = Field(..., ge=0, description="jobs that finished `succeeded` in the week")
+    runs_failed: int = Field(..., ge=0, description="jobs that finished `failed` in the week (`no_records` included)")
+    reports: int = Field(..., ge=0, description="reports delivered in the week: runs `SUCCESS` or `PARTIAL` "
+                                                "whose job did not fail")
+    avg_run_seconds: float | None = Field(..., description="mean `finished_at - started_at` of the finished jobs "
+                                                           "(seconds); `null` = no finished job")
+    last_report_at: datetime | None = Field(..., description="latest report of the week; `null` = none")
+
+
+class DataHealthSummary(BaseModel):
+    last_upload_at: datetime | None = Field(..., description="latest upload still on record; `null` = none")
+    last_success_at: datetime | None = Field(..., description="latest job that finished `succeeded`")
+    last_failure_at: datetime | None = Field(..., description="latest job that finished `failed`")
+    last_error_code: str | None = Field(..., description="`error_code` of that failed job")
+    streak_weeks: int = Field(..., ge=0, description="finished weeks in a row with at least one report, counted back "
+                                                     "from last week (the current week is not counted; at most 25)")
+    reminder_enabled: bool = Field(..., description="weekly export reminder (schedule)")
+    next_reminder_at: datetime | None = Field(..., description="next reminder (UTC); `null` = reminder off")
+    auto_run_on_upload: bool = Field(..., description="a job starts right after each upload (schedule)")
+    notify_on_finish: bool = Field(..., description="members get an e-mail when a run finishes (schedule)")
+    plan: str = Field(..., description="plan of the organization")
+    runs_used: int = Field(..., ge=0, description="runs counted this calendar month (UTC)")
+    runs_limit: int | None = Field(..., description="monthly run limit of the plan; `null` = unlimited")
+    retention_days: int = Field(..., description="how long uploaded files are kept")
+
+
+class HealthIssue(BaseModel):
+    code: HealthIssueCode
+    severity: HealthSeverity
+    since: datetime | None = Field(..., description="when the condition started, if known")
+    link: str = Field(..., description="cockpit path that explains or fixes the issue, e.g. `/upload`")
+
+
+class DataHealthOut(BaseModel):
+    generated_at: datetime
+    timezone: str = Field(..., description="IANA zone of the schedule; weeks start on Monday 00:00 there")
+    weeks: list[WeekHealth] = Field(..., description="oldest first; the last one is the current, partial week")
+    summary: DataHealthSummary
+    issues: list[HealthIssue] = Field(..., description="most severe first: `error`, `warning`, `info`")

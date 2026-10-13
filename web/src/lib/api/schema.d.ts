@@ -215,6 +215,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/orgs/{org_id}/data-health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Data health dashboard
+         * @description Is next Monday's report safe? Per ISO week in the time zone of the organization's schedule (Monday 00:00 local; the last week is the current, partial one): uploads, finished jobs, reports and the mean run time. The summary has the last upload, success and failure, the streak of finished weeks with a report, the reminder and auto-run settings and the plan usage; `issues` lists what to fix, most severe first, each with a cockpit link. Computed on the fly, read-only. `weeks` (1-26, default 12) only limits the `weeks` list: the summary and the issues always look at the last 26 weeks.
+         */
+        get: operations["get_data_health_api_v1_orgs__org_id__data_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/orgs/{org_id}/evidence": {
         parameters: {
             query?: never;
@@ -797,6 +817,98 @@ export interface components {
             /** Sheet */
             sheet?: string | null;
         };
+        /** DataHealthOut */
+        DataHealthOut: {
+            /**
+             * Generated At
+             * Format: date-time
+             */
+            generated_at: string;
+            /**
+             * Issues
+             * @description most severe first: `error`, `warning`, `info`
+             */
+            issues: components["schemas"]["HealthIssue"][];
+            summary: components["schemas"]["DataHealthSummary"];
+            /**
+             * Timezone
+             * @description IANA zone of the schedule; weeks start on Monday 00:00 there
+             */
+            timezone: string;
+            /**
+             * Weeks
+             * @description oldest first; the last one is the current, partial week
+             */
+            weeks: components["schemas"]["WeekHealth"][];
+        };
+        /** DataHealthSummary */
+        DataHealthSummary: {
+            /**
+             * Auto Run On Upload
+             * @description a job starts right after each upload (schedule)
+             */
+            auto_run_on_upload: boolean;
+            /**
+             * Last Error Code
+             * @description `error_code` of that failed job
+             */
+            last_error_code: string | null;
+            /**
+             * Last Failure At
+             * @description latest job that finished `failed`
+             */
+            last_failure_at: string | null;
+            /**
+             * Last Success At
+             * @description latest job that finished `succeeded`
+             */
+            last_success_at: string | null;
+            /**
+             * Last Upload At
+             * @description latest upload still on record; `null` = none
+             */
+            last_upload_at: string | null;
+            /**
+             * Next Reminder At
+             * @description next reminder (UTC); `null` = reminder off
+             */
+            next_reminder_at: string | null;
+            /**
+             * Notify On Finish
+             * @description members get an e-mail when a run finishes (schedule)
+             */
+            notify_on_finish: boolean;
+            /**
+             * Plan
+             * @description plan of the organization
+             */
+            plan: string;
+            /**
+             * Reminder Enabled
+             * @description weekly export reminder (schedule)
+             */
+            reminder_enabled: boolean;
+            /**
+             * Retention Days
+             * @description how long uploaded files are kept
+             */
+            retention_days: number;
+            /**
+             * Runs Limit
+             * @description monthly run limit of the plan; `null` = unlimited
+             */
+            runs_limit: number | null;
+            /**
+             * Runs Used
+             * @description runs counted this calendar month (UTC)
+             */
+            runs_used: number;
+            /**
+             * Streak Weeks
+             * @description finished weeks in a row with at least one report, counted back from last week (the current week is not counted; at most 25)
+             */
+            streak_weeks: number;
+        };
         /** EvidenceCheck */
         EvidenceCheck: {
             /** Artifact */
@@ -837,6 +949,29 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /** HealthIssue */
+        HealthIssue: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "last_run_failed" | "plan_limit_reached" | "stale_upload" | "plan_limit_near" | "partial_reports" | "no_uploads_yet" | "reminder_off" | "auto_run_off";
+            /**
+             * Link
+             * @description cockpit path that explains or fixes the issue, e.g. `/upload`
+             */
+            link: string;
+            /**
+             * Severity
+             * @enum {string}
+             */
+            severity: "error" | "warning" | "info";
+            /**
+             * Since
+             * @description when the condition started, if known
+             */
+            since: string | null;
         };
         /**
          * HealthResponse
@@ -1554,6 +1689,55 @@ export interface components {
              */
             status_class: "2xx" | "3xx" | "4xx" | "5xx" | "error";
         };
+        /** WeekHealth */
+        WeekHealth: {
+            /**
+             * Avg Run Seconds
+             * @description mean `finished_at - started_at` of the finished jobs (seconds); `null` = no finished job
+             */
+            avg_run_seconds: number | null;
+            /**
+             * Last Report At
+             * @description latest report of the week; `null` = none
+             */
+            last_report_at: string | null;
+            /**
+             * Partial
+             * @description `true` for the current week, which is still running
+             */
+            partial: boolean;
+            /**
+             * Reports
+             * @description reports delivered in the week: runs `SUCCESS` or `PARTIAL` whose job did not fail
+             */
+            reports: number;
+            /**
+             * Runs Failed
+             * @description jobs that finished `failed` in the week (`no_records` included)
+             */
+            runs_failed: number;
+            /**
+             * Runs Succeeded
+             * @description jobs that finished `succeeded` in the week
+             */
+            runs_succeeded: number;
+            /**
+             * Upload Bytes
+             * @description bytes uploaded in the week
+             */
+            upload_bytes: number;
+            /**
+             * Uploads
+             * @description files uploaded in the week
+             */
+            uploads: number;
+            /**
+             * Week Start
+             * Format: date
+             * @description Monday of the ISO week (local date in `timezone`)
+             */
+            week_start: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -1968,6 +2152,39 @@ export interface operations {
                 };
             };
             /** @description Malformed cursor or limit out of range */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_data_health_api_v1_orgs__org_id__data_health_get: {
+        parameters: {
+            query?: {
+                /** @description how many weeks to return, the current one included (1-26) */
+                weeks?: number;
+            };
+            header?: never;
+            path: {
+                /** @description Identyfikator organizacji */
+                org_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataHealthOut"];
+                };
+            };
+            /** @description `weeks` outside 1-26 */
             422: {
                 headers: {
                     [name: string]: unknown;

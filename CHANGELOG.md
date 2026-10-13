@@ -52,6 +52,13 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   is never sent twice; a stored time zone that is no longer known disables that reminder with an audit entry instead
   of failing every tick. Migration `0004` adds `org_schedules`; the cockpit has a "Schedule and notifications" section
   in Settings (read only for members).
+- **Data health dashboard** ("is next Monday's report safe?", cloud): `GET /api/v1/orgs/{org_id}/data-health`
+  (`runs:read`; `weeks` 1-26, default 12) with uploads, finished jobs, reports and the mean run time per ISO week in
+  the time zone of the schedule (Monday 00:00 local, DST-safe; the current week is partial), a summary (last upload,
+  success and failure with its error code, streak of weeks with a report, schedule settings, plan usage) and issues
+  with cockpit links, most severe first (`last_run_failed`, `plan_limit_reached`, `stale_upload`, `plan_limit_near`,
+  `partial_reports`, `no_uploads_yet`, `reminder_off`, `auto_run_off`). Computed on the fly, read-only, not audited;
+  new cockpit screen *Data health* (`/health`) with the verdict, key figures and an 8/12/26-week table with bars.
 
 ### Fixed
 

@@ -1,7 +1,7 @@
 "use client";
 
 /** Hooki TanStack Query per zasób. Klucze zapytań są zebrane w `qk`. */
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "./client";
 import type {
   CreateApiKeyRequest,
@@ -26,6 +26,7 @@ export const qk = {
   usage: (org: string) => ["orgs", org, "usage"] as const,
   webhooks: (org: string) => ["orgs", org, "webhooks"] as const,
   schedule: (org: string) => ["orgs", org, "schedule"] as const,
+  dataHealth: (org: string, weeks: number) => ["orgs", org, "data-health", weeks] as const,
   job: (org: string, id: string) => ["orgs", org, "jobs", id] as const,
 };
 
@@ -239,5 +240,16 @@ export function useUpdateSchedule(org: string) {
   return useMutation({
     mutationFn: (body: ScheduleSettings) => api.updateSchedule(org, body),
     onSuccess: (saved) => client.setQueryData(qk.schedule(org), saved),
+  });
+}
+
+/* --- zdrowie danych --- */
+
+/** Zmiana zakresu tygodni zostawia poprzednie dane na ekranie do czasu odpowiedzi (bez migania szkieletu). */
+export function useDataHealth(org: string, weeks: number) {
+  return useQuery({
+    queryKey: qk.dataHealth(org, weeks),
+    queryFn: ({ signal }) => api.getDataHealth(org, weeks, signal),
+    placeholderData: keepPreviousData,
   });
 }

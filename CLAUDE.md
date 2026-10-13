@@ -124,7 +124,10 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
   przypomnienie o eksporcie (`app/control/schedule.py`, pętla `SchedulerLoop` w lifespanie, tylko cloud, `DAAS_SCHEDULER_*`),
   auto-uruchomienie po uploadzie (`queue_job` wspólne z `POST /jobs`, pole `auto_job_id`), e-mail po runie
   (`app/control/notifications.py`, listener `run.finished`), sekcja w Ustawieniach kokpitu.
-- Kokpit `web/` (8 ekranów, PL/EN, jasny/ciemny motyw), `deploy/` (compose, Caddy, backup, restore, smoke), `docs/API.md`, `docs/SECURITY.md`.
+- Pulpit zdrowia danych (13.10.2026): `GET /orgs/{id}/data-health?weeks=` (`runs:read`; tygodnie ISO w strefie
+  harmonogramu, podsumowanie, problemy z linkami do kokpitu; liczone w locie z control plane, bez audytu,
+  `app/api/v1/data_health.py`), ekran `/health` w kokpicie (werdykt, wskaźniki, tabela 8/12/26 tygodni).
+- Kokpit `web/` (9 ekranów, PL/EN, jasny/ciemny motyw), `deploy/` (compose, Caddy, backup, restore, smoke), `docs/API.md`, `docs/SECURITY.md`.
 - Serwer MCP pod `/mcp` (12 narzędzi, te same funkcje serwisowe co API v1, audyt `mcp.tool`), `docs/MCP.md`.
 - DevSecOps: ruff, gitleaks, semgrep, zizmor, pip-audit, Dependabot, pre-commit, kontenery bez roota.
 - README ze screenshotem i wideo demo `docs/daas_demo.mp4`; materiały pilota w `docs/pilot/`.
