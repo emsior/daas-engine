@@ -34,18 +34,24 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   `start_run`, `get_job`, `list_runs`, `get_run`, `get_report`, `verify_report`, `get_evidence`, `get_usage`). Same
   organization API keys and scopes as `/api/v1` (`Authorization: Bearer` or `X-API-Key`, no session cookie), same
   service functions, limits and audit (`mcp.tool` per call, without arguments); tenant isolation tested for every tool.
-  Settings `DAAS_MCP_ENABLED`, `DAAS_MCP_MAX_BODY_BYTES` (3 MiB), `DAAS_MCP_MAX_UPLOAD_BYTES` (2 MiB); `/mcp` routed
-  by the bundled Caddyfile. Not in `openapi.json`. Guide: `docs/MCP.md`.
+  Settings `DAAS_MCP_ENABLED`, `DAAS_MCP_MAX_BODY_BYTES` (3 MiB), `DAAS_MCP_MAX_UPLOAD_BYTES` (2 MiB),
+  `DAAS_RATE_LIMIT_MCP_PER_MIN` (240 requests a minute per key); `/mcp` routed by the bundled Caddyfile. Not in
+  `openapi.json`. Guide: `docs/MCP.md`. Upgrade note: the route is on by default in both modes (a valid API key is
+  always required); set `DAAS_MCP_ENABLED=false` to remove it.
 - `tools/lock_windows_pins.py` re-adds platform-specific lock entries (`uvloop`, `tzdata`, `pywin32`, `colorama`) with
   the hashes of every release file after `pip-compile`.
 - **Schedule and notifications** ("the Monday report" without manual clicks, cloud): `GET`/`PUT /api/v1/orgs/{org_id}/schedule`
   (`org:read` / `org:manage`) with a weekly e-mail reminder to export (weekday, hour, IANA time zone, DST-safe; skipped
   after an upload in the last 6 days), automatic run of the suggested pipeline after an upload (`auto_job_id` in the
-  upload answer; a plan limit or a full queue keep the upload and are audited as `schedule.auto_run_skipped`) and an
-  e-mail to the members when a run finishes (metadata, SHA-256 and a link only; no report content, no token).
-  Reminders come from an in-process loop (`DAAS_SCHEDULER_ENABLED`, `DAAS_SCHEDULER_TICK_SEC`; one worker) that claims
-  each slot before sending, so a reminder is never sent twice. Migration `0004` adds `org_schedules`; the cockpit has a
-  "Schedule and notifications" section in Settings (read only for members).
+  upload answer; it needs the uploader's `runs:write`, the plan and per-key run limits apply and a file without
+  recognised rows is not run — each of these keeps the upload and is audited as `schedule.auto_run_skipped`) and an
+  e-mail to the members when a run finishes (metadata, SHA-256 and a link only; a partial run is named so; no report
+  content, no token). Over MCP, `upload_csv` reports the auto-run job and `start_run` on an upload whose job is still
+  queued or running returns that job (`reused: true`) instead of a second run. Reminders come from an in-process loop
+  (`DAAS_SCHEDULER_ENABLED`, `DAAS_SCHEDULER_TICK_SEC`; one worker) that claims each slot before sending, so a reminder
+  is never sent twice; a stored time zone that is no longer known disables that reminder with an audit entry instead
+  of failing every tick. Migration `0004` adds `org_schedules`; the cockpit has a "Schedule and notifications" section
+  in Settings (read only for members).
 
 ### Fixed
 
