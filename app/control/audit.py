@@ -29,6 +29,8 @@ AUDIT_META_KEYS: frozenset[str] = frozenset({
     "plan", "retention_days", "llm_narrative", "fmt", "ok", "error_type", "email_hash", "active", "count",
     "tool", "duration_ms", "key_id",  # mcp.tool: nazwa narzedzia, wynik, czas, klucz (bez argumentow)
     "sent", "recipients", "skipped_reason", "fields",  # schedule.*: przypomnienia i powiadomienia
+    "client_id", "grant", "resource", "prompt", "channel",  # oauth.*, mcp.resource / mcp.prompt, powiadomienia czatu
+    "period_from", "period_to", "weeks",  # job.created z zakresem dat; data-health
 })
 
 #: Akcje zapisywane przez API v1 (stabilne nazwy; sa czescia kontraktu audytu).
@@ -36,8 +38,10 @@ AUDIT_ACTIONS_V1: frozenset[str] = frozenset({
     "org.created", "org.updated", "org.deleted", "member.added", "member.invited", "member.removed", "member.role_changed", "invitation.revoked", "key.created", "key.revoked",
     "upload.created", "job.created", "job.cancelled", "run.finished", "webhook.created", "webhook.deleted",
     "upload.purged", "report.purged", "webhook.delivery", "webhook.delivered", "webhook.failed", "auth.login", "auth.logout", "auth_denied",
-    "mcp.tool",
+    "mcp.tool", "mcp.resource", "mcp.prompt",
     "schedule.updated", "schedule.reminder", "schedule.auto_run_skipped", "schedule.notified",
+    "schedule.webhook_notified",
+    "oauth.client_registered", "oauth.consent", "oauth.token_issued", "oauth.token_revoked",
 })
 
 _MAX_STR = 200

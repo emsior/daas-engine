@@ -128,6 +128,17 @@ class Settings(BaseSettings):
     #: Zadania POST /mcp na minute per klucz API (po uwierzytelnieniu; 0 = bez limitu): 4/s miesci agenta odpytujacego
     #: `get_job` co 250 ms, a ogranicza przyrost audytu `mcp.tool` z jednego klucza; limit per adres IP obowiazuje niezaleznie.
     daas_rate_limit_mcp_per_min: int = Field(default=240, ge=0, description="POST /mcp, per klucz API")
+    # --- OAuth 2.1 dla konektorow MCP (ChatGPT, Claude): serwer autoryzacji z SDK `mcp` (tylko cloud) ---
+    #: `false` = brak tras /authorize, /token, /register, /revoke i metadanych .well-known; klucz API nadal dziala.
+    daas_oauth_enabled: bool = True
+    #: Issuer (RFC 8414) = publiczny origin wdrozenia; None = `daas_cockpit_origin` (kokpit i API za jednym Caddy).
+    daas_oauth_issuer_url: str | None = None
+    daas_oauth_access_token_ttl_sec: int = Field(default=3600, ge=60, le=86400)
+    daas_oauth_refresh_token_ttl_sec: int = Field(default=30 * 86400, ge=3600, le=365 * 86400)
+    #: Zadanie autoryzacji (od /authorize do zgody w kokpicie) wygasa po tylu sekundach.
+    daas_oauth_authorization_ttl_sec: int = Field(default=600, ge=60, le=3600)
+    # --- powiadomienia o runie na czacie zespolu (Slack / Teams / dowolny JSON) ---
+    daas_notify_webhook_timeout_sec: float = Field(default=10.0, ge=1.0, le=60.0)
 
     # CORS domyslnie wylaczony: n8n i klienci API wolaja serwer-serwer, przegladarka niepotrzebna.
     # Wlaczenie: CORS_ORIGINS='["https://prochpc.pl"]' w .env

@@ -723,3 +723,44 @@ def test_migration_0004_renders_for_postgres(tmp_path: Path):
     assert "reminder_enabled BOOLEAN NOT NULL" in ddl and "next_reminder_at TIMESTAMP WITHOUT TIME ZONE" in ddl
     assert "CREATE INDEX ix_org_schedules_due ON org_schedules (reminder_enabled, next_reminder_at)" in ddl
     assert "UPDATE alembic_version SET version_num='0004'" in ddl
+
+
+# ================================================================ migracja 0005 (OAuth, webhook czatu, okres joba)
+def test_migration_0005_adds_oauth_tables_and_columns_and_reverts_cleanly(tmp_path: Path):
+    from alembic import command
+
+    s = _settings(tmp_path)
+    upgrade_sync(s, "0004")
+    tables, _ = _tables_and_indexes(s)
+    assert "oauth_tokens" not in tables
+    upgrade_sync(s)
+    tables, _ = _tables_and_indexes(s)
+    assert {"oauth_clients", "oauth_codes", "oauth_tokens"} <= tables
+
+    async def columns(db):
+        schedule = {r[1] for r in (await db.execute(text("PRAGMA table_info(org_schedules)"))).all()}
+        jobs = {r[1] for r in (await db.execute(text("PRAGMA table_info(jobs)"))).all()}
+        tokens = {(r[2], r[6]) for r in (await db.execute(text("PRAGMA foreign_key_list(oauth_tokens)"))).all()}
+        indexes = {r[1] for r in (await db.execute(text("PRAGMA index_list(oauth_tokens)"))).all()}
+        indexes |= {r[1] for r in (await db.execute(text("PRAGMA index_list(oauth_codes)"))).all()}
+        return schedule, jobs, tokens, indexes
+
+    schedule, jobs, token_fks, indexes = with_db(s, columns)
+    assert {"ix_oauth_tokens_org_id_kind", "ix_oauth_codes_expires_at"} <= indexes
+    assert {"notify_webhook_url", "notify_webhook_kind"} <= schedule
+    assert {"period_from", "period_to"} <= jobs
+    assert ("orgs", "CASCADE") in token_fks and ("oauth_clients", "CASCADE") in token_fks
+    command.downgrade(alembic_config(resolve_db_url(s)), "0004")
+    tables, _ = _tables_and_indexes(s)
+    assert "oauth_tokens" not in tables and "org_schedules" in tables
+
+
+def test_migration_0005_renders_for_postgres(tmp_path: Path):
+    from alembic import command
+
+    cfg = alembic_config("postgresql://user:pass@localhost/daas")
+    buffer = io.StringIO()
+    cfg.output_buffer = buffer
+    command.upgrade(cfg, "0004:0005", sql=True)
+    ddl = buffer.getvalue()
+    assert "CREATE TABLE oauth_tokens" in ddl and "ALTER TABLE org_schedules ADD COLUMN notify_webhook_url" in ddl
