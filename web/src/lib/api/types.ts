@@ -256,6 +256,9 @@ export interface WebhookPingResult {
   status_class: PingStatusClass;
 }
 
+/** Format wiadomości na czacie zespołu po runie (`notify_webhook_kind`): Slack, Microsoft Teams albo zwykły JSON. */
+export type ChatWebhookKind = "slack" | "teams" | "generic";
+
 /** Harmonogram i powiadomienia organizacji (`GET/PUT /orgs/{id}/schedule`). Godzina jest lokalna w `timezone`. */
 export interface ScheduleSettings {
   reminder_enabled: boolean;
@@ -268,9 +271,24 @@ export interface ScheduleSettings {
   reminder_skip_if_recent_upload: boolean;
   auto_run_on_upload: boolean;
   notify_on_finish: boolean;
+  /** Format powiadomienia na czacie; pominięty w PUT = `slack` (PUT zastępuje cały harmonogram). */
+  notify_webhook_kind?: ChatWebhookKind;
+  /**
+   * Adres webhooka czatu, tylko do zapisu (API nigdy go nie zwraca): pominięty = bez zmian,
+   * `null` = usuń zapisany adres, tekst = zapisz nowy (https, adres publiczny).
+   */
+  notify_webhook_url?: string | null;
 }
 
-export interface Schedule extends ScheduleSettings {
+export interface Schedule extends Omit<
+  ScheduleSettings,
+  "notify_webhook_kind" | "notify_webhook_url"
+> {
+  notify_webhook_kind: ChatWebhookKind;
+  /** Czy zapisano adres webhooka czatu. */
+  notify_webhook_set: boolean;
+  /** Zamaskowany zapisany adres, np. `hooks.slack.com/…XyZ9`; null = brak adresu. */
+  notify_webhook_hint: string | null;
   /** Najbliższe przypomnienie (UTC, ISO); null = przypomnienie wyłączone. */
   next_reminder_at: string | null;
   last_reminder_at: string | null;

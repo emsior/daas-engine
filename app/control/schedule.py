@@ -17,6 +17,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
+from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from fastapi.concurrency import run_in_threadpool
@@ -37,12 +38,34 @@ RECENT_UPLOAD_WINDOW = timedelta(days=6)
 #: Najmniejszy dopuszczalny odstep petli (sekundy); `DAAS_SCHEDULER_TICK_SEC` ponizej jest odrzucany przez Settings.
 MIN_TICK_SEC = 5
 
-#: Wartosci domyslne harmonogramu (organizacja bez wiersza w `org_schedules`).
+#: Wartosci domyslne harmonogramu (organizacja bez wiersza w `org_schedules`). `notify_webhook_url` (webhook czatu)
+#: zawiera sekret: API go nie zwraca (`webhook_hint`), a `PUT` bez tego pola zostawia zapisany adres.
 DEFAULTS: dict[str, object] = {
     "reminder_enabled": False, "reminder_weekday": 0, "reminder_hour": 8, "timezone": DEFAULT_TIMEZONE,
     "reminder_skip_if_recent_upload": True, "auto_run_on_upload": False, "notify_on_finish": False,
+    "notify_webhook_url": None, "notify_webhook_kind": "slack",
 }
 EDITABLE_FIELDS: tuple[str, ...] = tuple(DEFAULTS)
+#: Koncowke sciezki pokazujemy tylko przy sciezce co najmniej tej dlugosci (krotka moze byc cala sekretem).
+_HINT_MIN_PATH = 16
+_HINT_TAIL = 4
+
+
+def webhook_hint(url: str | None) -> str | None:
+    """Podpis zapisanego adresu webhooka czatu bez sekretu: `<host>/...<4 ostatnie znaki sciezki>` (wielokropek
+    U+2026), np. `hooks.slack.com/...XyZ9`. Bez zapytania (Teams ma w nim podpis `sig`), bez portu i danych logowania;
+    krotka sciezka nie jest ujawniana wcale (sam host). None, gdy adresu brak."""
+    if not url:
+        return None
+    try:
+        parts = urlsplit(url)
+        host = (parts.hostname or "").lower()
+    except ValueError:
+        host, parts = "", None
+    if not host or parts is None:
+        return "\u2026"
+    path = parts.path.rstrip("/")
+    return f"{host}/\u2026{path[-_HINT_TAIL:]}" if len(path) >= _HINT_MIN_PATH else host
 
 
 @lru_cache(maxsize=1)

@@ -378,8 +378,12 @@ class WebhookPingOut(BaseModel):
 
 
 # ----------------------------------------------------------------------------- harmonogram i powiadomienia (12.10)
+ChatWebhookKind = Literal["slack", "teams", "generic"]
+
+
 class ScheduleIn(BaseModel):
-    """Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna)."""
+    """Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: adres webhooka
+    czatu jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres)."""
 
     reminder_enabled: bool = Field(default=False, description="cotygodniowe przypomnienie e-mail o eksporcie")
     reminder_weekday: int = Field(default=0, ge=0, le=6, description="dzien tygodnia: 0 = poniedzialek, 6 = niedziela")
@@ -392,6 +396,14 @@ class ScheduleIn(BaseModel):
                                                                 "`suggested_pipeline`")
     notify_on_finish: bool = Field(default=False, description="e-mail do czlonkow po zakonczeniu runu "
                                                               "(sukces i blad)")
+    notify_webhook_kind: ChatWebhookKind = Field(
+        default="slack", description="format of the chat message after a run: `slack` (Incoming Webhook), `teams` "
+                                     "(Workflows webhook trigger) or `generic` (plain JSON); send it with every PUT")
+    notify_webhook_url: str | None = Field(  # max_length = kolumna `org_schedules.notify_webhook_url`
+        default=None, max_length=512, examples=["https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX"],
+        description="chat webhook address (write-only secret, never returned). Omitted = unchanged, `null` = remove "
+                    "the address, text = set it: `https` and a public address (outside dev), no credentials; an "
+                    "invalid address answers `422 validation_error` naming this field")
 
     @field_validator("timezone")
     @classmethod
@@ -412,6 +424,12 @@ class ScheduleOut(BaseModel):
     reminder_skip_if_recent_upload: bool
     auto_run_on_upload: bool
     notify_on_finish: bool
+    notify_webhook_kind: ChatWebhookKind = Field(..., description="format of the chat message after a run")
+    notify_webhook_set: bool = Field(..., description="a chat webhook address is saved (the address itself is never "
+                                                      "returned)")
+    notify_webhook_hint: str | None = Field(
+        default=None, examples=["hooks.slack.com/\u2026XyZ9"],
+        description="masked saved address: host and the last 4 characters of a long path (no query); `null` = none")
     next_reminder_at: datetime | None = Field(default=None, description="najblizsze przypomnienie (UTC); "
                                                                         "`null` = przypomnienie wylaczone")
     last_reminder_at: datetime | None = Field(default=None, description="ostatnia proba przypomnienia (UTC)")

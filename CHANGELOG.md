@@ -52,6 +52,13 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   is never sent twice; a stored time zone that is no longer known disables that reminder with an audit entry instead
   of failing every tick. Migration `0004` adds `org_schedules`; the cockpit has a "Schedule and notifications" section
   in Settings (read only for members).
+- **Chat notification after a run** (cloud): the schedule takes a Slack Incoming Webhook, Microsoft Teams (Workflows)
+  or generic JSON address (`notify_webhook_kind`, `notify_webhook_url`; write-only secret — `GET` shows only
+  `notify_webhook_set` and a mask such as `hooks.slack.com/…XyZ9`, an omitted address stays unchanged, `null` removes
+  it). Each run then posts one message (status incl. partial, data period, report SHA-256, link to the run; no report
+  content) with the SSRF rules and IP pinning of the signed webhooks, a single attempt with
+  `DAAS_NOTIFY_WEBHOOK_TIMEOUT_SEC`, independent of the run e-mail, audited as `schedule.webhook_notified`; the
+  cockpit section "Chat notification" sets it.
 
 ### Fixed
 
