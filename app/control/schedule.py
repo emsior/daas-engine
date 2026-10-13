@@ -5,7 +5,8 @@ Kontrakt (SPEC harmonogramu, 12.10.2026):
       obsluguje `zoneinfo` (godzina nieistniejaca = pierwsza chwila po przeskoku, zdublowana = pierwsze wystapienie),
     * `send_reminder` najpierw ZAJMUJE termin warunkowym UPDATE (`next_reminder_at` przesuniete o tydzien,
       `last_reminder_at = now`), dopiero potem wysyla — dwa ticki albo restart w trakcie nie daja dwoch maili
-      (co najwyzej jeden),
+      (co najwyzej jeden); wiersz, dla ktorego nie da sie policzyc nastepnego terminu (strefa nieznana po zmianie
+      `tzdata`), jest wylaczany z audytem `skipped_reason=unknown_timezone` zamiast wracac w kazdym ticku,
     * adresaci = czlonkowie organizacji (owner/admin/member); tresc bez tokenow i bez danych klienta,
     * `SchedulerLoop` dziala wylacznie w trybie cloud (lifespan), jeden proces (`workers=1`) jak reszta 2.0.
 """
@@ -16,7 +17,7 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from functools import lru_cache
-from zoneinfo import ZoneInfo, available_timezones
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy import exists, select, update
@@ -142,22 +143,34 @@ async def send_reminder(sessionmaker: async_sessionmaker[AsyncSession], settings
                 or schedule.next_reminder_at > now):
             return None
         due_at = schedule.next_reminder_at
-        following = compute_next_reminder(schedule.reminder_weekday, schedule.reminder_hour, schedule.timezone, now)
+        try:
+            following: datetime | None = compute_next_reminder(
+                schedule.reminder_weekday, schedule.reminder_hour, schedule.timezone, now)
+            disabled = False
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            # Wiersz, ktorego nie da sie policzyc (strefa zniknela z bazy tzdata albo dane spoza walidacji PUT):
+            # bez tego przypomnienie wracaloby w kazdym ticku z wyjatkiem w logu, bez konca. Wylaczamy je
+            # (widoczne w kokpicie i w audycie); wlasciciel wlacza ponownie z poprawna strefa.
+            log.warning("reminder disabled org_id=%s: cannot compute the next slot (%s)", org_id, type(exc).__name__)
+            following, disabled = None, True
         claimed = await db.execute(update(OrgSchedule).where(
             OrgSchedule.org_id == org_id, OrgSchedule.reminder_enabled.is_(True),
             OrgSchedule.next_reminder_at == due_at,
-        ).values(next_reminder_at=following, last_reminder_at=now).execution_options(synchronize_session=False))
+        ).values(next_reminder_at=following, last_reminder_at=now, reminder_enabled=not disabled)
+         .execution_options(synchronize_session=False))
         if claimed.rowcount != 1:
             await db.rollback()
             return None
         await db.commit()
 
-        skip = schedule.reminder_skip_if_recent_upload and (await db.execute(select(exists().where(
-            Upload.org_id == org_id, Upload.created_at >= now - RECENT_UPLOAD_WINDOW)))).scalar()
+        skip = (not disabled and schedule.reminder_skip_if_recent_upload and (await db.execute(select(exists().where(
+            Upload.org_id == org_id, Upload.created_at >= now - RECENT_UPLOAD_WINDOW)))).scalar())
         org = await db.get(Org, org_id)
-        recipients = [] if skip or org is None else await org_recipients(db, org_id)
+        recipients = [] if disabled or skip or org is None else await org_recipients(db, org_id)
 
-    if skip:
+    if disabled:
+        result = ReminderResult(org_id, sent=False, recipients=0, skipped_reason="unknown_timezone")
+    elif skip:
         result = ReminderResult(org_id, sent=False, recipients=0, skipped_reason="recent_upload")
     elif not recipients:
         result = ReminderResult(org_id, sent=False, recipients=0, skipped_reason="no_recipients")

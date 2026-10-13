@@ -2,8 +2,9 @@
 
 Jedno miejsce wysylki: listener executora `run.finished` (ten sam mechanizm co webhooki), wiec kazdy run daje
 najwyzej jedno powiadomienie. Wysylka idzie w tle (task asyncio) — nie blokuje zamka organizacji ani kolejnego runu.
-Adresaci: czlonkowie organizacji. Tresc: pipeline, status, okres danych, SHA-256 raportu, kod bledu i link do widoku
-runu w kokpicie (bez tokenu). Zadnej tresci raportu ani danych klienta. Audyt `schedule.notified`.
+Adresaci: czlonkowie organizacji. Tresc: pipeline, status (run `PARTIAL` jest nazwany czesciowym), okres danych,
+SHA-256 raportu, kod bledu i link do widoku runu w kokpicie (bez tokenu). Zadnej tresci raportu ani danych klienta.
+Audyt `schedule.notified`.
 Zadania, ktore koncza sie bledem przed startem runu (np. brak pliku), nie emituja `run.finished` i nie sa zglaszane.
 """
 from __future__ import annotations
@@ -68,7 +69,8 @@ class RunNotifier:
             mails = [run_finished_mail(
                 self.settings, email, locale, org_name=org.name, pipeline=event.pipeline, succeeded=succeeded,
                 run_id=event.run_id, period=period, report_sha256=record.sha256_html if record else None,
-                error_code=job.error_code if job is not None else None) for email, locale in recipients]
+                error_code=job.error_code if job is not None else None,
+                partial=event.run_status == "PARTIAL") for email, locale in recipients]
             sent = await send_mails(self.mailer, mails)
             async with self.sessionmaker() as db:
                 await record_event(db, None, org_id=event.org_id, actor_type="system", actor_id=None,

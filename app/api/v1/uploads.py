@@ -7,11 +7,11 @@ import os
 from datetime import timedelta
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.problems import ProblemError
+from app.api.problems import ProblemError, code_for
 from app.api.routes import _enforce_policy_on_path
 from app.api.v1.deps import OrgContext, org_access
 from app.api.v1.jobs import queue_job
@@ -91,29 +91,37 @@ def _validate_package(raw: bytes) -> None:
         raise UploadRejected(ReasonCode.SCHEMA_MISMATCH, 422, "paczka nie spelnia schematu kolektora") from None
 
 
-async def _auto_run(request: Request, db: AsyncSession, ctx: OrgContext, upload: Upload) -> str | None:
+async def _auto_run(request: Request, db: AsyncSession, ctx: OrgContext, upload: Upload, *,
+                    ready: bool | None) -> str | None:
     """Harmonogram `auto_run_on_upload`: zadanie dla `suggested_pipeline` ta sama droga co `POST /jobs`
-    (`queue_job`). Limit planu, pelna kolejka ani zaden inny blad NIE psuja uploadu (ten jest juz zapisany):
-    wynik to None i audyt `schedule.auto_run_skipped` z kodem w `reason`."""
-    schedule = await db.get(OrgSchedule, ctx.org_id)
-    pipeline = SUGGESTED_PIPELINE.get(upload.kind)
-    if schedule is None or not schedule.auto_run_on_upload or pipeline is None:
-        return None
-    state = request.app.state
-    actor = ctx.principal
+    (`queue_job`) i pod tymi samymi warunkami co reczne uruchomienie: zakres `runs:write` wolajacego (klucz
+    "tylko upload" nie uruchamia runow), limit planu, limit `v1_run` per podmiot. Plik, w ktorym mapper nie
+    znalazl zadnego wiersza (`ready=false`), nie jest uruchamiany — run skonczylby sie `no_records`.
+    Zaden z tych warunkow ani zaden blad NIE psuje uploadu (ten jest juz zapisany i zacommitowany): wynik to None
+    i audyt `schedule.auto_run_skipped` z kodem w `reason`; funkcja nigdy nie rzuca."""
     org_id, upload_id = ctx.org_id, upload.id  # po rollbacku obiekty ORM sa wygaszone: identyfikatory z gory
+    actor = ctx.principal
     actor_type, actor_id = actor.actor_type, actor.actor_id
+    pipeline = SUGGESTED_PIPELINE.get(upload.kind)
+    state = request.app.state
     reason: str
     try:
-        reached = await runs_limit_reached(db, ctx.org)
-        if reached is not None:
+        schedule = await db.get(OrgSchedule, org_id)
+        if schedule is None or not schedule.auto_run_on_upload or pipeline is None:
+            return None
+        if ready is False:
+            reason = "upload_not_ready"
+        elif sc.RUNS_WRITE not in ctx.scopes:
+            reason = "insufficient_scope"
+        elif await runs_limit_reached(db, ctx.org) is not None:
             reason = "plan_limit"
         else:
+            enforce(request, "v1_run", state.settings.daas_rate_limit_run_per_min)
             job = await queue_job(db, state, org_id, actor, JobCreate(pipeline=pipeline, upload_id=upload_id),
                                   request=request, audit_reason="auto_run")
             return job.id
-    except ProblemError as problem:
-        reason = problem.code
+    except HTTPException as exc:  # `ProblemError` z `queue_job` (409 queue_full, 422, 404) albo 429 limitu `v1_run`
+        reason = code_for(exc.status_code, exc)
     except Exception:  # noqa: BLE001
         log.exception("auto-run after upload failed upload_id=%s", upload_id)
         reason = "internal_error"
@@ -224,7 +232,7 @@ async def ingest_upload(request: Request, db: AsyncSession, ctx: OrgContext, fil
             id=row.id, kind=kind, filename=row.filename, bytes=row.bytes, sha256=row.sha256,
             created_at=row.created_at, retention_until=row.retention_until,
             suggested_pipeline=SUGGESTED_PIPELINE[kind], **mapping)
-        out.auto_job_id = await _auto_run(request, db, ctx, row)
+        out.auto_job_id = await _auto_run(request, db, ctx, row, ready=mapping.get("ready"))
         return out
 
     except UploadRejected as rejected:

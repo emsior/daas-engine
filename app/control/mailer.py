@@ -169,16 +169,19 @@ def reminder_mail(settings: Settings, to: str, org_name: str, locale: str) -> Ou
 
 def run_finished_mail(settings: Settings, to: str, locale: str, *, org_name: str, pipeline: str, succeeded: bool,
                       run_id: str, period: tuple[str | None, str | None], report_sha256: str | None,
-                      error_code: str | None) -> OutgoingMail:
+                      error_code: str | None, partial: bool = False) -> OutgoingMail:
     """Powiadomienie o zakonczonym runie: metadane (pipeline, status, okres, hash, kod bledu) i link do widoku runu.
-    Zadnej tresci raportu ani danych klienta — dane zostaja w kokpicie."""
+    `partial` = run udany, ale niepelny (`run_status=PARTIAL`, np. niekompletna paczka kolektora): temat i status
+    mowia to wprost. Zadnej tresci raportu ani danych klienta — dane zostaja w kokpicie."""
     link = f"{_cockpit_origin(settings)}/runs/{run_id}"
     name = sanitize_org_name(org_name)
     first, last = period
+    partial = partial and succeeded
     if locale == "en":
-        subject = "Your report is ready" if succeeded else "The report run failed"
+        subject = ("Your report is ready (partial)" if partial else "Your report is ready") if succeeded \
+            else "The report run failed"
         lines = [f"Organization: {name}", f"Pipeline: {pipeline}",
-                 f"Status: {'succeeded' if succeeded else 'failed'}"]
+                 f"Status: {('partial' if partial else 'succeeded') if succeeded else 'failed'}"]
         if first or last:
             lines.append(f"Data period: {first or '?'} – {last or '?'}")
         if report_sha256:
@@ -187,9 +190,10 @@ def run_finished_mail(settings: Settings, to: str, locale: str, *, org_name: str
             lines.append(f"Error code: {error_code}")
         lines += ["", f"Open the run in the cockpit: {link}"]
     else:
-        subject = "Raport jest gotowy" if succeeded else "Przetwarzanie raportu nie powiodło się"
+        subject = ("Raport jest gotowy (częściowy)" if partial else "Raport jest gotowy") if succeeded \
+            else "Przetwarzanie raportu nie powiodło się"
         lines = [f"Organizacja: {name}", f"Pipeline: {pipeline}",
-                 f"Status: {'zakończony' if succeeded else 'błąd'}"]
+                 f"Status: {('zakończony częściowo' if partial else 'zakończony') if succeeded else 'błąd'}"]
         if first or last:
             lines.append(f"Okres danych: {first or '?'} – {last or '?'}")
         if report_sha256:

@@ -289,6 +289,23 @@ def test_mail_failure_of_one_recipient_does_not_block_the_rest(cloud_settings, o
     assert result.sent is True and result.recipients == 1
 
 
+def test_unknown_stored_timezone_disables_the_reminder_instead_of_retrying_every_tick(cloud_settings, org, caplog):
+    # wiersz spoza walidacji PUT (np. strefa usunieta w nowszej bazie tzdata): wstawiony wprost do bazy
+    set_schedule(cloud_settings, org.org_id, reminder_enabled=True, next_reminder_at=NOW, timezone="Europe/Atlantis")
+    (result,) = tick(cloud_settings)
+    assert result.sent is False and result.skipped_reason == "unknown_timezone"
+    row = schedule_row(cloud_settings, org.org_id)
+    assert row.reminder_enabled is False and row.next_reminder_at is None and row.last_reminder_at == NOW
+    assert outbox(cloud_settings) == []
+    (event,) = schedule_events(cloud_settings, org.org_id)
+    assert event.meta == {"sent": False, "recipients": 0, "skipped_reason": "unknown_timezone"}
+    assert "Traceback" not in caplog.text  # ostrzezenie, nie wyjatek
+    # kolejne ticki: nic do zrobienia (bez petli bledow w logu)
+    assert tick(cloud_settings, NOW + timedelta(minutes=1)) == []
+    assert tick(cloud_settings, NOW + timedelta(days=7)) == []
+    assert len(schedule_events(cloud_settings, org.org_id)) == 1
+
+
 def test_org_name_in_the_reminder_is_sanitized(cloud_settings):
     seeded = seed_org(cloud_settings, name="Sklep <b> www.evil.example.test", owner_email="o@example.test")
     set_schedule(cloud_settings, seeded.org_id, reminder_enabled=True, next_reminder_at=NOW)
@@ -569,6 +586,79 @@ def test_full_queue_keeps_the_upload_and_skips_the_job(cloud_client, cloud_setti
     assert r.status_code == 201 and r.json()["auto_job_id"] is None
     (event,) = schedule_events(cloud_settings, api_org.org_id, "schedule.auto_run_skipped")
     assert event.meta["reason"] == "queue_full"
+
+
+def test_auto_run_skips_a_header_only_csv(cloud_client, cloud_settings, api_org):
+    cloud_client.put(schedule_url(api_org.org_id), json={**VALID, "auto_run_on_upload": True},
+                     headers=key_headers(api_org.api_key))
+    r = upload(cloud_client, api_org, data="Data sprzeda\u017cy;Warto\u015b\u0107 brutto\n".encode())
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["rows"] == 0 and body["ready"] is False and body["auto_job_id"] is None
+    assert get_rows(cloud_settings, models.Job) == []  # run skonczylby sie no_records (i mailem o bledzie)
+    (event,) = schedule_events(cloud_settings, api_org.org_id, "schedule.auto_run_skipped")
+    assert event.meta == {"upload_id": body["id"], "pipeline": "ecommerce_demo", "reason": "upload_not_ready"}
+
+
+def test_auto_run_needs_the_runs_write_scope_of_the_caller(cloud_client, cloud_settings, api_org):
+    from tests.v1_helpers import seed_key
+
+    cloud_client.app.state.executor.submit = lambda job_id, org_id: None
+    cloud_client.put(schedule_url(api_org.org_id), json={**VALID, "auto_run_on_upload": True},
+                     headers=key_headers(api_org.api_key))
+    _, upload_only = seed_key(cloud_settings, api_org.org_id, scopes=["uploads:write"], name="collector")
+    _, upload_and_run = seed_key(cloud_settings, api_org.org_id, scopes=["uploads:write", "runs:write"])
+
+    r = cloud_client.post(f"{API}/orgs/{api_org.org_id}/uploads", headers=key_headers(upload_only),
+                          files={"file": ("dane.csv", io.BytesIO(CSV_BYTES), "application/octet-stream")})
+    assert r.status_code == 201 and r.json()["auto_job_id"] is None, r.text
+    assert get_rows(cloud_settings, models.Job) == []
+    (event,) = schedule_events(cloud_settings, api_org.org_id, "schedule.auto_run_skipped")
+    assert event.meta["reason"] == "insufficient_scope" and event.actor_type == "key"
+
+    r = cloud_client.post(f"{API}/orgs/{api_org.org_id}/uploads", headers=key_headers(upload_and_run),
+                          files={"file": ("dane.csv", io.BytesIO(CSV_BYTES), "application/octet-stream")})
+    assert r.status_code == 201 and r.json()["auto_job_id"], r.text
+    (job,) = get_rows(cloud_settings, models.Job)
+    assert job.id == r.json()["auto_job_id"]
+
+
+def test_auto_run_counts_against_the_run_rate_limit_of_the_caller(cloud_factory):
+    client, settings = cloud_factory(DAAS_RATE_LIMIT_RUN_PER_MIN=1)
+    seeded = seed_org(settings)
+    client.app.state.executor.submit = lambda job_id, org_id: None
+    client.put(schedule_url(seeded.org_id), json={**VALID, "auto_run_on_upload": True},
+               headers=key_headers(seeded.api_key))
+    first, second = (upload(client, seeded).json() for _ in range(2))
+    assert first["auto_job_id"] and second["auto_job_id"] is None
+    assert len(get_rows(settings, models.Upload)) == 2 and len(get_rows(settings, models.Job)) == 1
+    (event,) = schedule_events(settings, seeded.org_id, "schedule.auto_run_skipped")
+    assert event.meta["reason"] == "rate_limited"
+
+
+def test_auto_run_failure_before_queueing_keeps_the_committed_upload(cloud_client, cloud_settings, api_org,
+                                                                     monkeypatch):
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    cloud_client.put(schedule_url(api_org.org_id), json={**VALID, "auto_run_on_upload": True},
+                     headers=key_headers(api_org.api_key))
+    real_get = AsyncSession.get
+
+    async def broken_get(self, entity, *args, **kwargs):
+        if entity is OrgSchedule:
+            raise RuntimeError("control db hiccup")
+        return await real_get(self, entity, *args, **kwargs)
+
+    monkeypatch.setattr(AsyncSession, "get", broken_get)
+    r = upload(cloud_client, api_org)
+    assert r.status_code == 201, r.text  # upload jest juz zapisany: blad auto-runu nie zamienia go w 422
+    body = r.json()
+    assert body["auto_job_id"] is None and get_rows(cloud_settings, models.Job) == []
+    (row,) = get_rows(cloud_settings, models.Upload)
+    stored = cloud_client.app.state.tenants.paths(api_org.org_id).uploads / row.path
+    assert row.id == body["id"] and stored.is_file()  # plik nie zostal usuniety
+    (event,) = schedule_events(cloud_settings, api_org.org_id, "schedule.auto_run_skipped")
+    assert event.meta["reason"] == "internal_error"
 
 
 def test_auto_run_for_a_collector_package_uses_its_pipeline(cloud_client, cloud_settings, api_org):

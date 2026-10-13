@@ -149,6 +149,47 @@ def test_mail_failure_does_not_fail_the_job(cloud_client, cloud_settings, org, m
     assert event.meta["sent"] is False and event.meta["recipients"] == 0
 
 
+def test_partial_run_mail_says_partial_in_both_languages():
+    settings = Settings(_env_file=None, daas_cockpit_origin="https://cockpit.example.test")
+    common = dict(org_name="Firma", pipeline="uksc_evidence", run_id="r-2", period=(None, None),
+                  report_sha256="a" * 64, error_code=None)
+    pl = run_finished_mail(settings, "a@example.test", "pl", succeeded=True, partial=True, **common)
+    en = run_finished_mail(settings, "a@example.test", "en", succeeded=True, partial=True, **common)
+    assert pl.subject == "Raport jest gotowy (częściowy)" and "Status: zakończony częściowo" in pl.body
+    assert en.subject == "Your report is ready (partial)" and "Status: partial" in en.body
+    full = run_finished_mail(settings, "a@example.test", "pl", succeeded=True, **common)
+    assert full.subject == "Raport jest gotowy" and "częściow" not in full.body
+    failed = run_finished_mail(settings, "a@example.test", "pl", succeeded=False, partial=True, **common)
+    assert failed.subject == "Przetwarzanie raportu nie powiodło się"  # porazka ma pierwszenstwo
+
+
+def test_partial_run_status_reaches_the_notification(cloud_settings, org):
+    import asyncio
+
+    from app.control.db import create_engine, make_sessionmaker
+    from app.control.executor import RunFinished
+    from app.control.mailer import build_mailer
+    from app.control.notifications import RunNotifier
+
+    event = RunFinished(org_id=org.org_id, job_id="01JOB", run_id="run-partial", pipeline="uksc_evidence",
+                        status="succeeded", run_status="PARTIAL", finished_at_iso="2026-10-12T08:00:00+00:00")
+
+    async def go():
+        engine = create_engine(cloud_settings)
+        try:
+            notifier = RunNotifier(cloud_settings, make_sessionmaker(engine), build_mailer(cloud_settings))
+            await notifier.on_run_finished(event)
+            await notifier.drain()
+        finally:
+            await engine.dispose()
+
+    asyncio.run(go())
+    (mail,) = outbox(cloud_settings)
+    assert mail["subject"] == "Raport jest gotowy (częściowy)" and mail["link"].endswith("/runs/run-partial")
+    (audit,) = notified(cloud_settings, org.org_id)
+    assert audit.meta["status"] == "succeeded" and audit.meta["sent"] is True
+
+
 def test_template_sanitizes_the_org_name_and_has_no_token():
     settings = Settings(_env_file=None, daas_cockpit_origin="https://cockpit.example.test/")
     mail = run_finished_mail(settings, "a@example.test", "pl", org_name="Firma https://evil.example.test <x>",
