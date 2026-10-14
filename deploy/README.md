@@ -146,6 +146,27 @@ raporty.example.com {
 			flush_interval -1
 		}
 	}
+	# Serwer MCP (Streamable HTTP): to samo trasowanie co deploy/Caddyfile, limit ciala 4 MiB (nad DAAS_MCP_MAX_BODY_BYTES 3 MiB), bez buforowania.
+	@mcp path /mcp /mcp/*
+	handle @mcp {
+		request_body {
+			max_size 4MiB
+		}
+		reverse_proxy api:8000 {
+			header_up X-Forwarded-For {remote_host}
+			flush_interval -1
+		}
+	}
+	# Serwer autoryzacji OAuth 2.1 konektorow MCP (rejestracja, token, cofniecie, metadane RFC 8414 / 9728): male ciala, limit 64 KiB.
+	@oauth path /authorize /token /register /revoke /.well-known/oauth-*
+	handle @oauth {
+		request_body {
+			max_size 64KiB
+		}
+		reverse_proxy api:8000 {
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
 	handle {
 		reverse_proxy web:3000 {
 			header_up X-Forwarded-For {remote_host}

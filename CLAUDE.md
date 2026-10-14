@@ -58,7 +58,7 @@ pip install --require-hashes -r requirements-postgres.lock   # asyncpg: testy na
 DAAS_TEST_POSTGRES_URL=postgresql+asyncpg://<rola z CREATEDB>:<hasło>@127.0.0.1:5432/postgres python -m pytest tests/test_postgres.py -p no:cacheprovider   # bez URL-a: 1 skipped
 ruff check app tests                      # ta sama wersja co w CI (0.16.8)
 python -m app.main                        # API na 127.0.0.1:8000; selfhost wymaga DAAS_API_KEY, cloud wymaga DAAS_SECRET_KEY
-python -m app.cli migrate | migrate-runtime | create-org --name ... --owner-email ...
+python -m app.cli migrate | migrate-runtime | create-org --name ... --owner-email ... | set-plan --org ... --plan free|pro|selfhost
 python tools/export_openapi.py            # odświeża docs/openapi.json (test pilnuje aktualności)
 
 # locki po zmianie zależności (pip-tools w venv na Pythonie 3.11 = minimum projektu, jak w nagłówku locków)
@@ -153,5 +153,6 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
 - DevSecOps: ruff, gitleaks, semgrep, zizmor, pip-audit, Dependabot, pre-commit, kontenery bez roota.
 - README ze screenshotem i wideo demo `docs/daas_demo.mp4`; materiały pilota w `docs/pilot/`.
 - Poza repo: landing ofertowy na prochpc.pl i wzór umowy powierzenia danych (RODO art. 28); w repo szkic `docs/DPA_v1_PL.md` do przeglądu prawnego.
+- Naprawy po teście obcego (14.10.2026): parser dat per-komórka + ostrzeżenie o mieszanych formatach w `warnings[]`, SHA-256 raportu w selfhost REST (`/run`, `/reports/...`), lokalizacja raportu PL przy `locale=pl`, `app.cli set-plan --org --plan` (plus `PATCH /orgs` odrzuca nieznany `plan`); worked-example `uksc_evidence` i reszta napraw dokumentacji w `CHANGELOG.md` (sekcja „Fixes after the stranger test").
 
 *Aktualizacja: przy każdej zmianie stacku, zasad albo statusu.*

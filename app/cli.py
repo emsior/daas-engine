@@ -1,8 +1,9 @@
-"""Polecenia operatora: `python -m app.cli <migrate|migrate-runtime|create-org|purge>`.
+"""Polecenia operatora: `python -m app.cli <migrate|migrate-runtime|create-org|set-plan|purge>`.
 
     migrate           alembic upgrade head dla bazy control plane (idempotentne)
     migrate-runtime   przeniesienie runtime/ sprzed 2.0 do runtime/tenants/default/ (idempotentne)
     create-org        nowa organizacja z kontem wlasciciela i jednorazowym kluczem API
+    set-plan          zmiana planu organizacji (free|pro|selfhost) — jedyna sciezka zmiany planu w 2.0
     purge             retencja: kasowanie uploadow, raportow i danych najemcow po terminie (--dry-run, --org)
 """
 from __future__ import annotations
@@ -64,6 +65,47 @@ def cmd_create_org(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+async def _set_plan(settings: Settings, org_id: str, plan: str) -> str:
+    from app.control.audit import record_event
+    from app.control.db import create_engine, make_sessionmaker
+    from app.control.models import Org
+
+    engine = create_engine(settings)
+    try:
+        async with make_sessionmaker(engine)() as db:
+            org = await db.get(Org, org_id)
+            if org is None:
+                raise LookupError(org_id)
+            org.plan = plan
+            # actor_type="system": zmiana operatorska spoza sesji/klucza; `org.updated` z meta.plan jak przy PATCH
+            await record_event(db, None, org_id=org.id, actor_type="system", actor_id=None,
+                               action="org.updated", target=f"org:{org.id}", meta={"plan": plan}, settings=settings)
+            await db.commit()
+            return org.name
+    finally:
+        await engine.dispose()
+
+
+def cmd_set_plan(settings: Settings, args: argparse.Namespace) -> int:
+    from app.control.db import upgrade_sync
+    from app.control.plans import PLAN_LIMITS
+
+    if args.plan not in PLAN_LIMITS:
+        valid = ", ".join(sorted(PLAN_LIMITS))
+        print(f"error: unknown plan {args.plan!r}; valid plans: {valid}", file=sys.stderr)
+        return 2
+    upgrade_sync(settings)
+    try:
+        name = asyncio.run(_set_plan(settings, args.org, args.plan))
+    except LookupError:
+        print(f"error: organization {args.org} not found", file=sys.stderr)
+        return 1
+    print(f"org_id: {args.org}")
+    print(f"plan:   {args.plan}")
+    print(f"name:   {name}")
+    return 0
+
+
 def cmd_migrate_runtime(settings: Settings, args: argparse.Namespace) -> int:
     from app.control.migrate_runtime import migrate_runtime
 
@@ -117,6 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
     co.add_argument("--owner-email", required=True)
     co.add_argument("--locale", default="pl", choices=["pl", "en"])
     co.set_defaults(func=cmd_create_org)
+    sp = sub.add_parser("set-plan", help="set an organization's plan (operator only; see app.control.plans)")
+    sp.add_argument("--org", required=True, help="organization id")
+    sp.add_argument("--plan", required=True, help="plan name: free, pro or selfhost")
+    sp.set_defaults(func=cmd_set_plan)
     return parser
 
 

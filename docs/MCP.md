@@ -6,7 +6,7 @@ DaaS Engine has a built-in [Model Context Protocol](https://modelcontextprotocol
 - **Transport:** Streamable HTTP, stateless, JSON responses (no SSE stream, no session id). Only `POST`; `GET` and `DELETE` answer `405`.
 - **Protocol versions:** the `initialize` handshake revisions 2024-11-05 to 2025-11-25, and the per-request envelope of 2026-07-28 (official Python SDK `mcp` 2.3).
 - **Modes:** `cloud` (the organization of the key) and `selfhost` (the deployment key `DAAS_API_KEY`, organization `default`, all scopes).
-- **Capabilities:** 12 [tools](#tools), 4 [resource templates](#resources) plus a list of the 20 newest reports, 3 [prompts](#prompts).
+- **Capabilities:** 13 [tools](#tools), 4 [resource templates](#resources) plus a list of the 20 newest reports, 3 [prompts](#prompts).
 - **Not in OpenAPI:** MCP is its own protocol; `docs/openapi.json` describes `/api/v1` only.
 
 ## Authentication
@@ -18,6 +18,8 @@ Send an organization API key (the same keys as `/api/v1`, created in the cockpit
 ```
 Authorization: Bearer daas_1a2b3c4d_...
 ```
+
+The **first** key of a fresh `cloud` deployment comes from the command that creates the organization: `python -m app.cli create-org --name "..." --owner-email ...` prints the new `org_id` and a one-time bootstrap `api_key` (shown once). Use it to connect an assistant or to call `POST .../api-keys` for further keys; later keys are also created in the cockpit. In `selfhost` mode the single deployment key `DAAS_API_KEY` is used directly (organization `default`, all scopes).
 
 `X-API-Key: daas_...` works too (it wins when both are sent). The session cookie of the cockpit is **not** accepted on `/mcp`. A missing, wrong, revoked or expired key answers `401` (`application/problem+json`, `code: "unauthorized"`) with `WWW-Authenticate: Bearer realm="daas-mcp"`; when OAuth is on (cloud) the header also carries `resource_metadata="https://<host>/.well-known/oauth-protected-resource/mcp"`, and a rejected OAuth token adds `error="invalid_token"`. Revoked and expired keys are recorded as `auth_denied` in the audit log.
 

@@ -122,7 +122,7 @@ class PipelineRunner:
 
             rep = self.reports.write(
                 pipeline, run_id, src.data_status, metrics, src.detail, records, started,
-                client_name=request.client_name,
+                client_name=request.client_name, language=request.language,
             )
             progress(90, "report written")
             finished = datetime.utcnow()

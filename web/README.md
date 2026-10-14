@@ -88,6 +88,8 @@ e2e/               Playwright (specy, helpers, proxy.mjs, stack.sh)
 
 `npm test` uruchamia testy jednostkowe (Vitest, jsdom). E2E (Playwright: `npm run e2e` = Chromium z `PLAYWRIGHT_BROWSERS_PATH`, projekty `mobile-375` i `desktop-1280`; `npm run e2e:firefox` = `desktop-firefox`; `npm run e2e:webkit` = `mobile-webkit`, 375 px) wymaga pełnego stosu w układzie produkcyjnym: jeden origin, `/api/*` do API, reszta do kokpitu. Raport jest osadzany w `<iframe>`, a API wysyła go z `frame-ancestors 'self'`, więc przy osobnych portach kokpitu i API ramka raportu jest blokowana; stąd proxy jednego originu.
 
+`e2e/proxy.mjs` odtwarza trasowanie produkcyjnego `deploy/Caddyfile`: do API trafiają `/api/*`, serwer MCP (`/mcp`) oraz serwer autoryzacji OAuth 2.1 (`/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/oauth-*`) — dzięki temu stos e2e testuje konektor MCP/OAuth tak jak produkcja. `/health` i `/ready` idą do kokpitu (nie do API), tak jak catch-all w Caddy: twarde wejście albo odświeżenie na `/health` pokazuje ekran „Zdrowie danych", a nie surowy JSON API. Liveness API sprawdzaj przez `/api/v1/health` albo bezpośrednio na porcie API (tak robi `e2e/stack.sh`).
+
 ```bash
 cd web
 export E2E_RUNTIME=/tmp/daas-e2e               # dane testowe (kasowane przy starcie)

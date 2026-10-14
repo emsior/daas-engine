@@ -199,10 +199,19 @@ def test_patch_validation(cloud_client: TestClient, org, body):
                               ).status_code == 422
 
 
-def test_patch_cannot_change_plan_or_id(cloud_client: TestClient, org):
-    r = cloud_client.patch(f"{API}/orgs/{org.org_id}", json={"plan": "pro", "id": "x", "slug": "y"},
-                           headers=key_headers(org.api_key))
-    assert r.json()["plan"] == "free" and r.json()["id"] == org.org_id and r.json()["slug"] == "acme"
+def test_patch_rejects_plan_change_loudly(cloud_client: TestClient, org):
+    """F4 (A09 S-05-01): plan NIE jest ignorowany po cichu — podanie go konczy sie jawnym 422 z linkiem do CLI."""
+    r = cloud_client.patch(f"{API}/orgs/{org.org_id}", json={"plan": "pro"}, headers=key_headers(org.api_key))
+    assert r.status_code == 422 and r.json()["code"] == "validation_error"
+    (err,) = [e for e in r.json()["errors"] if e["loc"][-1] == "plan"]
+    assert "set-plan" in err["msg"]
+    assert cloud_client.get(f"{API}/orgs/{org.org_id}", headers=key_headers(org.api_key)).json()["plan"] == "free"
+
+
+def test_patch_ignores_unknown_id_and_slug(cloud_client: TestClient, org):
+    """`id`/`slug` nie sa polami OrgPatch i nie sa wrazliwe jak plan: pozostaja pomijane (200, bez zmiany)."""
+    r = cloud_client.patch(f"{API}/orgs/{org.org_id}", json={"id": "x", "slug": "y"}, headers=key_headers(org.api_key))
+    assert r.status_code == 200 and r.json()["id"] == org.org_id and r.json()["slug"] == "acme"
 
 
 def test_patch_needs_manage_scope(cloud_client: TestClient, cloud_settings: Settings, org):
@@ -351,6 +360,34 @@ def test_invitation_is_stored_hashed_mailed_and_audited(cloud_client: TestClient
     assert "Acme" not in mail["subject"] and "Acme" in mail["body"] and mail["link"].endswith("/login")
     (event,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "member.invited")
     assert event.meta["role"] == "member" and "new@example.test" not in json.dumps(event.meta)
+
+
+def test_accepting_invitation_via_login_emits_member_added(cloud_client: TestClient, cloud_settings: Settings, org):
+    """D10 (A03 S-a03-04): dolaczenie przez zaproszenie zapisuje `member.added` (dotad byl tylko member.invited)."""
+    cloud_client.post(f"{API}/orgs/{org.org_id}/invitations", json={"email": "joiner@example.test", "role": "member"},
+                      headers=key_headers(org.api_key))
+    login_via_magic_link(cloud_client, cloud_settings, "joiner@example.test")
+    (joined,) = get_rows(cloud_settings, models.User, models.User.email == "joiner@example.test")
+    (event,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "member.added")
+    assert event.org_id == org.org_id and event.actor_type == "user" and event.actor_id == joined.id
+    assert event.meta["role"] == "member"
+    # bez danych wrazliwych: tylko hash adresu (ten sam co przy member.invited)
+    assert "joiner@example.test" not in json.dumps(event.meta)
+    assert event.meta["email_hash"] == sha256_hex("joiner@example.test")[:16]
+
+
+def test_me_accepting_invitation_emits_member_added(cloud_client: TestClient, cloud_settings: Settings, org):
+    """Druga sciezka akceptacji: zaproszenie utworzone po zalogowaniu, przyjete przy `GET /me` -> tez member.added."""
+    login_via_magic_link(cloud_client, cloud_settings, "later2@example.test")
+
+    async def _seed(db):
+        db.add(models.Invitation(org_id=org.org_id, email="later2@example.test", role="member",
+                                 token_hash="h" * 64, expires_at=utcnow() + timedelta(days=7)))
+
+    with_db(cloud_settings, _seed)
+    assert [o["role"] for o in cloud_client.get(f"{API}/me").json()["orgs"]] == ["member"]
+    (event,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "member.added")
+    assert event.org_id == org.org_id and event.actor_type == "user" and event.meta["role"] == "member"
 
 
 def cloud_settings_expiry(settings: Settings) -> timedelta:

@@ -89,6 +89,7 @@ Import workflow do n8n: **Workflows → Import from file** (pliki są też zamon
 ![Workflow n8n: webhook → POST /upload → walidacja → POST /run → odpowiedź z linkiem do raportu](docs/n8n_client_workflow.png)
 
 - `n8n/daas_client_report.json` — webhook `POST /webhook/daas-report` (multipart `file` + `client_name`) → `POST /upload` → `POST /run` → odpowiedź z linkiem do raportu HTML. To jest "przycisk" dla klienta: wysyła plik, dostaje link. Ustaw `DAAS_PUBLIC_URL` w env n8n, jeśli app jest za reverse proxy.
+- `n8n/pilot_workflow.json` — harmonogram z bramką `/health`, wpisem logu do Notion i alertem na Slacku przy awarii runu; ustaw zmienne `NOTION_DAAS_DB_ID`, `SLACK_ALERT_CHANNEL` i `DAAS_APP_URL`.
 
 Baza i raporty trafiają na hosta do `./runtime/` (wolumen).
 
@@ -98,8 +99,11 @@ Baza i raporty trafiają na hosta do `./runtime/` (wolumen).
 python -m venv .venv && . .venv/bin/activate
 pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
 export DAAS_API_KEY="$(openssl rand -hex 24)"
-python -m app.main                                     # http://127.0.0.1:8000
+export APP_HOST=127.0.0.1 APP_PORT=8000                # adres i port nasłuchu zmieniasz tu (zob. .env.example)
+python -m app.main                                     # http://$APP_HOST:$APP_PORT
 ```
+
+`python -m app.main` nasłuchuje na `APP_HOST:APP_PORT` (domyślnie `127.0.0.1:8000`); te zmienne zmieniają bind. W `selfhost` adres inny niż loopback wymaga `DAAS_API_KEY`. Na produkcyjny self-host, który nie uruchamia testów, zainstaluj `requirements.lock` zamiast `requirements-dev.lock` — zawiera tylko zależności uruchomieniowe, a `-dev` dokłada pytest, ruff i pozostałe narzędzia deweloperskie (potrzebne do sekcji Testy poniżej).
 
 **Windows, jedno kliknięcie:** `URUCHOM_DAAS_PYTHON.ps1` (prawy klik → *Uruchom w programie PowerShell*). Skrypt sprawdza Pythona 3.11+, tworzy `.venv`, instaluje zależności, odpala testy, startuje API na `:8000`, wgrywa `data/fixtures/client_export_pl.csv` przez `/upload` → `/run` i otwiera raport HTML w przeglądarce. Brak Pythona: `winget install Python.Python.3.12`.
 

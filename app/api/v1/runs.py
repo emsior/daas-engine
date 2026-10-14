@@ -2,10 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
@@ -14,7 +12,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.problems import ProblemError, not_found
-from app.api.routes import REPORT_HEADERS
+from app.api.routes import REPORT_HEADERS, read_report_bytes
 from app.api.v1.deps import OrgContext, org_access
 from app.api.v1.schemas import (
     EvidenceCheck,
@@ -122,12 +120,6 @@ async def run_detail(state, db: AsyncSession, org_id: str, run_id: str) -> RunDe
     return RunDetail(**run_out(record).model_dump(), **extra)
 
 
-def _read_report(path: Path) -> tuple[bytes, str]:
-    """Jeden odczyt pliku: zwraca (bajty, sha256 tych samych bajtow) — hash i odpowiedz nie moga sie rozjechac."""
-    body = path.read_bytes()
-    return body, hashlib.sha256(body).hexdigest()
-
-
 def _purged(record: RunRecord) -> bool:
     """True, gdy retencja usunela pliki raportow (rekord i hashe zostaja). Odczyt tolerancyjny dla starszych schematow."""
     return getattr(record, "report_purged_at", None) is not None
@@ -153,7 +145,8 @@ async def read_report_file(state, db: AsyncSession, org_id: str, run_id: str,
     path = _resolve_report(paths.reports, (row or {}).get(PATH_KEYS[fmt]))
     if path is None:
         raise not_found("report file")
-    body, actual = await asyncio.to_thread(_read_report, path)
+    # ten sam odczyt+hash co selfhost (app.api.routes.read_report_bytes): jeden odczyt pliku, parytet skrotu
+    body, actual = await asyncio.to_thread(read_report_bytes, path)
     if actual != expected:
         log.error("report integrity mismatch run_id=%s fmt=%s", run_id, fmt)
         raise ProblemError(500, "report_integrity_error", "the stored report does not match its recorded hash")

@@ -135,25 +135,27 @@ async def memberships_of(db: AsyncSession, user_id: str) -> list[tuple[Membershi
     return [(m, o) for m, o in rows.all()]
 
 
-async def accept_pending_invitations(db: AsyncSession, user: User) -> int:
+async def accept_pending_invitations(db: AsyncSession, user: User) -> list[tuple[str, str]]:
     """Zamienia oczekujace zaproszenia na adres uzytkownika w czlonkostwa. Nie robi commitu.
 
     Wolane po udowodnieniu wlasnosci adresu (magic link) i przy `GET /me` sesji. Wygasle zaproszenia sa pomijane.
+    Zwraca liste `(org_id, role)` NOWO utworzonych czlonkostw (puste, gdy nic nie dodano) — wolajacy zapisuje
+    na jej podstawie zdarzenie audytu `member.added` (sam adres jest juz znany jako `user.email`).
     """
     now = utcnow()
     pending = (await db.execute(select(Invitation).where(
         Invitation.email == user.email, Invitation.accepted_at.is_(None), Invitation.expires_at > now,
     ))).scalars().all()
-    accepted = 0
+    added: list[tuple[str, str]] = []
     for invitation in pending:
         exists = await db.get(Membership, (invitation.org_id, user.id))
         if exists is None:
             db.add(Membership(org_id=invitation.org_id, user_id=user.id, role=invitation.role))
-            accepted += 1
+            added.append((invitation.org_id, invitation.role))
         invitation.accepted_at = now
     if pending:
         await db.flush()
-    return accepted
+    return added
 
 
 def current_period(now: datetime | None = None) -> str:

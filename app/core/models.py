@@ -63,6 +63,7 @@ class RunRequest(BaseModel):
                     "Dla plików z POST /upload użyj upload_id. Wykluczone z upload_id.",
     )
     client_name: str | None = Field(default=None, description="Nazwa klienta do nagłówka raportu")
+    language: str = Field(default="pl", description="Język raportu (locale organizacji); 'pl' lub 'en'")
     period_from: date | None = Field(
         default=None, description="First day of the requested period (inclusive, not before 2000-01-01); "
                                   "ecommerce_demo counts only orders dated on or after it. Null = no lower bound")

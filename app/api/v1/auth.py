@@ -61,6 +61,12 @@ def mask_email(email: str) -> str:
     return f"{local[:1]}***@{domain}"
 
 
+def _email_hash(email: str) -> str:
+    """Skrot adresu do meta audytu (ten sam co przy `member.invited`, pozwala skorelowac zaproszenie z dolaczeniem);
+    nigdy pelny adres w audycie."""
+    return hashlib.sha256(email.encode()).hexdigest()[:16]
+
+
 def set_session_cookies(response: Response, settings: Settings, session: Session) -> None:
     """Cookie sesji (podpisane, HttpOnly) i cookie CSRF (czytelne dla JS; wartosc = token sesji)."""
     max_age = int(timedelta(hours=settings.daas_session_ttl_hours).total_seconds())
@@ -166,12 +172,16 @@ async def verify_magic_link(body: MagicLinkConfirm, request: Request, response: 
         raise ProblemError(401, "invalid_token", "the sign-in link is invalid, expired or already used")
     link = await db.get(MagicLink, digest)
     user, _created = await service.get_or_create_user(db, link.email)
-    await service.accept_pending_invitations(db, user)
+    added = await service.accept_pending_invitations(db, user)
     memberships = await service.memberships_of(db, user.id)
     session = Session(
         id=new_session_id(), user_id=user.id, org_id=memberships[0][1].id if memberships else None,
         csrf_token=new_csrf_token(), expires_at=now + timedelta(hours=settings.daas_session_ttl_hours))
     db.add(session)
+    for org_id, role in added:
+        await record_event(db, request, org_id=org_id, actor_type="user", actor_id=user.id,
+                           action="member.added", target=f"user:{user.id}",
+                           meta={"role": role, "email_hash": _email_hash(user.email)})
     await record_event(db, request, org_id=session.org_id, actor_type="user", actor_id=user.id,
                        action="auth.login")
     await db.commit()
@@ -201,9 +211,15 @@ async def logout(request: Request, principal: Principal = Depends(get_principal)
 
 @router.get("/me", response_model=MeOut, summary="Who am I",
             description="The caller, their organizations and roles. For an API key: the key's organization and scopes.")
-async def me(principal: Principal = Depends(get_principal), db: AsyncSession = Depends(get_db)) -> MeOut:
+async def me(request: Request, principal: Principal = Depends(get_principal),
+             db: AsyncSession = Depends(get_db)) -> MeOut:
     if principal.user is not None:
-        if await service.accept_pending_invitations(db, principal.user):
+        added = await service.accept_pending_invitations(db, principal.user)
+        for org_id, role in added:
+            await record_event(db, request, org_id=org_id, actor_type="user", actor_id=principal.user.id,
+                               action="member.added", target=f"user:{principal.user.id}",
+                               meta={"role": role, "email_hash": _email_hash(principal.user.email)})
+        if added:
             await db.commit()
         return MeOut(principal=PrincipalOut(type="user"), user=UserOut.model_validate(principal.user),
                      orgs=await _memberships_out(db, principal.user.id))

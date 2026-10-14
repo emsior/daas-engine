@@ -1467,6 +1467,11 @@ export interface components {
             locale?: ("pl" | "en") | null;
             /** Name */
             name?: string | null;
+            /**
+             * Plan
+             * @description tylko do odczytu w tym API: plan ustawia operator (`python -m app.cli set-plan`). Podanie wartosci konczy sie `422 validation_error` — plan nie jest zmieniany po cichu.
+             */
+            plan?: string | null;
             /** Retention Days */
             retention_days?: number | null;
         };

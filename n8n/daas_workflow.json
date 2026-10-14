@@ -52,7 +52,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://app:8000/run",
+        "url": "={{ $env.DAAS_APP_URL || 'http://app:8000' }}/run",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [

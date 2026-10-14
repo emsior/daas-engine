@@ -30,3 +30,12 @@
 
 ### Krok 5: Zamknięcie i propozycja pilota (1 min)
 - „Możemy uruchomić taki raport dla Twoich danych już od następnego poniedziałku bez żadnych zmian w Twojej strukturze IT.”
+
+---
+
+### Wariant compliance: raport statusu artefaktów (`uksc_evidence`)
+Dla klienta zainteresowanego wertykałem compliance (zamiast e-commerce) pokazujemy drugą ścieżkę:
+- Uruchomienie lokalnego kolektora `tools/uksc-collector.ps1` na stacji Windows (tylko odczyt) → paczka JSON ze skrótami artefaktów.
+- Wgranie paczki trasą v1 (`POST /api/v1/orgs/{org}/uploads`, w selfhost `org=default`) i uruchomienie `uksc_evidence` (`POST .../jobs {"pipeline":"uksc_evidence"}`).
+- Omówienie raportu: kontrola → wymóg (UKSC/NIS2) → status → skrót artefaktu, `package_sha256`, sekcja „do poświadczenia ręcznie” oraz zmiany względem poprzedniego runu tej stacji (`diff_vs_previous`).
+- Jasny komunikat: to **zapis stanu technicznego artefaktów**, nie ocena prawna ani potwierdzenie zgodności. Pełny przebieg: [`../API.md`](../API.md#status-of-collector-artifacts-uksc_evidence-end-to-end).

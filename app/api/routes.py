@@ -7,6 +7,7 @@ Nowa trasa dodana do `router` jest chroniona automatycznie; test `tests/test_aut
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 from datetime import datetime
@@ -15,6 +16,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from pydantic import ValidationError
 from sqlalchemy import text
 
 from app.core import audit, xlsx_import
@@ -28,6 +30,7 @@ from app.core.models import (
     RunResult,
     UploadResponse,
 )
+from app.core.observability import get_request_id
 from app.core.ratelimit import limit_ip, limit_run, limit_upload
 from app.core.redact import redact_run
 from app.core.upload_guard import (
@@ -52,6 +55,27 @@ from app.pipelines.runner import PIPELINES, PipelineRunner
 from app.sources.xlsx_formulas import formula_warning
 
 log = logging.getLogger(__name__)
+
+
+def read_report_bytes(path: Path) -> tuple[bytes, str]:
+    """Jeden odczyt pliku raportu: `(bajty, sha256 tych samych bajtow)`.
+
+    Hash liczony z serwowanych bajtow jest zgodny z `sha256sum` klienta i z `report_sha256`/ETag liczonym w cloud
+    (ta sama funkcja uzywana przez `app.api.v1.runs`) — raport i jego skrot nie moga sie rozjechac.
+    """
+    body = path.read_bytes()
+    return body, hashlib.sha256(body).hexdigest()
+
+
+#: Nazwa naglowka ze skrotem raportu na odpowiedziach legacy `GET /reports/...` (F1: "sprawdz sam" w selfhost REST).
+REPORT_SHA256_HEADER = "X-Report-SHA256"
+
+
+class RunResultWithHash(RunResult):
+    """Odpowiedz legacy `POST /run` = `RunResult` + sha256 raportu HTML (parytet z `report_sha256` w cloud)."""
+
+    report_sha256: str | None = None
+
 
 #: Prefiksy tras legacy (tylko selfhost); dostaja naglowek `Deprecation`.
 LEGACY_PREFIXES: tuple[str, ...] = ("/pipelines", "/run", "/runs", "/stats", "/upload", "/reports")
@@ -103,8 +127,34 @@ def pipelines(request: Request) -> list[PipelineInfo]:
     return _runner(request).list_pipelines()
 
 
-@router.post("/run", response_model=RunResult, tags=["pipelines"], dependencies=[Depends(limit_run)])
-def run(body: RunRequest, request: Request) -> RunResult:
+def _run_validation_response(errors: list[dict]) -> JSONResponse:
+    """422 walidacji ciala legacy `/run` w ksztalcie pozostalych bledow legacy (`detail`/`code`/`request_id`),
+    ale BEZ wartosci przeslanej przez klienta (D12 / API.md: "the submitted value is never echoed")."""
+    return JSONResponse({"detail": errors, "code": "validation_error", "request_id": get_request_id()},
+                        status_code=422)
+
+
+async def _read_run_request(request: Request) -> RunRequest | JSONResponse:
+    """Czyta i waliduje cialo `POST /run` tutaj (a nie przez model w sygnaturze), zeby 422 nie odbijal wartosci
+    klienta. Zwraca `RunRequest` albo gotowa odpowiedz 422 (loc/msg/type, bez `input`)."""
+    try:
+        payload = await request.json()
+    except Exception:  # noqa: BLE001  niepoprawny JSON: zglaszamy blad bez cytowania tresci
+        return _run_validation_response([{"loc": ["body"], "msg": "request body is not valid JSON",
+                                          "type": "value_error.jsondecode"}])
+    try:
+        return RunRequest.model_validate(payload)
+    except ValidationError as exc:
+        return _run_validation_response(
+            [{"loc": ["body", *(str(x) for x in e.get("loc", ()))], "msg": e.get("msg"), "type": e.get("type")}
+             for e in exc.errors()])
+
+
+@router.post("/run", response_model=RunResultWithHash, tags=["pipelines"], dependencies=[Depends(limit_run)])
+async def run(request: Request):
+    body = await _read_run_request(request)
+    if isinstance(body, JSONResponse):   # walidacja ciala nie przeszla -> 422 bez echa
+        return body
     if body.pipeline not in PIPELINES:
         raise HTTPException(status_code=404, detail=f"unknown pipeline: {body.pipeline}")
     runner = _runner(request)
@@ -114,13 +164,18 @@ def run(body: RunRequest, request: Request) -> RunResult:
         if not path.is_file():
             raise HTTPException(status_code=404, detail="upload not found")
         body = body.model_copy(update={"source_path": str(path), "upload_id": None})
-    result = runner.run(body)
+    result = await run_in_threadpool(runner.run, body)
     audit.record(
         request, action="run", allowed=True,
         reason=ReasonCode.RUN_FAILED if result.run_status.value == "FAILED" else ReasonCode.OK,
         pipeline=result.pipeline, run_id=result.run_id,
     )
-    return redact_run(result)
+    # F1: skrot raportu HTML (ten sam, ktory liczy cloud) w polu odpowiedzi — klient selfhost ma referencje do
+    # "sprawdz sam"; sciezka jest wewnetrzna (realna), odpowiedz zredagowana oddaje tylko link.
+    report_sha256 = None
+    if result.report_html_path and Path(result.report_html_path).is_file():
+        report_sha256 = read_report_bytes(Path(result.report_html_path))[1]
+    return RunResultWithHash(**redact_run(result).model_dump(), report_sha256=report_sha256)
 
 
 @router.get("/runs/latest", response_model=RunResult, tags=["runs"])
@@ -348,7 +403,10 @@ REPORT_HEADERS: dict[str, str] = {
 
 
 def _serve_report(path: Path, fmt: str):
+    # F1: sha256 serwowanych bajtow w naglowku, zeby klient selfhost mogl "sprawdzic sam" (README) tak jak w cloud.
+    body, digest = read_report_bytes(path)
+    headers = {**REPORT_HEADERS, REPORT_SHA256_HEADER: digest}
     if fmt == "html":
-        return HTMLResponse(path.read_text(encoding="utf-8"), headers=REPORT_HEADERS)
+        return HTMLResponse(body, headers=headers)
     media = "application/json" if fmt == "json" else "text/markdown; charset=utf-8"
-    return FileResponse(path, media_type=media, filename=path.name, headers=REPORT_HEADERS)
+    return FileResponse(path, media_type=media, filename=path.name, headers=headers)

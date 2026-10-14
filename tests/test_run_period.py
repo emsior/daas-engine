@@ -81,6 +81,35 @@ def test_week_period_counts_only_the_orders_of_that_week(cloud_client, cloud_set
     assert runs_used(cloud_settings, org.org_id) == 2
 
 
+# Scenariusz z testu obcego a02 (S-a02-01, BLOKER B1): kolumna daty miesza ISO, natywna date
+# Excela (`...00:00:00`) i `DD.MM.YYYY`, wszystkie w tygodniu 2026-08-01..07, dni <= 12.
+# Dawniej `format="mixed", dayfirst=True` czytal ISO/natywne jako d<->m (05 -> maj, 03 -> marzec),
+# rozsypujac tydzien po miesiacach i ZANIZAJAC raport tygodniowy. Teraz: per komorka + ostrzezenie.
+A02_MIXED_CSV = (
+    b"order_id,date,revenue\n"
+    b"A,2026-08-05,100\n"
+    b"B,03.08.2026,200\n"
+    b"C,2026-08-03 00:00:00,300\n"
+    b"D,06.08.2026,400\n"
+    b"E,2026-08-07,500\n"
+)
+
+
+def test_mixed_date_formats_do_not_understate_the_weekly_report(cloud_client, org):
+    """B1 end-to-end: wszystkie 5 zamowien zostaje w zamowionym tygodniu, raport nie jest zanizony."""
+    uid = upload(cloud_client, org, "mieszane_daty.csv", A02_MIXED_CSV)
+    week = finished(cloud_client, org, upload_id=uid, **WEEK)
+    assert week["status"] == "succeeded", week
+    detail = run_detail(cloud_client, org, week["run_id"])
+    # per-komorka: wszystkie 5 trafia do 2026-08-01..07 (stary parser zostawilby tylko 2 z DD.MM)
+    assert detail["records_processed"] == 5
+    assert detail["metrics"]["orders_total"] == 5
+    assert detail["metrics"]["revenue_total"] == 1500.0
+    assert "(5 of 5 records)" in detail["source_detail"]
+    # glosne ostrzezenie o mieszanych formatach dociera do klienta ta sama sciezka co inne warningi
+    assert "mieszane formaty" in detail["source_detail"]
+
+
 @pytest.mark.parametrize(("period", "expected"), [
     ({"period_from": "2026-08-10"}, 5),
     ({"period_to": "2026-08-02"}, 3),

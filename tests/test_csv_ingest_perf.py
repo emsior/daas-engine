@@ -22,6 +22,7 @@ from app.sources.csv_mapper import (
     map_dataframe,
     normalize_status_series,
     parse_dates,
+    parse_dates_ex,
     read_client_csv,
     to_number_series,
 )
@@ -122,6 +123,64 @@ def test_parsowanie_dat_nie_generuje_ostrzezenia(recwarn):
     """Stara sciezka krzyczala UserWarning o `dayfirst` przy kazdym uruchomieniu."""
     parse_dates(pd.Series(["2026-03-01"] * 5, dtype=object))
     assert [w for w in recwarn if issubclass(w.category, UserWarning)] == []
+
+
+# ---------------------------------------------------------------------------
+# B1: mieszane formaty daty — parsowanie per komorka + sygnal mieszania
+# ---------------------------------------------------------------------------
+#: Scenariusz z testu obcego a02 (S-a02-01): jedna kolumna miesza ISO, natywna date Excela
+#: (`...00:00:00`) i `DD.MM.YYYY`, wszystkie dni <= 12 w jednym sierpniowym tygodniu.
+#: Stara sciezka (`format="mixed", dayfirst=True`) czytala "2026-08-05" jako 8 maja, a
+#: "2026-08-03 00:00:00" jako 8 marca — rozsypujac tydzien po miesiacach.
+A02_MIXED = ["2026-08-05", "03.08.2026", "2026-08-03 00:00:00", "06.08.2026", "2026-08-07"]
+A02_TRUE_DAYS = ["2026-08-05", "2026-08-03", "2026-08-03", "2026-08-06", "2026-08-07"]
+
+
+def test_parse_dates_ex_mieszane_formaty_przypisuje_dni_per_komorka():
+    """Kazdy wiersz czytany wg WLASNEGO formatu, nie jedna kolejnoscia d/m dla calej kolumny."""
+    series, info = parse_dates_ex(pd.Series(A02_MIXED, dtype=object))
+    assert [str(x.date()) for x in series] == A02_TRUE_DAYS
+    assert info["formats"] > 1 and info["fallback"] == 0   # 3 jawne formaty, bez heurystyki
+
+
+def test_parse_dates_ex_jeden_format_nie_jest_mieszany():
+    """Plik jednoformatowy: dokladnie jeden format, zero heurystyki — brak sygnalu mieszania."""
+    for values in (["2026-03-01", "2026-03-02"], ["01.03.2026", "02.03.2026"],
+                   ["2026-08-03 00:00:00", "2026-08-04 00:00:00"]):
+        _, info = parse_dates_ex(pd.Series(values, dtype=object))
+        assert info["formats"] == 1 and info["fallback"] == 0, (values, info)
+
+
+def test_parse_dates_ex_tylko_zepsute_komorki_to_nie_mieszanie():
+    """Jeden poprawny format + smieci (nieparsowalne) != mieszane formaty — nie podnosi sygnalu."""
+    _, info = parse_dates_ex(pd.Series(["2026-03-01", "nie-data", "xxx"], dtype=object))
+    assert info["formats"] == 1 and info["fallback"] == 0
+
+
+MIXED_WARN = "mieszane formaty"   # stabilny rdzen komunikatu (niezalezny od diakrytykow)
+
+
+def test_map_dataframe_ostrzega_i_poprawnie_przypisuje_dni_przy_mieszanych_formatach():
+    """B1: mieszane formaty -> (1) ostrzezenie o zamianie d/m, (2) poprawne daty per komorka."""
+    df = pd.DataFrame({"data": A02_MIXED, "numer": [f"N{i}" for i in range(5)],
+                       "kwota": ["100", "200", "300", "400", "500"]})
+    out, rep = map_dataframe(df)
+    assert [str(d) for d in out["date"]] == A02_TRUE_DAYS      # nic nie rozsypane po miesiacach
+    assert out["revenue"].tolist() == [100.0, 200.0, 300.0, 400.0, 500.0]
+    hits = [w for w in rep.warnings if MIXED_WARN in w]
+    assert len(hits) == 1 and "miesi" in hits[0], rep.warnings   # komunikat mowi o dniu/miesiacu
+
+
+@pytest.mark.parametrize("dates", [
+    ["2026-01-05", "2026-01-06", "2026-01-07"],   # ISO
+    ["05.01.2026", "06.01.2026", "07.01.2026"],   # DD.MM.YYYY
+    ["2026-01-05 00:00:00", "2026-01-06 00:00:00", "2026-01-07 00:00:00"],  # natywna data Excela
+])
+def test_map_dataframe_bez_ostrzezenia_dla_jednego_formatu(dates):
+    """Brak regresji: plik z JEDNYM formatem daty nie dostaje ostrzezenia o mieszaniu."""
+    df = pd.DataFrame({"data": dates, "numer": ["N0", "N1", "N2"], "kwota": ["100", "200", "300"]})
+    _, rep = map_dataframe(df)
+    assert not any(MIXED_WARN in w for w in rep.warnings), rep.warnings
 
 
 # ---------------------------------------------------------------------------
