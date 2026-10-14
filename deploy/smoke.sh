@@ -4,7 +4,7 @@
 #   ./smoke.sh                                   # API http://127.0.0.1:8000, kokpit http://127.0.0.1:3000
 #   ./smoke.sh --public https://raporty.example.com --wait 90 --expect-version 2.0.0
 #
-# Opcje: --api URL, --web URL, --public URL (dodatkowo przechodzi przez proxy: TLS, nagłówki, ukryte /metrics),
+# Opcje: --api URL, --web URL, --public URL (dodatkowo przez proxy: TLS, nagłówki, ukryte /metrics, metadane OAuth, /mcp bez klucza),
 #        --wait SEKUNDY (czeka na gotowosc API), --expect-version X.Y.Z (porownuje z /health).
 # Kod wyjscia: 0 = wszystko dziala, 1 = co najmniej jedna kontrola nie przeszla.
 set -uo pipefail
@@ -97,6 +97,30 @@ if [ -n "$public" ]; then
     echo "ok    nagłówek Strict-Transport-Security"
   else
     echo "FAIL  brak nagłówka Strict-Transport-Security na $public/login"
+    fail=1
+  fi
+
+  # Flagowe funkcje 2.0 przez proxy. Domyslnie wlaczone (DAAS_MCP_ENABLED/DAAS_OAUTH_ENABLED = true);
+  # swiadomie wylaczone => trasa daje 404 (tez ok). Zle trasowanie na kokpit (307 do /login albo HTML kokpitu)
+  # jest tu FAIL — po to ta kontrola (bez niej zle trasowanie /mcp/OAuth przechodzi smoke).
+  oauth_url="$public/.well-known/oauth-authorization-server"
+  oauth_code="$(curl -sS -o "$tmp/body" -w '%{http_code}' --max-time 15 "$oauth_url" 2>/dev/null || true)"
+  if [ "$oauth_code" = "200" ] && grep -q '"issuer"' "$tmp/body"; then
+    echo "ok    proxy metadane OAuth ($oauth_code)"
+  elif [ "$oauth_code" = "404" ]; then
+    echo "ok    proxy metadane OAuth (404 — OAuth wylaczony)"
+  else
+    echo "FAIL  proxy metadane OAuth: $oauth_url -> HTTP ${oauth_code:-brak} (oczekiwano 200 z \"issuer\", albo 404 gdy OAuth wylaczony; 307/HTML = zle trasowanie na kokpit)"
+    fail=1
+  fi
+
+  mcp_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 -X POST -H 'content-type: application/json' --data '{}' "$public/mcp" 2>/dev/null || true)"
+  if [ "$mcp_code" = "401" ]; then
+    echo "ok    proxy /mcp bez klucza ($mcp_code)"
+  elif [ "$mcp_code" = "404" ]; then
+    echo "ok    proxy /mcp bez klucza (404 — MCP wylaczony)"
+  else
+    echo "FAIL  proxy /mcp bez klucza: $public/mcp -> HTTP ${mcp_code:-brak} (oczekiwano 401, albo 404 gdy MCP wylaczony; 307/inne = zle trasowanie na kokpit)"
     fail=1
   fi
 fi

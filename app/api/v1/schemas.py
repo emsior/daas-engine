@@ -116,6 +116,18 @@ class OrgPatch(BaseModel):
     retention_days: int | None = Field(default=None, ge=1, le=3650)
     llm_narrative: bool | None = Field(default=None, description="opt-in: streszczenie raportu przez zewnetrzny LLM")
     locale: Locale | None = None
+    plan: str | None = Field(
+        default=None,
+        description="tylko do odczytu w tym API: plan ustawia operator (`python -m app.cli set-plan`). "
+                    "Podanie wartosci konczy sie `422 validation_error` — plan nie jest zmieniany po cichu.")
+
+    @field_validator("plan")
+    @classmethod
+    def _plan_is_operator_only(cls, value: str | None) -> None:
+        # Plan rzutuje na limity/rozliczenia: nie wolno go podniesc przez `org:manage`. Zmienia go operator (CLI).
+        if value is not None:
+            raise ValueError("plan is set by the operator (python -m app.cli set-plan), not through this API")
+        return value
 
 
 # ----------------------------------------------------------------------------- czlonkowie

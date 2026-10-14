@@ -1685,6 +1685,18 @@
             ],
             "title": "Name"
           },
+          "plan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "tylko do odczytu w tym API: plan ustawia operator (`python -m app.cli set-plan`). Podanie wartosci konczy sie `422 validation_error` — plan nie jest zmieniany po cichu.",
+            "title": "Plan"
+          },
           "retention_days": {
             "anyOf": [
               {

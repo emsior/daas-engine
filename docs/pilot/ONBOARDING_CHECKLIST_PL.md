@@ -25,3 +25,17 @@ Krok po kroku dla operatora (PPC) i klienta przed rozpoczęciem pilota:
 - [ ] **Krok 5: Prezentacja wyników i odbiór feedbacku**
   - Przesłanie raportu do klienta i krótka sesja podsumowująca (15 min).
   - Ustalenie harmonogramu dostarczania kolejnych tygodniówek (ręcznie, harmonogram n8n albo webhook `run.finished`).
+
+## Wariant compliance: raport statusu artefaktów (pipeline `uksc_evidence`)
+
+Dla wertykału compliance (nie e-commerce) ścieżka jest inna — zamiast eksportu sprzedaży klient dostarcza paczkę JSON z lokalnego kolektora artefaktów stacji Windows. Raport jest **zapisem stanu technicznego artefaktów** (kontrola → wymóg UKSC/NIS2 → status → skrót artefaktu); nie jest oceną prawną ani potwierdzeniem zgodności.
+
+- [ ] **C1: Zebranie paczki na stacji**
+  - Uruchomienie `tools/uksc-collector.ps1` na stacji Windows (tryb tylko do odczytu, jako administrator; bez uprawnień administratora część kontroli wychodzi `NA_NO_ADMIN`). Kolektor tworzy `uksc_<host>_<stamp>.json` (+ plik `.sha256`) — nic nie opuszcza stacji, dopóki klient sam nie wgra paczki.
+- [ ] **C2: Wgranie paczki trasą v1**
+  - Paczka `.json` (do 5 MiB) idzie trasą v1: `POST /api/v1/orgs/{org}/uploads` (w selfhost `org` = `default`, klucz `DAAS_API_KEY`). Legacy `POST /upload` przyjmuje tylko CSV/XLSX i odrzuci `.json`. Upload wykrywa `kind=package` i podpowiada `uksc_evidence`.
+- [ ] **C3: Uruchomienie `uksc_evidence`**
+  - `POST /api/v1/orgs/{org}/jobs {"pipeline":"uksc_evidence","upload_id":"..."}` (ten pipeline nie przyjmuje okresu). Po `succeeded` pobranie raportu HTML i `GET /api/v1/orgs/{org}/evidence` (kontrola, wymóg, status, skrót artefaktu, `package_sha256`, `integrity`).
+- [ ] **C4: Weryfikacja i zmiany między runami**
+  - `package_sha256` odtwarzalny niezależnie (opis w raporcie i w `docs/API.md`); `POST .../verify` sprawdza skrót PLIKU RAPORTU, nie paczki.
+  - Kolejny run tej samej stacji pokazuje `diff_vs_previous` (poprawy/regresje). Pełny worked-example: [`../API.md`](../API.md#status-of-collector-artifacts-uksc_evidence-end-to-end).

@@ -1,6 +1,10 @@
 // Odwrotny proxy do e2e i lokalnej pracy: odtwarza układ produkcyjny (Caddy) w jednym procesie Node bez zależności.
-//   /api/*  -> API   (E2E_API_ORIGIN,  domyślnie http://127.0.0.1:8000)
-//   reszta  -> kokpit (E2E_WEB_ORIGIN,  domyślnie http://127.0.0.1:3000)
+//   /api/*, /mcp(/*), /authorize /token /register /revoke /.well-known/oauth-*  -> API  (E2E_API_ORIGIN,  domyślnie http://127.0.0.1:8000)
+//   reszta (w tym /health i /ready)                                             -> kokpit (E2E_WEB_ORIGIN,  domyślnie http://127.0.0.1:3000)
+// Zestaw tras kierowanych do API jest wierny `deploy/Caddyfile` (bloki @mcp i @oauth), żeby stos e2e testował serwer MCP
+// i konektor OAuth 2.1 tak jak produkcja. `/health` i `/ready` idą do kokpitu (jak catch-all `handle {}` w Caddy): twarde
+// wejście na `/health` ma pokazać ekran „Zdrowie danych”, nie surowy JSON API — liveness API sprawdza się przez
+// `/api/v1/health` albo bezpośrednio na porcie API (stack.sh czeka właśnie na porcie API, nie przez proxy).
 // Słucha na E2E_PROXY_PORT (domyślnie 3100). Strumienie SSE przechodzą bez buforowania.
 // Gdy ustawione E2E_TLS_CERT i E2E_TLS_KEY (ścieżki PEM), słucha po https (stack.sh z E2E_TLS=1) i dokłada do żądań
 // upstream `x-forwarded-proto: https` (jak Caddy w produkcji; wartość od klienta jest nadpisywana).
@@ -17,13 +21,19 @@ const keyPath = process.env.E2E_TLS_KEY;
 const tls = Boolean(certPath && keyPath);
 
 const handler = (req, res) => {
-  const target =
-    req.url?.startsWith("/api/") ||
-    req.url === "/api" ||
-    req.url === "/health" ||
-    req.url === "/ready"
-      ? api
-      : web;
+  // Ścieżka bez query (OAuth `/authorize` zawsze niesie query; `path` matcher Caddy też patrzy tylko na ścieżkę).
+  const path = (req.url ?? "").split("?")[0];
+  const toApi =
+    path === "/api" ||
+    path.startsWith("/api/") ||
+    path === "/mcp" ||
+    path.startsWith("/mcp/") ||
+    path === "/authorize" ||
+    path === "/token" ||
+    path === "/register" ||
+    path === "/revoke" ||
+    path.startsWith("/.well-known/oauth-");
+  const target = toApi ? api : web;
   const upstream = http.request(
     {
       hostname: target.hostname,

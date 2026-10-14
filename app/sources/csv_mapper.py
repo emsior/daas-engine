@@ -271,25 +271,60 @@ _DATE_FORMATS: tuple[str, ...] = (
 )
 
 
-def parse_dates(col: pd.Series) -> pd.Series:
-    """Parsuje kolumne daty jawnym formatem, z heurystyka wylacznie jako ostatnia deska.
+def parse_dates_ex(col: pd.Series) -> tuple[pd.Series, dict[str, int]]:
+    """Parsuje kolumne daty PER KOMORKA jawnym formatem; heurystyka tylko jako ostatnia deska.
 
-    Najpierw probuje formatow z `_DATE_FORMATS` — pierwszy, ktory pokryje caly
-    niepusty material, wygrywa. Dopiero gdy zaden nie pasuje, wraca do starej
-    sciezki `dayfirst=True`, zeby nie odrzucic pliku, ktory wczesniej przechodzil.
+    Kazdy niepusty wiersz dostaje pierwszy format z `_DATE_FORMATS`, ktory go pokrywa.
+    Dzieki temu kolumna z MIESZANYMI formatami (np. ISO + natywna data Excela + `DD.MM.YYYY`)
+    nie jest czytana jedna kolejnoscia dzien/miesiac dla calosci — to dawniej cicho
+    przestawialo dzien z miesiacem w wierszach o dniu <= 12 (finding B1). Jawny format jest
+    jednoznaczny, wiec dla wiersza nim sparsowanego zamiana d/m nie zachodzi.
+
+    Dopiero wiersze, ktorych zaden jawny format nie pokryl, przechodza stara sciezka
+    `dayfirst=True, format="mixed"` — zeby nie odrzucic pliku, ktory wczesniej przechodzil
+    (tam heurystyka pandas nadal moze przestawic d/m, dlatego liczymy to osobno).
+
+    Zwraca `(serie dat, info)`, gdzie `info` to liczniki:
+      - `"formats"`: ile roznych jawnych formatow faktycznie cos pokrylo (>1 == mieszane),
+      - `"fallback"`: ile wierszy odczytala dopiero heurystyka (tam grozi zamiana d/m).
+    `map_dataframe` zamienia te liczniki na ostrzezenie dla klienta.
     """
     s = col.astype("string").str.strip()
     non_empty = s.notna() & s.ne("")
     target = int(non_empty.sum())
 
-    if target:
-        for fmt in _DATE_FORMATS:
-            parsed = pd.to_datetime(s, errors="coerce", format=fmt)
-            if int(parsed.notna().sum()) == target:
-                return parsed
+    result = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
+    info = {"formats": 0, "fallback": 0}
+    if not target:
+        return result, info
 
-    # Mieszane albo nietypowe formaty — heurystyka pandas, jak dotychczas.
-    return pd.to_datetime(s, errors="coerce", dayfirst=True, format="mixed")
+    # Material jeszcze nieprzypisany zadnemu formatowi. Pojedynczy format = jedna iteracja
+    # (pokrywa wszystko, `remaining` pustieje, petla konczy sie) — ten sam koszt co dotychczas.
+    remaining = non_empty.copy()
+    for fmt in _DATE_FORMATS:
+        if not remaining.any():
+            break
+        parsed = pd.to_datetime(s, errors="coerce", format=fmt)
+        hit = parsed.notna() & remaining
+        if hit.any():
+            result = result.mask(hit, parsed)
+            remaining &= ~hit
+            info["formats"] += 1
+
+    # Wiersze, ktorych zaden jawny format nie objal — stara sciezka heurystyczna (jak dotychczas).
+    if remaining.any():
+        fb = pd.to_datetime(s.where(remaining), errors="coerce", dayfirst=True, format="mixed")
+        hit = fb.notna()
+        if hit.any():
+            result = result.mask(hit, fb)
+            info["fallback"] = int(hit.sum())
+
+    return result, info
+
+
+def parse_dates(col: pd.Series) -> pd.Series:
+    """Cienka nakladka na `parse_dates_ex` zwracajaca sama serie (zgodnosc wsteczna)."""
+    return parse_dates_ex(col)[0]
 
 
 @dataclass
@@ -419,7 +454,15 @@ def map_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, MappingReport]:
     out["status"] = normalize_status_series(out["status"])
 
     # --- daty ---
-    out["date"] = parse_dates(out["date"]).dt.date
+    parsed_dates, date_info = parse_dates_ex(out["date"])
+    out["date"] = parsed_dates.dt.date
+    # B1: mieszane formaty w jednej kolumnie (albo odczyt heurystyczny) = ryzyko cichej
+    # zamiany dnia z miesiacem. Ostrzegamy zawsze, gdy kolumna nie jest jednym formatem —
+    # nawet jesli odczyt per-komorka trafil poprawnie — zeby klient poprawil eksport.
+    if date_info["formats"] > 1 or date_info["fallback"]:
+        report.warnings.append(
+            "Kolumna daty zawiera mieszane formaty — sprawdź, czy dzień i miesiąc nie "
+            "zostały zamienione; użyj jednego formatu daty w całej kolumnie.")
     bad_dates = int(out["date"].isna().sum())
     if bad_dates:
         report.warnings.append(f"{bad_dates} wierszy z nieczytelną datą — pominięte.")

@@ -123,7 +123,11 @@ def _normalize(df: pd.DataFrame) -> list[dict[str, Any]]:
     df["discount"] = df["discount"].fillna(0).astype(float)
     # rabat podany w procentach (np. 20) -> ułamek
     df.loc[df["discount"] > 1, "discount"] = df.loc[df["discount"] > 1, "discount"] / 100.0
-    df["date"] = pd.to_datetime(df["date"]).dt.date
+    # B1: ta sama hardened sciezka co mapper plikow klienta (parsowanie per-komorka wg
+    # jawnego formatu), zeby dane z Apify/zewnetrznego CSV nie mialy cicho przestawionego
+    # dnia z miesiacem przy mieszanych formatach. Fixture jest jednoformatowy (ISO) -> bez zmian.
+    from app.sources.csv_mapper import parse_dates
+    df["date"] = parse_dates(df["date"]).dt.date
     records: list[dict[str, Any]] = []
     for row in df.to_dict(orient="records"):
         records.append(EcommerceOrder.model_validate(row).model_dump())

@@ -33,6 +33,13 @@ Mutating requests made with a session cookie must repeat the value of the `daas_
 
 There are no passwords. Sign-in is a single-use link sent by e-mail (`POST /auth/magic-link`, then `POST /auth/magic-link/verify` with the token from the link). The link is bound to the browser that asked for it (an HttpOnly nonce cookie set by `POST /auth/magic-link`). When it is opened in another browser, `verify` answers `409 confirm_required` with a masked `email_hint` and does **not** consume the token; repeat the call with `{"token": "...", "confirm": true}` after the user agrees to sign in as that address in this browser. Pending invitations for the address are accepted at sign-in. A key belongs to exactly one organization and carries scopes; a resource of another organization answers `404` (the members routes answer `403`).
 
+```bash
+# Request a sign-in link. "locale" (pl | en, default pl) picks the e-mail language. The answer is 202 for
+# any address (it does not reveal whether an account exists).
+curl -sS -X POST -H "Content-Type: application/json" \
+  -d '{"email":"jan@example.test","locale":"pl"}' "$DAAS/api/v1/auth/magic-link"
+```
+
 ### Scopes and roles
 
 | Scope | Allows | member | admin | owner | assignable to a key |
@@ -51,6 +58,25 @@ There are no passwords. Sign-in is a single-use link sent by e-mail (`POST /auth
 | `org:delete` | delete the organization | | | x | no (owner session only) |
 
 A key can grant only scopes it holds itself (`403 scope_escalation` otherwise).
+
+**Minimal scope set for a machine key** that uploads a file, starts a run and downloads the report (n8n, scripts, an MCP assistant): `uploads:write runs:write runs:read reports:read`. `runs:read` is required even for a key that only uploads and runs — without it the caller cannot poll the job or list the run to learn the `run_id`, so the report cannot be fetched. Add `usage:read` to let the key read plan limits and `webhooks:manage` to manage webhooks. Give a read-only analyst key only `runs:read reports:read usage:read`.
+
+### Creating an API key and inviting members
+
+```bash
+# Create an API key (scope keys:manage). The full key appears once in the answer ("key"); afterwards only its
+# metadata and prefix are returned. "scopes" must be a non-empty subset of the caller's own scopes.
+# "expires_in_days" is optional (1-3650; omit or null = no expiry).
+curl -sS -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"name":"n8n production","scopes":["uploads:write","runs:write","runs:read","reports:read"],"expires_in_days":365}' \
+  "$DAAS/api/v1/orgs/$ORG/api-keys"
+# {"id":"01J...","prefix":"a1cfe4b6","key":"daas_a1cfe4b6_...","scopes":[...],"expires_at":"...","created_at":"..."}
+
+# Invite a member by e-mail (scope members:manage). "role" is owner | admin | member (default member).
+# Always answers 202 {"status":"accepted"} without revealing whether the address already has an account.
+curl -sS -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"email":"ola@example.test","role":"member"}' "$DAAS/api/v1/orgs/$ORG/invitations"
+```
 
 ## Errors
 
@@ -140,7 +166,19 @@ Rate limits are per client address and per key and are kept in process memory; r
 | DELETE | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}` | `webhooks:manage` | 204 | 404 | delete |
 | POST | `/api/v1/orgs/{org_id}/webhooks/{webhook_id}/ping` | `webhooks:manage` | 200 | 404 | send a test event; answers `{delivered, status_class}` |
 
-Legacy routes (`/upload`, `/run`, `/pipelines`, `/runs`, `/reports/...`, `/stats`) exist only in `DAAS_MODE=selfhost` (organization `default`, key from `DAAS_API_KEY`, `Deprecation` response header). In `cloud` mode they answer `404`.
+Legacy routes exist only in `DAAS_MODE=selfhost` (organization `default`, key from `DAAS_API_KEY`, `Deprecation` response header). In `cloud` mode they answer `404`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/upload` | upload a CSV or XLSX (only; collector packages go through the v1 route, see below) |
+| POST | `/run` | run a pipeline synchronously (answer carries `report_path` and `report_html_path`) |
+| GET | `/pipelines` | list pipelines |
+| GET | `/runs`, `/runs/{run_id}`, `/runs/latest` | list and read runs |
+| GET | `/reports/{pipeline}/latest?fmt=html\|md\|json` | the latest report of a pipeline |
+| GET | `/reports/run/{run_id}?fmt=html\|md\|json` | the report of one run by id (the value `report_html_path` from `POST /run` points here) |
+| GET | `/stats` | row counts |
+
+**In `selfhost` the `/api/v1` routes also work**, for the single organization `org_id` = `default`, authenticated with `DAAS_API_KEY` (`X-API-Key` or `Authorization: Bearer`). Use them for anything the legacy routes do not cover — in particular uploading a collector package (`.json`), which the legacy `POST /upload` rejects (`415`, CSV and XLSX only); see [Status of collector artifacts](#status-of-collector-artifacts-uksc_evidence-end-to-end).
 
 ## Pipelines
 
@@ -204,16 +242,34 @@ curl -sS -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
 # {"known":true,"run_id":"c0a8...","pipeline":"ecommerce_demo","created_at":"...","format":"html"}
 ```
 
-### Status of collector artifacts
+### Status of collector artifacts (`uksc_evidence`), end to end
+
+The `uksc_evidence` pipeline turns a JSON package produced by the local collector (`tools/uksc-collector.ps1`) into a status report of technical artifacts. The package is uploaded through the **v1 upload route** (`kind=package`), not the legacy `POST /upload`, which accepts CSV and XLSX only (a `.json` answers `415`). This holds in `selfhost` too: use `/api/v1/orgs/default/uploads` with `DAAS_API_KEY` (the single organization is `default`).
 
 ```bash
-# Upload the package from the local collector, run uksc_evidence, then:
+# selfhost: ORG=default, KEY=$DAAS_API_KEY. cloud: ORG and KEY of the organization.
+
+# 1. Upload the collector package (.json). The upload is detected as kind=package and suggests the pipeline.
+#    For a package the CSV mapping fields are null (rows, mapping, ready); the package is still runnable.
+curl -sS -H "X-API-Key: $KEY" -F "file=@uksc_WS-01_20261014.json" "$DAAS/api/v1/orgs/$ORG/uploads"
+# {"id":"9b7e...","kind":"package","suggested_pipeline":"uksc_evidence","rows":null,"mapping":null,"ready":null,...}
+
+# 2. Run uksc_evidence with the upload id (202 Accepted; this pipeline takes no period).
+curl -sS -i -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"pipeline":"uksc_evidence","upload_id":"9b7e..."}' "$DAAS/api/v1/orgs/$ORG/jobs"
+
+# 3. After the job has succeeded, read the artifact status of the latest collector run.
 curl -sS -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/evidence"
-# {"run_id":"...","run_status":"SUCCESS","host":"...","package_sha256":"...","checks":[
-#   {"control_id":"...","requirement":"...","status":"...","artifact":{"source":"...","sha256":"..."}}]}
+# {"run_id":"...","run_status":"SUCCESS","host":"WS-01","collected_at":"...","package_sha256":"...","integrity":"ok",
+#  "checks":[{"control_id":"ENC-01","title":"...","requirement":"...","status":"PASS",
+#             "artifact":{"source":"...","sha256":"..."}}]}
 ```
 
-The response lists control, requirement, status and artifact hash. Artifact contents are not returned. `run_status` is `SUCCESS` or `PARTIAL`; a `PARTIAL` run (incomplete package) is returned as the latest run, so check it before reading the checks as complete.
+The response lists control, requirement, status and artifact hash (`EvidenceOut`: `run_id`, `run_status`, `host`, `collected_at`, `package_sha256`, `integrity`, `checks[]`). Artifact contents are not returned. `status` of a check is `PASS`, `FAIL`, `WARN`, `MANUAL`, `NA_NO_ADMIN` or `ERROR`. `run_status` is `SUCCESS` or `PARTIAL`; a `PARTIAL` run (incomplete package) is returned as the latest run, so check it before reading the checks as complete.
+
+**Two different hashes — do not confuse them.** `POST .../verify` checks the SHA-256 of a **report file** (the ETag of `GET .../runs/{run_id}/report`), so it answers `known: true` for a report hash and `known: false` for a `package_sha256`. The `package_sha256` is the integrity hash of the uploaded package itself; it is printed in the report and is recomputed independently from the package (SHA-256 of the sorted concatenation of the per-artifact `evidence_hash` values), not through `/verify`.
+
+**`diff_vs_previous` (change since the previous run of the same station).** The run report (the JSON report and section *"Zmiany względem poprzedniego runu tej stacji"* of the HTML) carries `diff_vs_previous`: `{"improved": [...], "regressed": [...], "new_controls": [...], "removed_controls": [...], "previous_checks": N}`, where `improved` is the controls that went `FAIL`/`WARN` → `PASS` and `regressed` the ones that went `PASS` → `FAIL`/`WARN`. It is computed **per host**: it compares against the previous run of the **same station** (`host`), so running two different stations one after another leaves `diff_vs_previous` `null` and the HTML section absent. To see a change, upload and run the same station twice.
 
 ## Live progress (SSE)
 
@@ -264,11 +320,11 @@ def valid(secret: str, raw_body: bytes, header: str) -> bool:
     return hmac.compare_digest(expected, header)
 ```
 
-Delivery rules: success is any `2xx` within 5 seconds; redirects are not followed; at most 3 attempts in total, with the pauses from `DAAS_WEBHOOK_BACKOFF_SEC` (default `1,5,25`); pending retries are kept in memory and do not survive a restart. Use `X-DaaS-Delivery` to deduplicate. The signature covers the body only, not the timestamp header.
+Delivery rules: success is any `2xx` within 5 seconds; redirects are not followed; **at most 3 attempts in total** (one initial attempt plus up to 2 retries), with the pauses from `DAAS_WEBHOOK_BACKOFF_SEC`. 3 attempts mean only **2 pauses**, so with the default `1,5,25` only `1` (after the first attempt) and `5` (after the second) are used — the third value `25` is never reached. Pending retries are kept in memory and do not survive a restart. Use `X-DaaS-Delivery` to deduplicate. The signature covers the body only, not the timestamp header.
 
 Registration rules:
 
-- The URL must be `https`, carry no credentials and resolve only to public addresses (SSRF protection); outside `APP_ENV=dev` anything else answers `422 webhook_url_invalid` with a `reason_code` (`https_required`, `private_address`, `credentials_in_url`, `url_malformed`).
+- The URL must be `https`, carry no credentials and resolve only to public addresses (SSRF protection); a bad URL answers `422 webhook_url_invalid` with a `reason_code` (`https_required`, `private_address`, `credentials_in_url`, `url_malformed`). `APP_ENV=dev` relaxes **only the address range and the `https` requirement** (so an `http` loopback or a private address is accepted for local testing); `credentials_in_url` and `url_malformed` are rejected in every environment.
 - At most 10 webhooks per organization (`409 webhook_limit_reached`); the same URL twice answers `409 webhook_exists`.
 - The signing secret is derived from `DAAS_SECRET_KEY`; without that setting creation answers `503 webhooks_unavailable`.
 
@@ -277,6 +333,8 @@ Test call: `POST .../webhooks/{webhook_id}/ping` sends one signed `ping` event (
 ## Schedule and notifications
 
 "The Monday report" without manual clicks. One schedule per organization:
+
+> **`PUT` replaces the whole schedule — send the full object.** `PUT` is not a partial update: every field you omit is reset to its default. A `PUT` that carries only, say, `notify_webhook_kind` silently turns `reminder_enabled`, `auto_run_on_upload` and `notify_on_finish` back to `false` (answer `200`, no error) — the "Monday report" stops running. Always `GET` the schedule first, change the fields you need in the returned object, and `PUT` the whole thing back. The only exception is the chat webhook pair `notify_webhook_url`/`notify_webhook_kind`: these two stay as saved when omitted (the address is write-only and cannot be read back to resend), so omit them unless you are changing the chat webhook.
 
 ```bash
 curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/schedule"
@@ -361,6 +419,8 @@ curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/oauth/grants"
 
 Periods are calendar months in UTC (`YYYY-MM`); a limit of `null` means unlimited.
 
+`retention_days` (also in `data-health.summary`) is the organization's retention, set with `PATCH /api/v1/orgs/{org_id}` (scope `org:manage`); its range is **1–3650** (a value outside it answers `422 validation_error`, `loc: ["body", "retention_days"]`). It governs what the retention job deletes: uploads after their `retention_until` (fixed when the upload is stored) and the report files and DuckDB rows of runs older than `retention_days`. The run record and the report SHA-256 stay, so `POST .../verify` keeps working and `GET .../runs/{run_id}/report` answers `410 report_expired`. Backups are not touched. Defaults and the purge schedule: [`DEPLOY.md`](DEPLOY.md).
+
 | Plan | Runs per month | Uploaded bytes per month |
 |---|---|---|
 | `free` | 20 | 200 MiB |
@@ -411,7 +471,7 @@ curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/data-health?weeks=8"
 | `reminder_off` | `info` | the weekly export reminder is off | `/settings` |
 | `auto_run_off` | `info` | a job does not start automatically after an upload | `/settings` |
 
-The cockpit screen *Data health* (`/health`) turns the list into a verdict: any `error` = at risk (red), only `warning` = at risk (yellow), no file yet = no data, otherwise safe (green).
+The API response has **no `verdict` field**: it returns `issues` (and `summary`), and the caller derives the verdict from the highest `issues[].severity`. The cockpit screen *Data health* (`/health`) does exactly that: any `error` = at risk (red), only `warning` = at risk (yellow), no file yet = no data, otherwise safe (green).
 
 ## Audit log
 

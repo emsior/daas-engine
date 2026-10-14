@@ -72,7 +72,11 @@ docker compose up --build
 | API | `http://127.0.0.1:8000` (interactive docs at `/docs` only with `APP_ENV=dev`) |
 | n8n | `http://127.0.0.1:5678` |
 
-The DuckDB database and generated reports land in `./runtime/` (host volume). Import a workflow in n8n via **Workflows → Import from file**: `n8n/daas_workflow.json` (scheduled run) or `n8n/daas_client_report.json` (client file → report).
+The DuckDB database and generated reports land in `./runtime/` (host volume). Import a workflow in n8n via **Workflows → Import from file**:
+
+- `n8n/daas_workflow.json` — scheduled run (Monday 07:00) of both pipelines, formatting and an alert branch. The alert fires on a failed run, missing data, or a **week-over-week revenue drop of 15% or more, or a margin drop of 3 percentage points or more**.
+- `n8n/daas_client_report.json` — client file → report over a webhook (upload → run → link to the HTML report).
+- `n8n/pilot_workflow.json` — scheduled run with a `/health` gate, a Notion log entry and a Slack alert on failure; set the environment variables `NOTION_DAAS_DB_ID`, `SLACK_ALERT_CHANNEL` and `DAAS_APP_URL` for it.
 
 ## Quickstart — pip (no Docker)
 
@@ -80,10 +84,11 @@ The DuckDB database and generated reports land in `./runtime/` (host volume). Im
 python -m venv .venv && . .venv/bin/activate          # Windows: py -3.11 -m venv .venv; .\.venv\Scripts\Activate.ps1
 pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
 export DAAS_API_KEY="$(openssl rand -hex 24)"
-python -m app.main                                     # http://127.0.0.1:8000
+export APP_HOST=127.0.0.1 APP_PORT=8000                # change the listen address/port here (see .env.example)
+python -m app.main                                     # http://$APP_HOST:$APP_PORT
 ```
 
-The lockfiles install on Windows as well (the Linux-only `uvloop` is skipped by a platform marker). Windows without Docker or a shell setup: `URUCHOM_DAAS_PYTHON.ps1` (Python check, venv, tests, server, sample upload and report in the browser). If `Activate.ps1` is blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+`python -m app.main` binds to `APP_HOST:APP_PORT` (defaults `127.0.0.1:8000`); set those variables to change it. In `selfhost` a non-loopback `APP_HOST` requires `DAAS_API_KEY`. For a production self-host that does not run the test suite, install `requirements.lock` instead of `requirements-dev.lock` — it holds the runtime dependencies only, while `-dev` adds pytest, ruff and the other developer tools (needed for the Tests section below). The lockfiles install on Windows as well (the Linux-only `uvloop` is skipped by a platform marker). Windows without Docker or a shell setup: `URUCHOM_DAAS_PYTHON.ps1` (Python check, venv, tests, server, sample upload and report in the browser). If `Activate.ps1` is blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
 
 Cloud mode from source: `DAAS_MODE=cloud DAAS_SECRET_KEY=$(openssl rand -hex 32) python -m app.main`, then the cockpit with `cd web && npm ci && npm run build` and `npm run dev` (details: [`web/README.md`](web/README.md)).
 
@@ -107,13 +112,32 @@ curl -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
 curl -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/<run_id>/report?fmt=html" -o report.html
 ```
 
+A machine key for this flow needs the scopes `uploads:write runs:write runs:read reports:read` — `runs:read` is required even to only upload and run, because without it the caller cannot poll the job or list the run to get the `run_id`, so the report cannot be fetched. Full scope table: [`docs/API.md`](docs/API.md#scopes-and-roles).
+
 ### Every week without clicks
 
 In the cockpit, *Settings → Schedule and notifications* (or `PUT /api/v1/orgs/{org_id}/schedule`): a weekly e-mail reminder to export (for example Monday 8:00 Europe/Warsaw, skipped when the file already came in), an automatic run right after the upload and an e-mail with a link to the report when it is ready. A short message can also go to the team chat (Slack, Microsoft Teams or any JSON webhook) with the status, data period, report hash and the link. The messages carry no report content; the data stays in the cockpit. Details: [`docs/API.md`](docs/API.md#schedule-and-notifications).
 
 The *Data health* screen (or `GET /api/v1/orgs/{org_id}/data-health`) tells whether next Monday's report is safe: files, reports and failures week by week, the streak of weeks with a report and what to fix, each item linked to the right screen ([`docs/API.md`](docs/API.md#data-health)).
 
-Selfhost legacy routes (same engine, one organization): `POST /upload` → `POST /run` → `GET /reports/{pipeline}/latest`, each with `X-API-Key: $DAAS_API_KEY`.
+Selfhost legacy routes (same engine, one organization `default`), each with `X-API-Key: $DAAS_API_KEY`:
+
+```bash
+# 1. Upload a CSV or XLSX (returns the detected mapping and a ready-to-send run_payload)
+curl -s -H "X-API-Key: $DAAS_API_KEY" -F "file=@data/fixtures/client_export_pl.csv" -F "client_name=Demo Shop" localhost:8000/upload
+# {"rows":15,"confidence":1.0,"ready":true,"mapping":{"revenue":"Wartość brutto",...},
+#  "run_payload":{"pipeline":"ecommerce_demo","upload_id":"<32 hex>","client_name":"Demo Shop"}}
+
+# 2. Run (synchronous; the answer carries run_status, data_status and the report paths)
+curl -s -X POST localhost:8000/run -H "X-API-Key: $DAAS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"pipeline":"ecommerce_demo","upload_id":"<upload_id>","client_name":"Demo Shop"}'
+
+# 3. Fetch the report — latest for a pipeline, or a specific run by id (fmt: html | md | json)
+curl -s -H "X-API-Key: $DAAS_API_KEY" "localhost:8000/reports/ecommerce_demo/latest?fmt=html" -o report.html
+curl -s -H "X-API-Key: $DAAS_API_KEY" "localhost:8000/reports/run/<run_id>?fmt=html" -o report.html
+```
+
+`run_status` is `SUCCESS` / `PARTIAL` (0 records) / `FAILED` (still HTTP 200, detail in `error`); `data_status` is `LIVE_DATA` / `MOCK_DATA` / `BLOCKED_MISSING_SECRET`. A pipeline without a file (fixture fallback) runs with just `{"pipeline":"cs2_demo"}`. The column mapper detects separators, encodings (utf-8/cp1250), Polish and English headers and amounts such as `1 299,00 zł`; XLSX goes through the same path after conversion (limits: [`docs/pilot/INPUT_REQUIREMENTS_PL.md`](docs/pilot/INPUT_REQUIREMENTS_PL.md)).
 
 ![n8n workflow: webhook → POST /upload → validation → POST /run → response with a link to the report](docs/n8n_client_workflow.png)
 

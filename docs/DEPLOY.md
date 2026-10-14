@@ -21,6 +21,8 @@ docker compose exec api python -m app.cli create-org --name "Nazwa firmy" --owne
 ./smoke.sh --public https://raporty.example.com --wait 90 --expect-version 2.0.0
 ```
 
+`create-org` wypisuje (raz) `org_id` nowej organizacji oraz jej pierwszy, bootstrapowy `api_key` (prefiks + pełny klucz). Zanotuj je: tego klucza używasz do pierwszych wywołań `/api/v1` i `/mcp` albo do utworzenia kolejnych kluczy (`POST /api/v1/orgs/{org_id}/api-keys`); kolejne klucze tworzysz też w kokpicie. Właściciel i tak loguje się linkiem z e-maila — klucz jest do integracji maszynowych.
+
 Aktualizacja: `./backup.sh`, nowy tag w `DAAS_VERSION`, `docker compose build`, `docker compose --profile edge up -d`, `./smoke.sh`.
 Rollback: poprzedni `DAAS_VERSION` i `docker compose up -d` (obraz jest lokalnie); gdy nowa wersja zmigrowała bazę, dodatkowo `./restore.sh backups/<kopia>.tar.gz`.
 Szczegóły, wspólne proxy z drugą aplikacją i kopie zapasowe: [`deploy/README.md`](../deploy/README.md).
@@ -98,7 +100,8 @@ Kolumna „Tryb": `c` = istotne w `cloud`, `s` = w `selfhost`, `cs` = w obu.
 | `DAAS_RETENTION_INTERVAL_MIN` | `60` | co ile minut zadanie w tle kasuje dane po terminie (tylko `cloud`); `0` = wyłączone, 0-10080. Ręcznie: `python -m app.cli purge [--dry-run] [--org ID]`. Kopii zapasowych nie dotyczy |
 | `DAAS_SCHEDULER_ENABLED` | `true` | pętla harmonogramu (cotygodniowe przypomnienia o eksporcie) w procesie API; tylko `cloud`. `false` wyłącza wysyłkę przypomnień w tym wdrożeniu (auto-uruchamianie po uploadzie i e-mail po runie działają dalej, jeśli organizacja je włączyła) |
 | `DAAS_SCHEDULER_TICK_SEC` | `60` | co ile sekund pętla sprawdza terminy przypomnień (5-3600). Pętla działa w jednym procesie roboczym, jak reszta 2.0; zaległe przypomnienie po restarcie wychodzi raz |
-| `DAAS_WEBHOOK_BACKOFF_SEC` | `1,5,25` | pauzy między ponowieniami dostawy webhooka (sekundy, po jednej próbie początkowej) |
+| `DAAS_WEBHOOK_BACKOFF_SEC` | `1,5,25` | pauzy między ponowieniami dostawy webhooka (sekundy, po jednej próbie początkowej). Prób jest najwyżej 3, więc używane są tylko dwie pierwsze pauzy (`1` i `5`); trzecia (`25`) nigdy nie działa |
+| `DAAS_NOTIFY_WEBHOOK_TIMEOUT_SEC` | `10` | limit czasu (s, 1-60) jednej wiadomości na czat zespołu po runie (Slack / Teams / JSON; adres ustawia organizacja w harmonogramie). Jedna próba, bez ponowień |
 | `DAAS_SSE_HEARTBEAT_SEC` | `15` | odstęp komentarza `: heartbeat` w strumieniu SSE |
 | `DAAS_SSE_MAX_PER_PRINCIPAL` | `5` | otwarte strumienie SSE na klucz lub sesję (1-100); powyżej: `429 sse_limit` |
 | `DAAS_SSE_MAX_TOTAL` | `100` | otwarte strumienie SSE w całym procesie (1-10000) |
@@ -106,6 +109,7 @@ Kolumna „Tryb": `c` = istotne w `cloud`, `s` = w `selfhost`, `cs` = w obu.
 | `DAAS_MCP_ENABLED` | `true` | serwer MCP dla agentów AI pod `POST /mcp` ([`MCP.md`](MCP.md)); `false` = trasy nie ma (`404`) |
 | `DAAS_MCP_MAX_BODY_BYTES` | `3145728` | limit ciała żądania `/mcp` (3 MiB); większe: `413` (Caddy przepuszcza do 4 MiB) |
 | `DAAS_MCP_MAX_UPLOAD_BYTES` | `2097152` | limit treści CSV narzędzia `upload_csv` (2 MiB); mniejszy niż limit ciała |
+| `DAAS_RATE_LIMIT_MCP_PER_MIN` | `240` | żądania `/mcp` na minutę per klucz API (dowolna metoda JSON-RPC, po uwierzytelnieniu); powyżej `429` z `Retry-After`; `0` = bez limitu. Limit per adres IP (`DAAS_RATE_LIMIT_IP_PER_MIN`) obowiązuje niezależnie |
 | `DAAS_OAUTH_ENABLED` | `true` | (tylko `cloud`) serwer autoryzacji OAuth 2.1 dla konektorów MCP (ChatGPT, Claude): `/authorize`, `/token`, `/register`, `/revoke`, `/.well-known/oauth-*` ([`MCP.md`](MCP.md#connect-from-chatgpt--claude-oauth)); `false` = tych tras nie ma (`404`), klucze API działają dalej |
 | `DAAS_OAUTH_ISSUER_URL` | `DAAS_COCKPIT_ORIGIN` | publiczny origin wdrożenia (issuer), np. `https://raporty.example.com`, bez ścieżki; `https` (http tylko dla `localhost`). Bez niego i bez `DAAS_COCKPIT_ORIGIN` OAuth jest wyłączony (ostrzeżenie w dzienniku). Kokpit i API muszą być pod tym originem: Caddy kieruje trasy OAuth do API |
 | `DAAS_OAUTH_ACCESS_TOKEN_TTL_SEC` | `3600` | ważność tokenu dostępu konektora (60-86400 s) |

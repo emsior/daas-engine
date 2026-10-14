@@ -223,7 +223,8 @@ class JobExecutor:
 
         runner = await self.registry.aget(org_id, llm_narrative=effective_llm(self.settings, org))
         request = RunRequest(pipeline=job.pipeline, force_mock=job.force_mock, client_name=job.client_name,
-                             source_path=source_path, period_from=job.period_from, period_to=job.period_to)
+                             source_path=source_path, period_from=job.period_from, period_to=job.period_to,
+                             language=org.locale)
         loop = asyncio.get_running_loop()
 
         def on_progress(percent: int, message: str) -> None:  # wolane z watku runu
