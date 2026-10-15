@@ -238,6 +238,59 @@ def invitations(settings: Settings, org_id: str) -> list[models.Invitation]:
     return get_rows(settings, models.Invitation, models.Invitation.org_id == org_id)
 
 
+@pytest.mark.parametrize("role", ["admin", "member"])
+def test_a_key_cannot_invite_a_role_whose_scopes_exceed_its_own(cloud_client, cloud_settings, org, role):
+    _, narrow = seed_key(cloud_settings, org.org_id, scopes=[sc.MEMBERS_MANAGE])
+    hdr = key_headers(narrow)
+    email = "test-invitee@example.test"
+    r = invite(cloud_client, org.org_id, email, hdr, role=role)
+    assert r.status_code == 403 and r.json()["code"] == "forbidden"
+    assert email not in r.json()["detail"] and role not in r.json()["detail"]
+    assert not invitations(cloud_settings, org.org_id)
+    listed = cloud_client.get(f"{API}/orgs/{org.org_id}/invitations", headers=hdr)
+    assert listed.status_code == 200 and listed.json() == []
+    assert not audit(cloud_settings, "member.invited")
+
+
+def test_a_key_with_the_role_scopes_can_invite_that_role(cloud_client, cloud_settings, org):
+    _, limited = seed_key(cloud_settings, org.org_id, scopes=sorted(sc.ROLE_SCOPES["member"] | {sc.MEMBERS_MANAGE}))
+    hdr = key_headers(limited)
+    email = "test-member@example.test"
+    assert invite(cloud_client, org.org_id, email, hdr, role="member").status_code == 202
+    r = invite(cloud_client, org.org_id, email, hdr, role="admin")
+    assert r.status_code == 403 and r.json()["code"] == "forbidden"
+    (pending,) = invitations(cloud_settings, org.org_id)
+    assert pending.email == email and pending.role == "member"
+    assert len(audit(cloud_settings, "member.invited")) == 1
+
+
+@pytest.mark.parametrize("full_scopes", [False, True], ids=["narrow-key", "full-admin-key"])
+def test_narrow_key_escalation_path_is_closed(cloud_client, cloud_settings, org, full_scopes):
+    scopes = sorted(sc.ROLE_SCOPES["admin"]) if full_scopes else [sc.MEMBERS_MANAGE, sc.KEYS_MANAGE]
+    _, raw = seed_key(cloud_settings, org.org_id, scopes=scopes)
+    email = "test-login@example.test"
+    role = "member" if full_scopes else "admin"
+    r = invite(cloud_client, org.org_id, email, key_headers(raw), role=role)
+    assert r.status_code == (202 if full_scopes else 403)
+    if not full_scopes:
+        assert r.json()["code"] == "forbidden"
+
+    body = login_via_magic_link(cloud_client, cloud_settings, email)
+    (user,) = get_rows(cloud_settings, models.User, models.User.email == email)
+    if full_scopes:
+        assert next(o for o in body["orgs"] if o["org_id"] == org.org_id)["role"] == "member"
+        assert memberships(cloud_settings, org.org_id)[user.id] == "member"
+        # Acceptance audit: test_orgs_v1.test_accepting_invitation_via_login_emits_member_added.
+        # A member cannot create any key, including reports:read + keys:manage:
+        # test_orgs_v1.test_key_management_by_role[member-403]; key scope escalation:
+        # test_orgs_v1.test_scope_escalation_is_refused.
+    else:
+        assert org.org_id not in [o["org_id"] for o in body["orgs"]]
+        assert user.id not in memberships(cloud_settings, org.org_id)
+        denied = cloud_client.get(f"{API}/orgs/{org.org_id}/members")
+        assert denied.status_code == 403 and denied.json()["code"] == "forbidden"
+
+
 def test_pending_invitations_can_be_listed_and_revoked(cloud_client, cloud_settings, org):
     hdr = key_headers(org.api_key)
     assert invite(cloud_client, org.org_id, "n@example.test", hdr).status_code == 202

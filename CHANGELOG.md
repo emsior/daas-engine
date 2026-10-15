@@ -10,6 +10,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Changed
 
+- Invitations can grant only a role whose scopes the caller holds; an API key with only `members:manage`
+  cannot invite anyone, including a `member`.
 - All routes except `GET /health` and `GET /ready` require the `X-API-Key` header. Without a configured key the
   protected routes answer `401`, and the server refuses to start on a non-loopback address.
 - The default listen address is `127.0.0.1`; the container image sets `0.0.0.0` explicitly and Compose publishes ports on loopback only.

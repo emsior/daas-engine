@@ -46,6 +46,8 @@ def _check_role_grant(ctx: OrgContext, role: str) -> None:
     """Nadawanie roli `owner` tylko przez wlasciciela (sesja); klucze API i admini nie eskaluja uprawnien."""
     if role == "owner" and ctx.role != "owner":
         raise ProblemError(403, "forbidden", "only an owner can grant the owner role")
+    if not sc.ROLE_SCOPES[role] <= ctx.scopes:
+        raise ProblemError(403, "forbidden", "the invited role would exceed the caller's scopes")
 
 
 @router.get("/orgs/{org_id}/members", response_model=list[MemberOut], summary="List members")
