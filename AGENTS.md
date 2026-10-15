@@ -104,4 +104,4 @@ Codex CLI jest tu **wykonawcą domyślnym** (`codex exec` ze spec-pliku); zmiany
    RELEASED_BY: codex. ACCEPTED_BY: —
    === KONIEC ===
    ```
-10. Ćwiczenia `TODO(michal)` zostawiasz właścicielowi. Pliki z polskimi znakami w UTF-8. W repozytorium z remote — zero lokalnych ścieżek dysku.
+10. Ćwiczenia właściciela (znaczniki `TODO` z jego imieniem) zostawiasz właścicielowi. Pliki z polskimi znakami w UTF-8. W repozytorium z remote — zero lokalnych ścieżek dysku.
