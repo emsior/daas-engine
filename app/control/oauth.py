@@ -234,6 +234,7 @@ async def revoke_oauth_grant(db: AsyncSession, grant_id: str, reason: str, *,
 
 async def purge_expired(db: AsyncSession, now: datetime | None = None) -> tuple[int, int, int, int]:
     """AT: 30 dni od wygasniecia. Historia RT zostaje do konca retencji calego grantu.
+    Tokeny sprzed migracji grantow maja wlasny okres retencji po cofnieciu lub wygasnieciu.
     Zwraca `(kody, tokeny, granty, klienci)`; commit robi wolajacy."""
     now = now or utcnow()
     cutoff = now - TOKEN_RETENTION
@@ -245,6 +246,8 @@ async def purge_expired(db: AsyncSession, now: datetime | None = None) -> tuple[
     tokens = await db.execute(delete(OAuthToken).where(or_(
         and_(OAuthToken.kind == "access", OAuthToken.expires_at < cutoff),
         and_(OAuthToken.kind == "refresh", OAuthToken.grant_id.in_(old_grants)),
+        and_(OAuthToken.grant_id.is_(None), or_(OAuthToken.revoked_at <= cutoff,
+             and_(OAuthToken.kind == "refresh", OAuthToken.expires_at <= cutoff))),
     )).execution_options(synchronize_session=False))
     grants = await db.execute(delete(OAuthGrant).where(
         ~exists().where(OAuthToken.grant_id == OAuthGrant.id)).execution_options(synchronize_session=False))

@@ -16,7 +16,13 @@ from sqlalchemy import delete, text
 
 from app.control import models
 from app.control import scopes as sc
-from app.control.oauth import ACCESS_PREFIX, REFRESH_PREFIX, REGISTER_PER_MIN, purge_expired
+from app.control.oauth import (
+    ACCESS_PREFIX,
+    REFRESH_PREFIX,
+    REGISTER_PER_MIN,
+    TOKEN_RETENTION,
+    purge_expired,
+)
 from app.control.security import sha256_hex
 from app.control.types import utcnow
 from app.core.config import Settings
@@ -982,6 +988,55 @@ def test_migration_0006_revokes_legacy_tokens(tmp_path):
             await engine.dispose()
 
     run(check_inactive())
+
+
+@pytest.mark.parametrize("retention_reason", ["expired", "revoked"])
+def test_purge_removes_legacy_tokens_after_migration_retention(tmp_path, retention_reason):
+    from app.control.db import upgrade_sync
+    from app.control.ids import new_ulid
+
+    settings = Settings(_env_file=None, daas_control_db_url=f"sqlite+aiosqlite:///{tmp_path / 'legacy-purge.db'}",
+                        daas_cockpit_origin=ISSUER)
+    upgrade_sync(settings, "0005")
+    org = seed_org(settings)
+    now = utcnow()
+    created_at = now - timedelta(days=2)
+    expires_at = now - timedelta(days=1) if retention_reason == "expired" else now + timedelta(days=60)
+    refresh_id, access_id = new_ulid(), new_ulid()
+
+    async def seed_legacy(db):
+        db.add(models.OAuthClient(client_id="TEST-legacy-client", info={}, created_at=created_at))
+        await db.flush()
+        # Seed an AT/RT pair using only columns present before the grant migration.
+        statement = text("INSERT INTO oauth_tokens "
+                         "(id, kind, token_hash, client_id, org_id, user_id, scopes, resource, parent_id, "
+                         "created_at, expires_at) VALUES "
+                         "(:id, :kind, :token_hash, 'TEST-legacy-client', :org_id, :user_id, '[]', :resource, "
+                         ":parent_id, :created_at, :expires_at)")
+        for row_id, kind, parent_id in ((refresh_id, "refresh", None), (access_id, "access", refresh_id)):
+            await db.execute(statement, {"id": row_id, "kind": kind, "token_hash": sha256_hex(f"TEST-{kind}"),
+                                         "org_id": org.org_id, "user_id": org.user_id, "resource": RESOURCE,
+                                         "parent_id": parent_id, "created_at": created_at, "expires_at": expires_at})
+
+    with_db(settings, seed_legacy)
+    upgrade_sync(settings, "0006")
+    migrated = tokens(settings)
+    assert len(migrated) == 2 and all(row.grant_id is None and row.revoked_at is not None for row in migrated)
+    retained_from = expires_at if retention_reason == "expired" else max(row.revoked_at for row in migrated)
+    purge_at = retained_from + TOKEN_RETENTION - timedelta(microseconds=1)
+
+    async def purge(db):
+        return await purge_expired(db, purge_at)
+
+    assert with_db(settings, purge) == (0, 0, 0, 0)
+    assert {row.id for row in tokens(settings)} == {refresh_id, access_id}
+    assert len(get_rows(settings, models.OAuthClient)) == 1
+
+    purge_at += timedelta(microseconds=2)
+    assert with_db(settings, purge) == (0, 2, 0, 1)
+    assert tokens(settings) == [] and get_rows(settings, models.OAuthClient) == []
+    assert get_rows(settings, models.OAuthGrant) == []
+    assert with_db(settings, purge) == (0, 0, 0, 0)
 
 
 # ================================================================ caly przeplyw w jednym scenariuszu

@@ -113,7 +113,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - OAuth refresh and revocation share a database grant lock, so disconnecting also revokes a pair issued
   by a concurrent refresh (P1-2).
 - Reusing a rotated refresh token revokes the entire grant and all its access and refresh tokens,
-  including when the presented token has expired; rotation history is retained with the grant (P1-3).
+  including when the presented token has expired; rotation history is retained with the grant,
+  while legacy tokens without a grant are purged after retention so unused clients can be removed (P1-3).
 
 ### Fixed
 
