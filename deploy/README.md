@@ -10,6 +10,8 @@ Zestaw w tym katalogu uruchamia tryb `cloud` (wiele organizacji, kokpit www, klu
 | `backup.sh`, `restore.sh` | kopia (tar + SHA-256 + retencja) i odtworzenie danych |
 | `smoke.sh` | test dymny po wdrożeniu |
 
+Pilot na jednym VPS (przygotowanie hosta, DNS i poczta, kopie poza serwerem, monitoring, incydent, zakończenie): [`RUNBOOK.md`](RUNBOOK.md).
+
 ```
 internet ──443──► caddy ──/api/*──► api :8000 ──► wolumeny: control (control.db), runtime (organizacje)
                     └──── reszta ──► web :3000

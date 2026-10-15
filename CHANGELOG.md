@@ -140,6 +140,7 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - **CI.** New jobs `web` (API schema drift, eslint, tsc, vitest, `next build`, `npm audit` of production dependencies), `e2e` (Playwright against the API in cloud mode with the console mail adapter) and `lighthouse` (mobile; `/login` and `/dpa`; performance >= 0.9, accessibility >= 0.95, best practices >= 0.9); `pip-audit` in `security`; Python 3.13 in the test matrix; web image build and cloud-mode container smoke (read-only file system, all capabilities dropped) in `docker`, plus validation of `compose.yml`, the LLM overlay and the Caddyfile; Dependabot for `npm` and `docker` in `web/`; the OPSEC grep also rejects the owner handle and the old brand string.
 - **Deploy hardening.** `compose.yml` passes the `api` container an explicit list of variables instead of `env_file` (selfhost source keys and `ANTHROPIC_API_KEY` do not reach it; the LLM summary is switched on only by the `compose.llm.yml` overlay); `read_only` file systems with `tmpfs` for `api` and `web`; Caddy with `cap_drop: ALL` + `NET_BIND_SERVICE`; the Caddy log (access and error) drops `Referer` and masks the `?token=` of sign-in links; `DAAS_FORWARDED_ALLOW_IPS` for shared proxies; `gen-env.sh` sets `DAAS_ALLOW_CONSOLE_MAIL=true` next to the console adapter.
 - **Documentation.** `docs/API.md`, `docs/DEPLOY.md`, `docs/SECURITY.md`, `docs/DPA_v1_PL.md` (draft awaiting legal review), rewritten `docs/ARCHITECTURE.md`, pilot materials aligned with 2.0, READMEs for both modes.
+- **Pilot runbook.** `deploy/RUNBOOK.md` (Polish) for a single-VPS pilot: host preparation, DNS and mail (SPF, DKIM, DMARC), first deployment, encrypted off-server backups with a heartbeat, a monthly restore test on a separate machine with outbound container traffic blocked, monitoring, update and rollback, incident handling, and offboarding with data deletion. Placeholders only: provider choices, costs and pilot data stay outside the repository.
 
 ### Fixes after the security re-audit
 
@@ -150,6 +151,7 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - **Client address.** `deploy/Caddyfile` overwrites `X-Forwarded-For` explicitly (`header_up X-Forwarded-For {remote_host}`); verified on Caddy 2.10.2 that a forged header does not reach the API. `docs/SECURITY.md` explains when `FORWARDED_ALLOW_IPS=*` is safe.
 - **API schema.** Unused `UsageOut`, `UsageRow`, `WebhookPing` and `WebhookPingResult` removed from the OpenAPI document (the ping answer is `WebhookPingOut`).
 - **OPSEC.** Remaining owner name and statute references removed from the repository; the CI guard rejects more patterns (round 3 and `d0b1bb2`).
+- **Gitleaks.** 8 synthetic test values in the history of `tests/` are excluded by their fingerprints in `.gitleaksignore` (owner decision of 2026-10-13; no path or regex allowlist, so any new finding still fails CI). The fingerprints depend on commit hashes: merge the PR with a merge commit, not squash or rebase. The `security` job now gets past gitleaks and runs semgrep, zizmor and pip-audit again.
 
 ### Fixes after the stranger test
 
@@ -172,6 +174,7 @@ An independent "outsider" test (13 agents installing and using the product from 
 - `selfhost` mode uses a single instance key and has no roles; roles exist in `cloud` mode.
 - Cloud mode runs on one node with a SQLite control database; there is no failover. The `console` mail adapter is for trials only: in `cloud` with `APP_ENV=prod` the server refuses to start with it unless `DAAS_ALLOW_CONSOLE_MAIL=true`.
 - No passkeys, SSO, online payments or external timestamps.
+- Deleting an organization removes its control-plane records and data directory but keeps the accounts of its users (e-mail address, optional name) in the control database; there is no command to delete a user yet. A failed sign-in e-mail shows only in the `api` log (`magic link e-mail failed`), because the endpoint answers `202` either way. SMTP uses STARTTLS (port 587); implicit TLS (port 465) is not supported.
 
 ## [1.0.0] — 2026-09-28
 
