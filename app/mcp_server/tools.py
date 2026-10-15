@@ -391,7 +391,11 @@ async def upload_xlsx(ctx: Context,
         raise ToolFailure("validation_error", f"pipeline_hint: {pipeline_hint} does not read XLSX uploads")
     try:
         # bialy znak (np. zawijanie linii co 76 znakow) jest pomijany; kazdy inny znak spoza alfabetu = blad
-        data = base64.b64decode("".join(content_base64.split()), validate=True)
+        encoded = "".join(content_base64.split())
+        unpadded = encoded.rstrip("=")
+        if len(encoded) % 4 or len(encoded) - len(unpadded) > 2 or "=" in unpadded:
+            raise ValueError
+        data = base64.b64decode(encoded, validate=True)
     except ValueError:  # binascii.Error (zly alfabet, dopelnienie) i znaki spoza ASCII
         raise ToolFailure("validation_error", "content_base64: not valid base64") from None
     if not data:

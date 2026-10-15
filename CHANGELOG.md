@@ -91,7 +91,7 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   `422 period_not_supported`. The job (`JobOut`, MCP `get_job`) keeps the requested period, `job.created` audits it and
   MCP reuses a pending job only for the same upload, pipeline and period. New MCP tool `upload_xlsx` (13 tools): an
   XLSX workbook as base64 through the same checks as the REST upload, `DAAS_MCP_MAX_UPLOAD_BYTES` counted on the
-  decoded file.
+  decoded file, with explicit base64 padding validation on every supported Python version.
 - **MCP resources and prompts:** four resource templates (`daas://runs/{run_id}/report.md`, `.../report.json`,
   `.../evidence.json`, `daas://uploads/{upload_id}/summary.json`) with the same content and SHA-256 as
   `get_report` / `get_evidence`, `resources/list` with the 20 newest reports of the key's organization, and three

@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -114,6 +116,27 @@ def test_invalid_base64_is_a_validation_error_without_an_upload(cloud_client, cl
     assert text_of(result) == "validation_error: content_base64: not valid base64"
     assert get_rows(cloud_settings, models.Upload) == []
     assert events(cloud_settings, org.org_id, "auth_denied") == []  # odrzucone przed sciezka uploadu
+
+
+@pytest.mark.asyncio
+async def test_excess_base64_padding_is_rejected_with_a_permissive_decoder(monkeypatch):
+    call = SimpleNamespace(state=SimpleNamespace(settings=SimpleNamespace(daas_mcp_max_upload_bytes=3)))
+    monkeypatch.setattr(mcp_tools, "call_of", lambda ctx: call)
+
+    def permissive_decode(content, *, validate):
+        assert content == "QUJD=" and validate is True
+        return b"ABC"  # Older Python versions accept this excess padding even with validate=True.
+
+    monkeypatch.setattr(mcp_tools.base64, "b64decode", permissive_decode)
+    ingest = AsyncMock()
+    monkeypatch.setattr(mcp_tools, "_ingest", ingest)
+
+    with pytest.raises(mcp_tools.ToolFailure) as exc:
+        await mcp_tools.upload_xlsx(None, "a.xlsx", "QUJD=")
+
+    assert exc.value.code == "validation_error"
+    assert exc.value.message == "content_base64: not valid base64"
+    ingest.assert_not_awaited()
 
 
 def test_whitespace_only_content_is_an_empty_file(cloud_client, cloud_settings, org):
