@@ -10,6 +10,8 @@ Zestaw w tym katalogu uruchamia tryb `cloud` (wiele organizacji, kokpit www, klu
 | `backup.sh`, `restore.sh` | kopia (tar + SHA-256 + retencja) i odtworzenie danych |
 | `smoke.sh` | test dymny po wdrożeniu |
 
+Opcje `smoke.sh --expect-mcp on|off|auto` i `--expect-oauth on|off|auto` określają oczekiwany stan funkcji przez proxy; domyślne `auto` porównuje odpowiedzi z bezpośrednim API wskazanym przez `--api`, a 404 bez dowodu wyłączenia funkcji oznacza `FAIL`.
+
 Pilot na jednym VPS (przygotowanie hosta, DNS i poczta, kopie poza serwerem, monitoring, incydent, zakończenie): [`RUNBOOK.md`](RUNBOOK.md).
 
 ```

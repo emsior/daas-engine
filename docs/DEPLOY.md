@@ -21,6 +21,8 @@ docker compose exec api python -m app.cli create-org --name "Nazwa firmy" --owne
 ./smoke.sh --public https://raporty.example.com --wait 90 --expect-version 2.0.0
 ```
 
+Opcje `smoke.sh --expect-mcp on|off|auto` i `--expect-oauth on|off|auto` określają oczekiwany stan funkcji przez proxy; domyślne `auto` porównuje odpowiedzi z bezpośrednim API wskazanym przez `--api`, a 404 bez dowodu wyłączenia funkcji oznacza `FAIL`.
+
 `create-org` wypisuje (raz) `org_id` nowej organizacji oraz jej pierwszy, bootstrapowy `api_key` (prefiks + pełny klucz). Zanotuj je: tego klucza używasz do pierwszych wywołań `/api/v1` i `/mcp` albo do utworzenia kolejnych kluczy (`POST /api/v1/orgs/{org_id}/api-keys`); kolejne klucze tworzysz też w kokpicie. Właściciel i tak loguje się linkiem z e-maila — klucz jest do integracji maszynowych.
 
 Aktualizacja: `./backup.sh`, nowy tag w `DAAS_VERSION`, `docker compose build`, `docker compose --profile edge up -d`, `./smoke.sh`.

@@ -6,6 +6,7 @@
 #
 # Opcje: --api URL, --web URL, --public URL (dodatkowo przez proxy: TLS, nagłówki, ukryte /metrics, metadane OAuth, /mcp bez klucza),
 #        --wait SEKUNDY (czeka na gotowosc API), --expect-version X.Y.Z (porownuje z /health).
+#        --expect-mcp on|off|auto, --expect-oauth on|off|auto (domyslnie auto: porownanie proxy z --api).
 # Kod wyjscia: 0 = wszystko dziala, 1 = co najmniej jedna kontrola nie przeszla.
 set -uo pipefail
 
@@ -14,6 +15,8 @@ web="http://127.0.0.1:3000"
 public=""
 wait_sec=0
 expect_version=""
+expect_mcp="auto"
+expect_oauth="auto"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -22,8 +25,16 @@ while [ "$#" -gt 0 ]; do
     --public) public="${2:?}"; shift 2 ;;
     --wait) wait_sec="${2:?}"; shift 2 ;;
     --expect-version) expect_version="${2:?}"; shift 2 ;;
+    --expect-mcp | --expect-oauth)
+      case "${2:-}" in
+        on | off | auto) ;;
+        *) echo "Bledna wartosc $1: oczekiwano on|off|auto." >&2; exit 2 ;;
+      esac
+      if [ "$1" = "--expect-mcp" ]; then expect_mcp="$2"; else expect_oauth="$2"; fi
+      shift 2
+      ;;
     -h | --help)
-      sed -n '2,9p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+      sed -n '2,10p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -100,29 +111,54 @@ if [ -n "$public" ]; then
     fail=1
   fi
 
-  # Flagowe funkcje 2.0 przez proxy. Domyslnie wlaczone (DAAS_MCP_ENABLED/DAAS_OAUTH_ENABLED = true);
-  # swiadomie wylaczone => trasa daje 404 (tez ok). Zle trasowanie na kokpit (307 do /login albo HTML kokpitu)
-  # jest tu FAIL — po to ta kontrola (bez niej zle trasowanie /mcp/OAuth przechodzi smoke).
-  oauth_url="$public/.well-known/oauth-authorization-server"
-  oauth_code="$(curl -sS -o "$tmp/body" -w '%{http_code}' --max-time 15 "$oauth_url" 2>/dev/null || true)"
-  if [ "$oauth_code" = "200" ] && grep -q '"issuer"' "$tmp/body"; then
-    echo "ok    proxy metadane OAuth ($oauth_code)"
-  elif [ "$oauth_code" = "404" ]; then
-    echo "ok    proxy metadane OAuth (404 — OAuth wylaczony)"
-  else
-    echo "FAIL  proxy metadane OAuth: $oauth_url -> HTTP ${oauth_code:-brak} (oczekiwano 200 z \"issuer\", albo 404 gdy OAuth wylaczony; 307/HTML = zle trasowanie na kokpit)"
-    fail=1
-  fi
+  # Flagowe funkcje 2.0: samo 404 nie dowodzi wylaczenia funkcji.
+  # auto wymaga zgodnosci z bezposrednim API; on/off to jawne oczekiwanie operatora.
+  check_feature() {
+    local name="$1" path="$2" mode="$3" enabled="$4" option="$5" pattern="${6:-}"
+    local proxy_code api_code want="$enabled" detail
+    local -a request=()
+    if [ "$path" = "/mcp" ]; then
+      request=(-X POST -H 'content-type: application/json' --data '{}')
+    fi
+    proxy_code="$(curl -sS -o "$tmp/body" -w '%{http_code}' --max-time 15 "${request[@]}" "$public$path" 2>/dev/null)" || proxy_code="000"
+    detail="proxy=$proxy_code"
+    if [ "$mode" = "auto" ]; then
+      api_code="$(curl -sS -o "$tmp/api-body" -w '%{http_code}' --max-time 15 "${request[@]}" "${api%/}$path" 2>/dev/null)" || api_code="000"
+      detail="$detail, API=$api_code"
+      if { [ "$api_code" != "$enabled" ] && [ "$api_code" != "404" ]; } ||
+         { [ "$api_code" = "$enabled" ] && [ -n "$pattern" ] && ! grep -q "$pattern" "$tmp/api-body"; }; then
+        echo "FAIL  $name ($detail): brak dowodu oczekiwanego stanu: podaj $option on|off (API: ${api%/}$path)"
+        fail=1
+        return
+      fi
+      want="$api_code"
+    elif [ "$mode" = "off" ]; then
+      want="404"
+    fi
 
-  mcp_code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 -X POST -H 'content-type: application/json' --data '{}' "$public/mcp" 2>/dev/null || true)"
-  if [ "$mcp_code" = "401" ]; then
-    echo "ok    proxy /mcp bez klucza ($mcp_code)"
-  elif [ "$mcp_code" = "404" ]; then
-    echo "ok    proxy /mcp bez klucza (404 — MCP wylaczony)"
-  else
-    echo "FAIL  proxy /mcp bez klucza: $public/mcp -> HTTP ${mcp_code:-brak} (oczekiwano 401, albo 404 gdy MCP wylaczony; 307/inne = zle trasowanie na kokpit)"
-    fail=1
-  fi
+    if [ "$proxy_code" != "$want" ]; then
+      if [ "$want" = "404" ] && [ "$proxy_code" = "$enabled" ]; then
+        echo "FAIL  $name ($detail): funkcja wlaczona, choc miala byc wylaczona"
+      else
+        echo "FAIL  $name ($detail): $public$path (oczekiwano $want)"
+      fi
+      fail=1
+      return
+    fi
+    if [ "$want" = "$enabled" ] && [ -n "$pattern" ] && ! grep -q "$pattern" "$tmp/body"; then
+      echo "FAIL  $name ($detail): brak $pattern w odpowiedzi proxy"
+      fail=1
+      return
+    fi
+    if [ "$want" = "404" ]; then
+      echo "ok    $name ($detail; funkcja wylaczona, dowod: $mode)"
+    else
+      echo "ok    $name ($detail)"
+    fi
+  }
+
+  check_feature "proxy metadane OAuth" "/.well-known/oauth-authorization-server" "$expect_oauth" 200 --expect-oauth '"issuer"'
+  check_feature "proxy /mcp bez klucza" "/mcp" "$expect_mcp" 401 --expect-mcp
 fi
 
 if [ "$fail" = "0" ]; then

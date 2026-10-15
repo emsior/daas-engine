@@ -115,6 +115,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Fixed
 
+- Deployment smoke checks require explicit feature expectations or matching direct API responses before
+  treating a proxy 404 for MCP or OAuth metadata as a disabled feature (P1-7).
 - API v1 OpenAPI errors use the shared `Problem` schema and `application/problem+json`, including
   validation `errors[]`, matching the actual responses (P1-6).
 - Cockpit CORS allows credentialed `PUT` preflights for schedule updates (P2-10).
