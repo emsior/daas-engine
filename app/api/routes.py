@@ -15,7 +15,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from pydantic import ValidationError
 from sqlalchemy import text
 
@@ -150,7 +150,44 @@ async def _read_run_request(request: Request) -> RunRequest | JSONResponse:
              for e in exc.errors()])
 
 
-@router.post("/run", response_model=RunResultWithHash, tags=["pipelines"], dependencies=[Depends(limit_run)])
+@router.post(
+    "/run", response_model=RunResultWithHash, tags=["pipelines"], dependencies=[Depends(limit_run)],
+    openapi_extra={
+        "requestBody": {
+            "required": True,
+            "content": {"application/json": {"schema": RunRequest.model_json_schema()}},
+        },
+        "responses": {
+            "422": {
+                "description": "Request body validation failed; submitted values are never echoed.",
+                "content": {
+                    "application/json": {
+                        "schema": {
+                            "type": "object",
+                            "required": ["detail", "code", "request_id"],
+                            "properties": {
+                                "detail": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "required": ["loc", "msg", "type"],
+                                        "properties": {
+                                            "loc": {"type": "array", "items": {"type": "string"}},
+                                            "msg": {"type": "string"},
+                                            "type": {"type": "string"},
+                                        },
+                                    },
+                                },
+                                "code": {"type": "string", "const": "validation_error"},
+                                "request_id": {"type": "string"},
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    },
+)
 async def run(request: Request):
     body = await _read_run_request(request)
     if isinstance(body, JSONResponse):   # walidacja ciala nie przeszla -> 422 bez echa
@@ -409,4 +446,5 @@ def _serve_report(path: Path, fmt: str):
     if fmt == "html":
         return HTMLResponse(body, headers=headers)
     media = "application/json" if fmt == "json" else "text/markdown; charset=utf-8"
-    return FileResponse(path, media_type=media, filename=path.name, headers=headers)
+    headers["Content-Disposition"] = f'attachment; filename="{path.name}"'
+    return Response(content=body, media_type=media, headers=headers)

@@ -113,6 +113,10 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Fixed
 
+- Selfhost Markdown and JSON reports are served from the bytes used to compute `X-Report-SHA256`,
+  even if the report file is replaced before the response is sent (P1-4).
+- Selfhost OpenAPI describes the required `POST /run` JSON body and the existing redacted legacy
+  validation response (`detail`, `code`, `request_id`) with status `422` (P2-8).
 - OAuth `/token` and `/revoke` accept credentials supplied only through `client_secret_basic`, including
   form-encoded credentials, and reject conflicting client identities in the form (P2-9).
 

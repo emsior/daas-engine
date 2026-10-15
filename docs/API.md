@@ -178,6 +178,8 @@ Legacy routes exist only in `DAAS_MODE=selfhost` (organization `default`, key fr
 | GET | `/reports/run/{run_id}?fmt=html\|md\|json` | the report of one run by id (the value `report_html_path` from `POST /run` points here) |
 | GET | `/stats` | row counts |
 
+For every format returned by the legacy `GET /reports/...` routes, `X-Report-SHA256` is the SHA-256 digest of the exact bytes sent in the response body.
+
 **In `selfhost` the `/api/v1` routes also work**, for the single organization `org_id` = `default`, authenticated with `DAAS_API_KEY` (`X-API-Key` or `Authorization: Bearer`). Use them for anything the legacy routes do not cover — in particular uploading a collector package (`.json`), which the legacy `POST /upload` rejects (`415`, CSV and XLSX only); see [Status of collector artifacts](#status-of-collector-artifacts-uksc_evidence-end-to-end).
 
 ## Pipelines
