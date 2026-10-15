@@ -10,6 +10,7 @@ from http import HTTPStatus
 from typing import Any
 
 from fastapi import HTTPException
+from pydantic import BaseModel, ConfigDict
 
 PROBLEM_MEDIA_TYPE = "application/problem+json"
 API_V1_PREFIX = "/api/v1"
@@ -20,6 +21,29 @@ ERROR_CODES: dict[int, str] = {
     409: "conflict", 413: "payload_too_large", 415: "unsupported_media_type", 422: "unprocessable",
     429: "rate_limited", 500: "internal_error", 503: "unavailable",
 }
+
+
+class ValidationIssue(BaseModel):
+    """Redacted request validation error, without the submitted value."""
+
+    loc: list[str]
+    msg: str
+    type: str
+
+
+class Problem(BaseModel):
+    """Shared RFC 9457 response contract, including optional error extensions."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str
+    title: str
+    status: int
+    detail: str
+    instance: str
+    request_id: str | None
+    code: str
+    errors: list[ValidationIssue] | None = None
 
 
 class ProblemError(HTTPException):

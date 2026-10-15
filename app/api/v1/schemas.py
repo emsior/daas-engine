@@ -168,7 +168,7 @@ class ApiKeyCreate(BaseModel):
     def _known(cls, value: list[str]) -> list[str]:
         unknown = sorted(set(value) - set(sc.KEY_SCOPES))
         if unknown:
-            raise ValueError(f"unknown scopes: {', '.join(unknown)}")
+            raise ValueError("unknown scopes")
         return sorted(set(value))
 
     @field_validator("name")

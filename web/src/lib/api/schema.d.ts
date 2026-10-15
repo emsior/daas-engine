@@ -1025,11 +1025,6 @@ export interface components {
              */
             run_status: "SUCCESS" | "PARTIAL" | "FAILED";
         };
-        /** HTTPValidationError */
-        HTTPValidationError: {
-            /** Detail */
-            detail?: components["schemas"]["ValidationError"][];
-        };
         /** HealthIssue */
         HealthIssue: {
             /**
@@ -1506,6 +1501,33 @@ export interface components {
              */
             type: "user" | "api_key";
         };
+        /**
+         * Problem
+         * @description Shared RFC 9457 response contract, including optional error extensions.
+         */
+        Problem: {
+            /** Code */
+            code: string;
+            /** Detail */
+            detail: string;
+            /**
+             * Errors
+             * @default null
+             */
+            errors: components["schemas"]["ValidationIssue"][] | null;
+            /** Instance */
+            instance: string;
+            /** Request Id */
+            request_id: string | null;
+            /** Status */
+            status: number;
+            /** Title */
+            title: string;
+            /** Type */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
         /** ReadyResponse */
         ReadyResponse: {
             /**
@@ -1833,17 +1855,16 @@ export interface components {
             /** Name */
             name?: string | null;
         };
-        /** ValidationError */
-        ValidationError: {
-            /** Context */
-            ctx?: Record<string, never>;
-            /** Input */
-            input?: unknown;
-            /** Location */
-            loc: (string | number)[];
-            /** Message */
+        /**
+         * ValidationIssue
+         * @description Redacted request validation error, without the submitted value.
+         */
+        ValidationIssue: {
+            /** Loc */
+            loc: string[];
+            /** Msg */
             msg: string;
-            /** Error Type */
+            /** Type */
             type: string;
         };
         /** VerifyIn */
@@ -2005,6 +2026,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Validation error (RFC 9457 problem details) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     request_magic_link_api_v1_auth_magic_link_post: {
@@ -2029,13 +2059,13 @@ export interface operations {
                     "application/json": components["schemas"]["MagicLinkAccepted"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2067,22 +2097,26 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description `confirm_required`: link was requested from another browser */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2105,6 +2139,15 @@ export interface operations {
                     "application/json": components["schemas"]["HealthResponse"];
                 };
             };
+            /** @description Validation error (RFC 9457 problem details) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     me_api_v1_me_get: {
@@ -2123,6 +2166,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MeOut"];
+                };
+            };
+            /** @description Validation error (RFC 9457 problem details) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2153,29 +2205,35 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description Unknown request, or already decided */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description `expired`: the request is older than DAAS_OAUTH_AUTHORIZATION_TTL_SEC */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2210,35 +2268,45 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description Unknown request */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description `request_already_decided` */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description `expired` */
             410: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description `org_id` missing, or `no_grantable_scopes` */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };
@@ -2269,14 +2337,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description DPA not accepted */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };
@@ -2301,13 +2373,13 @@ export interface operations {
                     "application/json": components["schemas"]["OrgOut"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2331,13 +2403,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2367,13 +2439,13 @@ export interface operations {
                     "application/json": components["schemas"]["OrgOut"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2399,13 +2471,13 @@ export interface operations {
                     "application/json": components["schemas"]["ApiKeyOut"][];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2440,15 +2512,17 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2473,13 +2547,13 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2508,12 +2582,14 @@ export interface operations {
                     "application/json": components["schemas"]["AuditPage"];
                 };
             };
-            /** @description Malformed cursor or limit out of range */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };
@@ -2541,12 +2617,14 @@ export interface operations {
                     "application/json": components["schemas"]["DataHealthOut"];
                 };
             };
-            /** @description `weeks` outside 1-26 */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };
@@ -2576,15 +2654,17 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2610,13 +2690,13 @@ export interface operations {
                     "application/json": components["schemas"]["InvitationOut"][];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2646,13 +2726,13 @@ export interface operations {
                     "application/json": components["schemas"]["InvitationAccepted"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Invitation limit reached */
@@ -2660,7 +2740,9 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };
@@ -2689,15 +2771,17 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2727,13 +2811,13 @@ export interface operations {
                     "application/json": components["schemas"]["JobPage"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2768,21 +2852,27 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description Queue full */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Pipeline and upload do not match, or the period is invalid or not supported */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };
@@ -2808,13 +2898,13 @@ export interface operations {
                     "application/json": components["schemas"]["JobOut"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2846,15 +2936,17 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2881,13 +2973,13 @@ export interface operations {
                     "text/event-stream": string;
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2913,13 +3005,13 @@ export interface operations {
                     "application/json": components["schemas"]["MemberOut"][];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -2949,29 +3041,35 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description Not a member */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description The last owner cannot be removed */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3007,29 +3105,35 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description Not a member */
             404: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description The last owner cannot be demoted */
             409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3055,13 +3159,13 @@ export interface operations {
                     "application/json": components["schemas"]["OAuthGrantOut"][];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3091,15 +3195,17 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3130,13 +3236,13 @@ export interface operations {
                     "application/json": components["schemas"]["RunPage"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3163,13 +3269,13 @@ export interface operations {
                     "application/json": components["schemas"]["RunDetail"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3212,15 +3318,17 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3246,13 +3354,13 @@ export interface operations {
                     "application/json": components["schemas"]["ScheduleOut"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3282,12 +3390,14 @@ export interface operations {
                     "application/json": components["schemas"]["ScheduleOut"];
                 };
             };
-            /** @description Invalid weekday, hour, time zone or chat webhook address */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };
@@ -3321,21 +3431,27 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description Unsupported file type */
             415: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description File failed validation */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };
@@ -3360,13 +3476,13 @@ export interface operations {
                     "application/json": components["schemas"]["UsageReport"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3396,13 +3512,13 @@ export interface operations {
                     "application/json": components["schemas"]["VerifyOut"];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3428,13 +3544,13 @@ export interface operations {
                     "application/json": components["schemas"]["WebhookOut"][];
                 };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3469,21 +3585,27 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description URL not allowed */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
             /** @description Webhooks need DAAS_SECRET_KEY */
             503: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
         };
     };
@@ -3512,15 +3634,17 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3552,15 +3676,17 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
             };
-            /** @description Validation Error */
+            /** @description Validation error (RFC 9457 problem details) */
             422: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
         };
@@ -3581,6 +3707,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ReadyResponse"];
+                };
+            };
+            /** @description Validation error (RFC 9457 problem details) */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
                 };
             };
             /** @description Service Unavailable */

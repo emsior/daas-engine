@@ -19,6 +19,7 @@ from starlette.routing import Route
 from app.api.problems import (
     MCP_PATH,
     PROBLEM_MEDIA_TYPE,
+    Problem,
     code_for,
     is_problem_path,
     is_v1_path,
@@ -59,6 +60,20 @@ DOCS_PATHS = ("/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect")
 def _error_body(detail, code: str) -> dict:
     """Jednolity ksztalt bledu: detail (jak dotad), code, request_id."""
     return {"detail": detail, "code": code, "request_id": get_request_id()}
+
+
+def _schema_refs(value: object) -> set[str]:
+    """Collect references before removing unused FastAPI validation components."""
+    refs: set[str] = set()
+    if isinstance(value, dict):
+        if isinstance(value.get("$ref"), str):
+            refs.add(value["$ref"])
+        for item in value.values():
+            refs.update(_schema_refs(item))
+    elif isinstance(value, list):
+        for item in value:
+            refs.update(_schema_refs(item))
+    return refs
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -205,7 +220,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             CORSMiddleware,
             allow_origins=[settings.daas_cockpit_origin.rstrip("/")],
             allow_credentials=True,
-            allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+            allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
             allow_headers=["Content-Type", API_KEY_HEADER, "X-CSRF-Token"],
             expose_headers=["X-Request-ID", "Location", "ETag"],
         )
@@ -228,6 +243,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.oauth = mount_oauth(app, settings)
     if not settings.cloud:
         app.include_router(router)  # trasy legacy: tylko selfhost; w cloud odpowiadaja 404
+
+    fastapi_openapi = app.openapi
+
+    def problem_openapi() -> dict:
+        if app.openapi_schema is None:
+            document = fastapi_openapi()
+            schemas = document.setdefault("components", {}).setdefault("schemas", {})
+            problem = Problem.model_json_schema(ref_template="#/components/schemas/{model}")
+            schemas.update(problem.pop("$defs", {}))
+            schemas["Problem"] = problem
+            for path, item in document["paths"].items():
+                if not is_problem_path(path):
+                    continue
+                for method, operation in item.items():
+                    if method not in {"get", "put", "post", "delete", "options", "head", "patch", "trace"}:
+                        continue
+                    responses = operation.setdefault("responses", {})
+                    validation = responses.setdefault("422", {})
+                    validation["description"] = "Validation error (RFC 9457 problem details)"
+                    for status, response in responses.items():
+                        if status == "422" or (status.startswith(("4", "5")) and "content" not in response):
+                            response["content"] = {
+                                PROBLEM_MEDIA_TYPE: {"schema": {"$ref": "#/components/schemas/Problem"}},
+                            }
+            # Remove the parent first, then its issue schema; legacy references keep both alive.
+            for name in ("HTTPValidationError", "ValidationError"):
+                if f"#/components/schemas/{name}" not in _schema_refs(document):
+                    schemas.pop(name, None)
+            app.openapi_schema = document
+        return app.openapi_schema
+
+    app.openapi = problem_openapi
     return app
 
 

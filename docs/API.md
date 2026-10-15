@@ -96,6 +96,7 @@ Errors are `application/problem+json` (RFC 9457) with a stable machine code:
 ```
 
 Validation errors (`422`, `code: validation_error`) list `errors[]` with `loc`, `msg` and `type` only; the submitted value is never echoed.
+OpenAPI describes these responses with the shared `Problem` component, whose optional `errors[]` entries use `ValidationIssue`.
 
 | Status | `code` (examples) | Meaning |
 |---|---|---|

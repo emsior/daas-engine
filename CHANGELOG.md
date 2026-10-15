@@ -115,6 +115,10 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Fixed
 
+- API v1 OpenAPI errors use the shared `Problem` schema and `application/problem+json`, including
+  validation `errors[]`, matching the actual responses (P1-6).
+- Cockpit CORS allows credentialed `PUT` preflights for schedule updates (P2-10).
+- API key validation reports unknown scopes without echoing the submitted values (P2-11).
 - Retention preserves upload records and the affected run's DuckDB rows, report paths and unpurged status
   when file removal fails, so later cycles can retry. Missing files still allow completion; successful
   purges are counted and audited only for uploads and runs whose files were removed or already absent (P1-5).
