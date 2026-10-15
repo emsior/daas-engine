@@ -27,8 +27,8 @@ from app.control import scopes as sc
 from app.control import service
 from app.control.audit import record_event
 from app.control.db import get_db
-from app.control.models import Membership, OAuthClient, OAuthCode, OAuthToken, User
-from app.control.oauth import CODE_TTL, grantable_scopes, revoke_subtree
+from app.control.models import Membership, OAuthClient, OAuthCode, OAuthGrant, OAuthToken, User
+from app.control.oauth import CODE_TTL, grantable_scopes, revoke_oauth_grant
 from app.control.security import new_token
 from app.control.types import utcnow
 
@@ -204,8 +204,10 @@ async def list_grants(ctx: OrgContext = Depends(_MANAGE), db: AsyncSession = Dep
     rows = (await db.execute(
         select(OAuthToken, OAuthClient.client_name, Membership.role)
         .join(OAuthClient, OAuthClient.client_id == OAuthToken.client_id)
+        .join(OAuthGrant, OAuthGrant.id == OAuthToken.grant_id)
         .outerjoin(Membership, and_(Membership.org_id == OAuthToken.org_id, Membership.user_id == OAuthToken.user_id))
         .where(OAuthToken.org_id == ctx.org_id, OAuthToken.kind == "refresh", OAuthToken.revoked_at.is_(None),
+               OAuthGrant.revoked_at.is_(None),
                or_(OAuthToken.expires_at.is_(None), OAuthToken.expires_at > now))
         .order_by(OAuthToken.created_at.desc(), OAuthToken.id.desc()))).all()
     used: dict[str, datetime] = {}
@@ -238,11 +240,11 @@ async def revoke_grant(token_id: Annotated[str, Path(max_length=64)], request: R
         OAuthToken.id == token_id, OAuthToken.org_id == ctx.org_id, OAuthToken.kind == "refresh"))).scalar_one_or_none()
     if token is None:
         raise not_found("connection")
-    count = await revoke_subtree(db, token.client_id, [token.id], utcnow())
-    if count:
-        await record_event(db, request, org_id=ctx.org_id, actor_type=ctx.principal.actor_type,
-                           actor_id=ctx.principal.actor_id, action="oauth.token_revoked",
-                           target=f"oauth:{token.client_id}",
-                           meta={"client_id": token.client_id, "reason": "disconnected", "count": count})
+    grant_id = token.grant_id
+    actor_type, actor_id = ctx.principal.actor_type, ctx.principal.actor_id
+    await db.rollback()  # zakoncz lookup: transakcja cofniecia zaczyna sie od wspolnego guarda
+    if grant_id is not None:
+        await revoke_oauth_grant(db, grant_id, "disconnected", request=request,
+                                 actor_type=actor_type, actor_id=actor_id)
     await db.commit()
     return Response(status_code=204)

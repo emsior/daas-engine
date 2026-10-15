@@ -318,6 +318,23 @@ class OAuthCode(Base):
     __table_args__ = (Index("ix_oauth_codes_client_id", "client_id"), Index("ix_oauth_codes_expires_at", "expires_at"))
 
 
+class OAuthGrant(Base):
+    """Zgoda laczaca tokeny jednej autoryzacji; `lock_seq` serializuje zmiany jej stanu."""
+
+    __tablename__ = "oauth_grants"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    client_id: Mapped[str] = mapped_column(ForeignKey("oauth_clients.client_id", ondelete=_CASCADE))
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    resource: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    revocation_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    lock_seq: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
 class OAuthToken(Base):
     """Token dostepu albo odswiezania (`kind`), przechowywany jako SHA-256; organizacja i zakresy sa zamrozone
     w chwili zgody. `parent_id` wiaze token dostepu z tokenem odswiezania, z ktorego powstal (rotacja)."""
@@ -328,6 +345,10 @@ class OAuthToken(Base):
     kind: Mapped[str] = mapped_column(String(8))  # access | refresh
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     client_id: Mapped[str] = mapped_column(ForeignKey("oauth_clients.client_id", ondelete=_CASCADE))
+    grant_id: Mapped[str | None] = mapped_column(
+        ForeignKey("oauth_grants.id", ondelete=_CASCADE, name="fk_oauth_tokens_grant_id_oauth_grants"),
+        nullable=True,
+    )
     org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
@@ -336,7 +357,9 @@ class OAuthToken(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    rotated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
     __table_args__ = (Index("ix_oauth_tokens_org_id_kind", "org_id", "kind"),
-                      Index("ix_oauth_tokens_client_id", "client_id"))
+                      Index("ix_oauth_tokens_client_id", "client_id"),
+                      Index("ix_oauth_tokens_grant_id", "grant_id"))

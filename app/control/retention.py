@@ -169,14 +169,14 @@ async def purge_all(sessionmaker: async_sessionmaker[AsyncSession], registry: Te
     return reports
 
 
-async def purge_oauth(sessionmaker: async_sessionmaker[AsyncSession]) -> tuple[int, int, int]:
+async def purge_oauth(sessionmaker: async_sessionmaker[AsyncSession]) -> tuple[int, int, int, int]:
     """Sprzatanie OAuth konektorow MCP: wygasle zadania/kody autoryzacji, tokeny i porzuceni klienci
     (`app.control.oauth.purge_expired`)."""
     async with sessionmaker() as db:
         counts = await purge_expired(db, utcnow())
         await db.commit()
     if any(counts):
-        log.info("retention oauth codes=%d tokens=%d clients=%d", *counts)
+        log.info("retention oauth codes=%d tokens=%d grants=%d clients=%d", *counts)
     return counts
 
 

@@ -14,22 +14,22 @@ do kokpitu -> uzytkownik wybiera organizacje i zakresy (`POST /api/v1/oauth/requ
 (`daas_oat_...` dostepu, `daas_ort_...` odswiezania) -> token dostepu dziala w `/mcp` jak klucz API organizacji zgody
 (`principal_for`), z zakresami zgody obcietymi do biezacej roli uzytkownika.
 
-Lancuch `parent_id` (bez nowych kolumn): token dostepu -> token odswiezania wydany razem z nim; token odswiezania ->
-poprzedni token odswiezania (rotacja) albo id wiersza `oauth_codes`, z ktorego powstala pierwsza para. Dzieki temu
-"wszystkie tokeny wydane z kodu" (ponowne uzycie kodu, RFC 6749 4.1.2) i "polaczenie z aplikacja" (odlaczenie
-w kokpicie) to poddrzewo od jednego korzenia (`revoke_subtree`).
+Grant przechowuje stan calej zgody, a UPDATE jego `lock_seq` serializuje rotacje i cofanie. `parent_id`
+zachowuje historie pochodzenia: AT -> RT, RT -> poprzedni RT albo kod pierwszej pary.
 """
 from __future__ import annotations
 
+import base64
+import binascii
 import contextvars
 import json
 import logging
 import re
 import secrets
-from collections.abc import Callable, Iterable
+from collections.abc import Awaitable, Callable, Iterable
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Any
-from urllib.parse import unquote_plus, urlencode
+from urllib.parse import parse_qsl, quote, unquote_plus, urlencode
 
 from mcp.server.auth.handlers.metadata import MetadataHandler
 from mcp.server.auth.provider import (
@@ -66,7 +66,7 @@ from app.api.problems import PROBLEM_MEDIA_TYPE, problem_body
 from app.control import scopes as sc
 from app.control.audit import record_event
 from app.control.ids import new_ulid
-from app.control.models import Membership, OAuthClient, OAuthCode, OAuthToken, User
+from app.control.models import Membership, OAuthClient, OAuthCode, OAuthGrant, OAuthToken, User
 from app.control.security import sha256_hex
 from app.control.types import utcnow
 from app.core.config import Settings
@@ -116,6 +116,9 @@ _PKCE_S256 = re.compile(r"^[A-Za-z0-9_-]{43}$")
 _URL = TypeAdapter(AnyHttpUrl, config=ConfigDict(url_preserve_empty_path=True))
 #: Adres klienta zadania trasy SDK (ustawia `OAuthRouteGuard`): SDK nie przekazuje providerowi obiektu `Request`.
 _CLIENT_IP: contextvars.ContextVar[str | None] = contextvars.ContextVar("daas_oauth_client_ip", default=None)
+_ROUTE: contextvars.ContextVar[str | None] = contextvars.ContextVar("daas_oauth_route", default=None)
+# Punkt kontrolowanego przeplotu testow PostgreSQL; w produkcji pozostaje None.
+_TEST_AFTER_GUARD: Callable[[], Awaitable[None]] | None = None
 
 
 # ============================================================================ modele SDK z polami DaaS
@@ -183,20 +186,74 @@ async def revoke_subtree(db: AsyncSession, client_id: str, root_ids: Iterable[st
     return len(rows)
 
 
-async def purge_expired(db: AsyncSession, now: datetime | None = None) -> tuple[int, int, int]:
-    """Usuwa kody/zadania autoryzacji wygasle ponad dobe temu, tokeny wygasle ponad 30 dni temu i klientow
-    zarejestrowanych ponad dobe temu, ktorzy nie maja juz zadnego kodu ani tokenu (rejestracja porzucona albo
-    polaczenie, ktorego wszystkie tokeny zostaly juz sprzatniete; klient rejestruje sie wtedy od nowa, RFC 7591).
-    Zwraca `(kody, tokeny, klienci)`. Commit robi wolajacy (petla retencji, `app.control.retention`)."""
+async def _guard_grant(db: AsyncSession, grant_id: str) -> bool:
+    """Pierwsza instrukcja transakcji mutujacej grant: wspolna blokada zapisu SQLite/PostgreSQL."""
+    locked = await db.execute(update(OAuthGrant).where(OAuthGrant.id == grant_id)
+                              .values(lock_seq=OAuthGrant.lock_seq + 1)
+                              .execution_options(synchronize_session=False))
+    if locked.rowcount != 1:
+        return False
+    if _TEST_AFTER_GUARD is not None:
+        await _TEST_AFTER_GUARD()
+    return True
+
+
+async def _revoke_guarded_grant(db: AsyncSession, grant_id: str, reason: str, *,
+                                request: Request | None = None, actor_type: str = "system",
+                                actor_id: str | None = None, settings: Settings | None = None) -> int:
+    """Wywoluj tylko pod guardem. Swiezy stan, jeden audyt pierwszego cofniecia; commit robi wolajacy."""
+    grant = (await db.execute(select(OAuthGrant).where(OAuthGrant.id == grant_id)
+                              .execution_options(populate_existing=True))).scalar_one_or_none()
+    if grant is None:
+        return 0
+    now = utcnow()
+    first = await db.execute(update(OAuthGrant).where(
+        OAuthGrant.id == grant_id, OAuthGrant.revoked_at.is_(None))
+        .values(revoked_at=now, revocation_reason=reason).execution_options(synchronize_session=False))
+    revoked = await db.execute(update(OAuthToken).where(
+        OAuthToken.grant_id == grant_id, OAuthToken.revoked_at.is_(None))
+        .values(revoked_at=now).execution_options(synchronize_session=False))
+    count = revoked.rowcount or 0
+    if first.rowcount == 1:
+        await record_event(db, request, org_id=grant.org_id, actor_type=actor_type, actor_id=actor_id,
+                           action="oauth.token_revoked", target=f"oauth:{grant.client_id}",
+                           meta={"client_id": grant.client_id, "reason": reason, "count": count},
+                           ip=_CLIENT_IP.get(), settings=settings)
+    return count
+
+
+async def revoke_oauth_grant(db: AsyncSession, grant_id: str, reason: str, *,
+                             request: Request | None = None, actor_type: str = "system",
+                             actor_id: str | None = None, settings: Settings | None = None) -> int:
+    """Cofniecie calej zgody pod wspolnym guardem, bez commita. Wczesniejsze odczyty zakoncz przed wywolaniem."""
+    if not await _guard_grant(db, grant_id):
+        return 0
+    return await _revoke_guarded_grant(db, grant_id, reason, request=request, actor_type=actor_type,
+                                       actor_id=actor_id, settings=settings)
+
+
+async def purge_expired(db: AsyncSession, now: datetime | None = None) -> tuple[int, int, int, int]:
+    """AT: 30 dni od wygasniecia. Historia RT zostaje do konca retencji calego grantu.
+    Zwraca `(kody, tokeny, granty, klienci)`; commit robi wolajacy."""
     now = now or utcnow()
+    cutoff = now - TOKEN_RETENTION
     codes = await db.execute(delete(OAuthCode).where(OAuthCode.expires_at < now - CODE_RETENTION))
-    tokens = await db.execute(delete(OAuthToken).where(OAuthToken.expires_at.is_not(None),
-                                                       OAuthToken.expires_at < now - TOKEN_RETENTION))
+    # Najnowszy RT musi byc wygasly od calego okresu retencji; NULL oznacza brak wygasania.
+    recent_refresh = exists().where(OAuthToken.grant_id == OAuthGrant.id, OAuthToken.kind == "refresh",
+                                     or_(OAuthToken.expires_at.is_(None), OAuthToken.expires_at > cutoff))
+    old_grants = select(OAuthGrant.id).where(or_(OAuthGrant.revoked_at <= cutoff, ~recent_refresh))
+    tokens = await db.execute(delete(OAuthToken).where(or_(
+        and_(OAuthToken.kind == "access", OAuthToken.expires_at < cutoff),
+        and_(OAuthToken.kind == "refresh", OAuthToken.grant_id.in_(old_grants)),
+    )).execution_options(synchronize_session=False))
+    grants = await db.execute(delete(OAuthGrant).where(
+        ~exists().where(OAuthToken.grant_id == OAuthGrant.id)).execution_options(synchronize_session=False))
     has_code = exists().where(OAuthCode.client_id == OAuthClient.client_id)
     has_token = exists().where(OAuthToken.client_id == OAuthClient.client_id)
+    has_grant = exists().where(OAuthGrant.client_id == OAuthClient.client_id)
     clients = await db.execute(delete(OAuthClient).where(OAuthClient.created_at < now - CLIENT_RETENTION,
-                                                         ~has_code, ~has_token))
-    return codes.rowcount or 0, tokens.rowcount or 0, clients.rowcount or 0
+                                                         ~has_code, ~has_token, ~has_grant))
+    return codes.rowcount or 0, tokens.rowcount or 0, grants.rowcount or 0, clients.rowcount or 0
 
 
 # ============================================================================ provider (protokol SDK)
@@ -350,12 +407,20 @@ class DaasOAuthProvider(OAuthAuthorizationServerProvider[DaasAuthorizationCode, 
             subject=row.user_id, request_id=row.id, org_id=row.org_id)
 
     async def _revoke_code_family(self, db: AsyncSession, row: OAuthCode) -> None:
-        count = await revoke_subtree(db, row.client_id, [row.id], utcnow())
-        log.warning("oauth authorization code reused client_id=%s revoked=%d", row.client_id, count)
-        if row.org_id is not None:
-            await self._audit(db, org_id=row.org_id, actor_type="system", actor_id=None,
-                              action="oauth.token_revoked", client_id=row.client_id,
-                              meta={"reason": "code_replay", "count": count})
+        code_id, client_id, org_id = row.id, row.client_id, row.org_id
+        grant_ids = (await db.execute(select(OAuthToken.grant_id).where(
+            OAuthToken.client_id == client_id, OAuthToken.parent_id == code_id,
+            OAuthToken.grant_id.is_not(None)).distinct())).scalars().all()
+        await db.rollback()  # lookup wskazuje grant; transakcja zmiany zaczyna sie od guarda
+        if grant_ids:
+            for grant_id in grant_ids:
+                await revoke_oauth_grant(db, grant_id, "code_replay", settings=self.settings)
+        else:  # historyczne tokeny bez grantu (API poddrzewa zostaje dla tej sciezki)
+            count = await revoke_subtree(db, client_id, [code_id], utcnow())
+            if count and org_id is not None:
+                await self._audit(db, org_id=org_id, actor_type="system", actor_id=None,
+                                  action="oauth.token_revoked", client_id=client_id,
+                                  meta={"reason": "code_replay", "count": count})
 
     async def exchange_authorization_code(self, client: OAuthClientInformationFull,
                                           authorization_code: DaasAuthorizationCode) -> TokenResponse:
@@ -373,7 +438,12 @@ class DaasOAuthProvider(OAuthAuthorizationServerProvider[DaasAuthorizationCode, 
                     await self._revoke_code_family(db, row)
                     await db.commit()
                 raise TokenError("invalid_grant", "authorization code is invalid, expired or already used")
-            response = await self._issue_pair(db, client_id=client.client_id, org_id=code.org_id,
+            grant = OAuthGrant(id=new_ulid(), client_id=client.client_id, org_id=code.org_id,
+                               user_id=code.subject, scopes=list(code.scopes), resource=code.resource,
+                               created_at=now, lock_seq=0)
+            db.add(grant)
+            await db.flush()  # FK pary wskazuje grant utworzony w tej samej transakcji
+            response = await self._issue_pair(db, grant_id=grant.id, client_id=client.client_id, org_id=code.org_id,
                                               user_id=code.subject, grant_scopes=list(code.scopes),
                                               access_scopes=list(code.scopes), resource=code.resource,
                                               parent_id=code.request_id, now=now)
@@ -383,7 +453,7 @@ class DaasOAuthProvider(OAuthAuthorizationServerProvider[DaasAuthorizationCode, 
             await db.commit()
         return response
 
-    async def _issue_pair(self, db: AsyncSession, *, client_id: str, org_id: str, user_id: str | None,
+    async def _issue_pair(self, db: AsyncSession, *, grant_id: str, client_id: str, org_id: str, user_id: str | None,
                           grant_scopes: list[str], access_scopes: list[str], resource: str | None, parent_id: str,
                           now: datetime, refresh_used_at: datetime | None = None) -> TokenResponse:
         """Nowa para: token odswiezania (zakresy calej zgody, potomek `parent_id`) i token dostepu (zakresy zadane,
@@ -391,11 +461,11 @@ class DaasOAuthProvider(OAuthAuthorizationServerProvider[DaasAuthorizationCode, 
         refresh_raw, refresh_hash = _new_secret(REFRESH_PREFIX)
         access_raw, access_hash = _new_secret(ACCESS_PREFIX)
         refresh = OAuthToken(id=new_ulid(), kind="refresh", token_hash=refresh_hash, client_id=client_id,
-                             org_id=org_id, user_id=user_id, scopes=grant_scopes, resource=resource,
+                             grant_id=grant_id, org_id=org_id, user_id=user_id, scopes=grant_scopes, resource=resource,
                              parent_id=parent_id, created_at=now, expires_at=now + self.refresh_ttl,
                              last_used_at=refresh_used_at)
         access = OAuthToken(id=new_ulid(), kind="access", token_hash=access_hash, client_id=client_id, org_id=org_id,
-                            user_id=user_id, scopes=access_scopes, resource=resource, parent_id=refresh.id,
+                            grant_id=grant_id, user_id=user_id, scopes=access_scopes, resource=resource, parent_id=refresh.id,
                             created_at=now, expires_at=now + self.access_ttl)
         db.add_all([refresh, access])
         return TokenResponse(access_token=access_raw, expires_in=int(self.access_ttl.total_seconds()),
@@ -407,53 +477,109 @@ class DaasOAuthProvider(OAuthAuthorizationServerProvider[DaasAuthorizationCode, 
         if not raw or not raw.startswith(prefix) or len(raw) > _MAX_SECRET_LEN:
             return None
         async with self._session() as db:
-            row = (await db.execute(select(OAuthToken).where(
+            row = (await db.execute(select(OAuthToken).join(OAuthGrant, OAuthGrant.id == OAuthToken.grant_id).where(
                 OAuthToken.token_hash == sha256_hex(raw), OAuthToken.kind == kind,
-                OAuthToken.revoked_at.is_(None)))).scalar_one_or_none()
+                OAuthToken.revoked_at.is_(None), OAuthGrant.revoked_at.is_(None)))).scalar_one_or_none()
         if row is None or (row.expires_at is not None and row.expires_at <= utcnow()):
             return None
         return row
 
     async def load_refresh_token(self, client: OAuthClientInformationFull,
                                  refresh_token: str) -> DaasRefreshToken | None:
-        row = await self._active_token(refresh_token, "refresh")
-        if row is None or row.client_id != client.client_id or row.user_id is None:
+        if not refresh_token or len(refresh_token) > _MAX_SECRET_LEN:
             return None
-        return DaasRefreshToken(token=refresh_token, client_id=row.client_id, scopes=list(row.scopes or []),
+        # Pierwszy odczyt identyfikuje tylko grant; nie uprawnia do rotacji ani cofniecia.
+        async with self._session() as lookup:
+            row = (await lookup.execute(select(OAuthToken).where(
+                OAuthToken.token_hash == sha256_hex(refresh_token), OAuthToken.kind == "refresh",
+                OAuthToken.client_id == client.client_id))).scalar_one_or_none()
+            if row is None:
+                return None
+            if _ROUTE.get() == REVOCATION_PATH:
+                return self._refresh_pointer(row, refresh_token)
+            token_id, grant_id = row.id, row.grant_id
+        if grant_id is None:
+            return None
+        async with self._session() as db:
+            if not await _guard_grant(db, grant_id):
+                return None
+            row = await self._usable_refresh(db, grant_id, token_id, client.client_id)
+            result = self._refresh_pointer(row, refresh_token) if row is not None else None
+            await db.commit()  # odmowa reuse nastepuje dopiero po trwalym cofnieciu
+        return result
+
+    @staticmethod
+    def _refresh_pointer(row: OAuthToken, raw: str) -> DaasRefreshToken:
+        return DaasRefreshToken(token=raw, client_id=row.client_id, scopes=list(row.scopes or []),
                                 expires_at=_epoch(row.expires_at), resource=row.resource, subject=row.user_id,
                                 token_id=row.id, org_id=row.org_id)
+
+    async def _usable_refresh(self, db: AsyncSession, grant_id: str, token_id: str,
+                               client_id: str) -> OAuthToken | None:
+        """Klasyfikacja D7 ze swiezych zapytan, tylko po guardzie. Nie rzuca wyjatku przed commitem."""
+        found = (await db.execute(select(OAuthToken, OAuthGrant)
+            .join(OAuthGrant, OAuthGrant.id == OAuthToken.grant_id)
+            .where(OAuthToken.id == token_id, OAuthToken.grant_id == grant_id,
+                   OAuthToken.client_id == client_id, OAuthToken.kind == "refresh")
+            .execution_options(populate_existing=True))).first()
+        if found is None:
+            return None
+        row, grant = found
+        if grant.revoked_at is not None:
+            return None
+        reason = None
+        if row.rotated_at is not None:
+            reason = "reuse_detected"
+        elif row.revoked_at is not None:
+            reason = "client_revoked"
+        elif row.expires_at is not None and row.expires_at <= utcnow():
+            return None
+        elif row.user_id is None or (await db.execute(select(Membership.role).where(
+                Membership.org_id == row.org_id, Membership.user_id == row.user_id))).scalar_one_or_none() is None:
+            reason = "membership_ended"
+        if reason is not None:
+            await _revoke_guarded_grant(db, grant_id, reason, settings=self.settings)
+            return None
+        return row
 
     async def exchange_refresh_token(self, client: OAuthClientInformationFull, refresh_token: DaasRefreshToken,
                                      scopes: list[str]) -> TokenResponse:
         """Rotacja: stary token odswiezania i jego tokeny dostepu sa cofane, powstaje nowa para. Nowy token
         odswiezania ma zakresy calej zgody (RFC 6749 6), token dostepu - zadany podzbior."""
-        granted = list(refresh_token.scopes)
-        requested = _dedupe(scopes) or granted
-        if not set(requested) <= set(granted):
-            raise TokenError("invalid_scope", "requested scopes exceed the original grant")
-        now = utcnow()
+        async with self._session() as lookup:
+            grant_id = (await lookup.execute(select(OAuthToken.grant_id).where(
+                OAuthToken.id == refresh_token.token_id, OAuthToken.kind == "refresh",
+                OAuthToken.token_hash == sha256_hex(refresh_token.token),
+                OAuthToken.client_id == client.client_id))).scalar_one_or_none()
+        if grant_id is None:
+            raise TokenError("invalid_grant", "the grant is no longer valid")
         async with self._session() as db:
-            member = await db.get(Membership, (refresh_token.org_id, refresh_token.subject))
-            if member is None:  # uzytkownik nie nalezy juz do organizacji: zgoda wygasa razem z czlonkostwem
-                count = await revoke_subtree(db, client.client_id, [refresh_token.token_id], now)
-                await self._audit(db, org_id=refresh_token.org_id, actor_type="system", actor_id=None,
-                                  action="oauth.token_revoked", client_id=client.client_id,
-                                  meta={"reason": "membership_ended", "count": count})
+            if not await _guard_grant(db, grant_id):
+                raise TokenError("invalid_grant", "the grant is no longer valid")
+            row = await self._usable_refresh(db, grant_id, refresh_token.token_id, client.client_id)
+            if row is None:
                 await db.commit()
                 raise TokenError("invalid_grant", "the grant is no longer valid")
+            granted = list(row.scopes or [])
+            requested = _dedupe(scopes) or granted
+            if not set(requested) <= set(granted):
+                raise TokenError("invalid_scope", "requested scopes exceed the original grant")
+            now = utcnow()
             rotated = await db.execute(update(OAuthToken).where(
-                OAuthToken.id == refresh_token.token_id, OAuthToken.revoked_at.is_(None)).values(revoked_at=now))
-            if rotated.rowcount != 1:  # rownolegle odswiezenie tym samym tokenem: wygrywa jedno
-                await db.rollback()
-                raise TokenError("invalid_grant", "refresh token is invalid, expired or already used")
+                OAuthToken.id == row.id, OAuthToken.revoked_at.is_(None), OAuthToken.rotated_at.is_(None))
+                .values(revoked_at=now, rotated_at=now))
+            if rotated.rowcount != 1:
+                await self._usable_refresh(db, grant_id, row.id, client.client_id)
+                await db.commit()
+                raise TokenError("invalid_grant", "the grant is no longer valid")
             await db.execute(update(OAuthToken).where(
-                OAuthToken.client_id == client.client_id, OAuthToken.parent_id == refresh_token.token_id,
+                OAuthToken.client_id == client.client_id, OAuthToken.parent_id == row.id,
                 OAuthToken.kind == "access", OAuthToken.revoked_at.is_(None)).values(revoked_at=now))
-            response = await self._issue_pair(db, client_id=client.client_id, org_id=refresh_token.org_id,
-                                              user_id=refresh_token.subject, grant_scopes=granted,
-                                              access_scopes=requested, resource=refresh_token.resource,
-                                              parent_id=refresh_token.token_id, now=now, refresh_used_at=now)
-            await self._audit(db, org_id=refresh_token.org_id, actor_type="user", actor_id=refresh_token.subject,
+            response = await self._issue_pair(db, grant_id=grant_id, client_id=client.client_id, org_id=row.org_id,
+                                              user_id=row.user_id, grant_scopes=granted,
+                                              access_scopes=requested, resource=row.resource,
+                                              parent_id=row.id, now=now, refresh_used_at=now)
+            await self._audit(db, org_id=row.org_id, actor_type="user", actor_id=row.user_id,
                               action="oauth.token_issued", client_id=client.client_id,
                               meta={"grant": "refresh_token", "scopes": requested})
             await db.commit()
@@ -469,19 +595,33 @@ class DaasOAuthProvider(OAuthAuthorizationServerProvider[DaasAuthorizationCode, 
                                token_id=row.id, org_id=row.org_id)
 
     async def revoke_token(self, token: DaasAccessToken | DaasRefreshToken) -> None:
-        """RFC 7009 (`/revoke`): cofa token, a token odswiezania razem z potomkami (jego tokeny dostepu)."""
-        now = utcnow()
-        async with self._session() as db:
+        """RFC 7009: RT cofa caly grant; AT tylko przedstawiony token."""
+        async with self._session() as lookup:
             token_id = getattr(token, "token_id", None)
-            row = await db.get(OAuthToken, token_id) if token_id else (await db.execute(select(OAuthToken).where(
-                OAuthToken.token_hash == sha256_hex(token.token)))).scalar_one_or_none()
+            row = (await lookup.execute(select(OAuthToken).where(
+                OAuthToken.token_hash == sha256_hex(token.token), OAuthToken.client_id == token.client_id,
+                OAuthToken.id == token_id))).scalar_one_or_none()
+            if row is None or row.grant_id is None:
+                return
+            grant_id, token_id = row.grant_id, row.id
+        async with self._session() as db:
+            if not await _guard_grant(db, grant_id):
+                return
+            row = (await db.execute(select(OAuthToken).where(OAuthToken.id == token_id,
+                OAuthToken.grant_id == grant_id, OAuthToken.client_id == token.client_id)
+                .execution_options(populate_existing=True))).scalar_one_or_none()
             if row is None:
                 return
-            count = await revoke_subtree(db, row.client_id, [row.id], now)
-            if count:
-                await self._audit(db, org_id=row.org_id, actor_type="user", actor_id=row.user_id,
-                                  action="oauth.token_revoked", client_id=row.client_id,
-                                  meta={"reason": "client_revoked", "count": count})
+            if row.kind == "refresh":
+                await _revoke_guarded_grant(db, grant_id, "client_revoked", actor_type="user",
+                                             actor_id=row.user_id, settings=self.settings)
+            else:
+                revoked = await db.execute(update(OAuthToken).where(
+                    OAuthToken.id == row.id, OAuthToken.revoked_at.is_(None)).values(revoked_at=utcnow()))
+                if revoked.rowcount:
+                    await self._audit(db, org_id=row.org_id, actor_type="user", actor_id=row.user_id,
+                                      action="oauth.token_revoked", client_id=row.client_id,
+                                      meta={"reason": "client_revoked", "count": revoked.rowcount})
             await db.commit()
 
     async def principal_for(self, token: str) -> Principal | None:
@@ -498,11 +638,13 @@ class DaasOAuthProvider(OAuthAuthorizationServerProvider[DaasAuthorizationCode, 
             found = (await db.execute(
                 select(OAuthToken, Membership.role, User)
                 .join(OAuthClient, OAuthClient.client_id == OAuthToken.client_id)
+                .join(OAuthGrant, OAuthGrant.id == OAuthToken.grant_id)
                 .join(Membership, and_(Membership.org_id == OAuthToken.org_id,
                                        Membership.user_id == OAuthToken.user_id))
                 .join(User, User.id == OAuthToken.user_id)
                 .where(OAuthToken.token_hash == sha256_hex(token), OAuthToken.kind == "access",
-                       OAuthToken.revoked_at.is_(None), OAuthClient.revoked_at.is_(None)))).first()
+                       OAuthToken.revoked_at.is_(None), OAuthClient.revoked_at.is_(None),
+                       OAuthGrant.revoked_at.is_(None)))).first()
             if found is None:
                 return None
             row, role, user = found
@@ -552,23 +694,32 @@ class OAuthRouteGuard:
                 await _problem(request, 429, "rate_limited", "rate limit exceeded", too_many(wait).headers)(
                     scope, receive, send)
                 return
-        if self.path == REVOCATION_PATH and request.method == "POST":
-            patched = await _revocation_with_secret_field(scope, receive)
+        if self.path in ("/token", REVOCATION_PATH) and request.method == "POST":
+            try:
+                patched = await _revocation_with_secret_field(scope, receive,
+                                                               revocation=self.path == REVOCATION_PATH)
+            except ValueError:
+                await _problem(request, 400, "invalid_request", "invalid client authentication request")(
+                    scope, receive, send)
+                return
             if patched is None:
                 await _problem(request, 413, "payload_too_large",
                                f"request body exceeds {MAX_REVOKE_BODY} bytes")(scope, receive, send)
                 return
             scope, receive = patched
         marker = _CLIENT_IP.set(ip)
+        route_marker = _ROUTE.set(self.path)
         try:
             await self.app(scope, receive, send)
         finally:
             _CLIENT_IP.reset(marker)
+            _ROUTE.reset(route_marker)
 
 
-async def _revocation_with_secret_field(scope: Scope, receive: Receive) -> tuple[Scope, Receive] | None:
-    """Buforuje cialo `POST /revoke` (limit `MAX_REVOKE_BODY`) i dopisuje `client_secret=`, gdy formularz go nie ma.
-    None = cialo za duze."""
+async def _revocation_with_secret_field(scope: Scope, receive: Receive, *,
+                                         revocation: bool = True) -> tuple[Scope, Receive] | None:
+    """Adapter formularza dla SDK: Basic-only dostaje id/sekret; /revoke zawsze ma pole sekretu.
+    None = cialo za duze; ValueError = niepoprawne lub sprzeczne uwierzytelnienie (bez echa wartosci)."""
     body = bytearray()
     trailing: list[Message] = []
     while True:
@@ -584,9 +735,32 @@ async def _revocation_with_secret_field(scope: Scope, receive: Receive) -> tuple
     headers = [(k, v) for k, v in scope.get("headers", []) if k.lower() != b"content-length"]
     content_type = next((v for k, v in headers if k.lower() == b"content-type"), b"").decode("latin-1").lower()
     if content_type.startswith("application/x-www-form-urlencoded"):
-        keys = {unquote_plus(part.split(b"=", 1)[0].decode("latin-1")) for part in bytes(body).split(b"&") if part}
-        if "client_secret" not in keys:
-            body.extend(b"&client_secret=" if body else b"client_secret=")
+        fields = parse_qsl(bytes(body).decode("utf-8"), keep_blank_values=True)
+        keys = {k for k, _ in fields}
+        auth = next((v for k, v in headers if k.lower() == b"authorization"), b"")
+        scheme, _, credentials = auth.partition(b" ")
+        if scheme.lower() == b"basic":
+            try:
+                decoded = base64.b64decode(credentials, validate=True).decode("utf-8")
+                encoded_id, encoded_secret = decoded.split(":", 1)
+                basic_id, basic_secret = unquote_plus(encoded_id), unquote_plus(encoded_secret)
+            except (ValueError, UnicodeDecodeError, binascii.Error) as exc:
+                raise ValueError("invalid client authentication request") from exc
+            ids = [v for k, v in fields if k == "client_id"]
+            if any(value != basic_id for value in ids):
+                raise ValueError("invalid client authentication request")
+            if not ids:
+                # Sekret z Basic jest autorytatywny; SDK nadal uwierzytelnia za pomoca naglowka.
+                fields = [(k, v) for k, v in fields if k != "client_secret"]
+                fields.extend((("client_id", basic_id), ("client_secret", basic_secret)))
+                keys.update(("client_id", "client_secret"))
+            # SDK uzywa unquote, nie unquote_plus. Kanonizujemy spacje do %20 i zostawiamy Basic.
+            normalized = f"{quote(basic_id, safe='')}:{quote(basic_secret, safe='')}".encode()
+            headers = [(k, v) for k, v in headers if k.lower() != b"authorization"]
+            headers.append((b"authorization", b"Basic " + base64.b64encode(normalized)))
+        if revocation and "client_secret" not in keys:
+            fields.append(("client_secret", ""))
+        body = bytearray(urlencode(fields).encode("utf-8"))
     headers.append((b"content-length", str(len(body)).encode("latin-1")))
     queued: list[Message] = [{"type": "http.request", "body": bytes(body), "more_body": False}, *trailing]
 

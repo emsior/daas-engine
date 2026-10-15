@@ -3,12 +3,16 @@
 Izolacja najemcow i brak sekretow w audycie: `test_oauth_isolation.py`."""
 from __future__ import annotations
 
+import base64
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from threading import Barrier
+from urllib.parse import quote_plus
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import delete
+from sqlalchemy import delete, text
 
 from app.control import models
 from app.control import scopes as sc
@@ -470,6 +474,18 @@ def test_refresh_rotates_the_pair(cloud_client, cloud_settings, org):
     assert rotated["scope"] == "runs:read" and rotated["refresh_token"] != conn.refresh_token
     assert refresh(cloud_client, conn.client_id, conn.refresh_token).json()["error"] == "invalid_grant"
     assert mcp_status(cloud_client, conn.access_token) == 401  # stary token dostepu cofniety razem z rotacja
+    assert mcp_status(cloud_client, rotated["access_token"]) == 401
+    assert refresh(cloud_client, conn.client_id, rotated["refresh_token"]).json()["error"] == "invalid_grant"
+    (event,) = events(cloud_settings, "oauth.token_revoked")
+    assert event.meta == {"client_id": conn.client_id, "reason": "reuse_detected", "count": 2}
+
+
+def test_successful_rotation_keeps_the_grant_and_original_scopes(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read usage:read")
+    r = refresh(cloud_client, conn.client_id, conn.refresh_token, scope="runs:read")
+    assert r.status_code == 200, r.text
+    rotated = r.json()
+    assert mcp_status(cloud_client, conn.access_token) == 401
     assert ok(call_tool(cloud_client, rotated["access_token"], "whoami"))["scopes"] == ["runs:read"]
     # nowy token odswiezania niesie cala zgode (RFC 6749 6): bez `scope` wraca pelny zestaw
     full = refresh(cloud_client, conn.client_id, rotated["refresh_token"]).json()
@@ -479,6 +495,240 @@ def test_refresh_rotates_the_pair(cloud_client, cloud_settings, org):
     assert refresh(cloud_client, conn.client_id, full["refresh_token"]).status_code == 200  # nie zuzyty
     grants = [e.meta["grant"] for e in events(cloud_settings, "oauth.token_issued")]
     assert grants == ["authorization_code", "refresh_token", "refresh_token", "refresh_token"]
+    assert events(cloud_settings, "oauth.token_revoked") == []
+
+
+def test_reuse_after_two_rotations_revokes_the_latest_pair(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    first = refresh(cloud_client, conn.client_id, conn.refresh_token).json()
+    latest = refresh(cloud_client, conn.client_id, first["refresh_token"]).json()
+    assert mcp_status(cloud_client, latest["access_token"]) == 200
+    assert refresh(cloud_client, conn.client_id, conn.refresh_token).json()["error"] == "invalid_grant"
+    assert mcp_status(cloud_client, latest["access_token"]) == 401
+    assert refresh(cloud_client, conn.client_id, latest["refresh_token"]).json()["error"] == "invalid_grant"
+    (event,) = events(cloud_settings, "oauth.token_revoked")
+    assert event.meta == {"client_id": conn.client_id, "reason": "reuse_detected", "count": 2}
+
+
+def test_parallel_reuse_is_idempotent(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    current = refresh(cloud_client, conn.client_id, conn.refresh_token).json()
+    ready = Barrier(2)
+
+    def reuse():
+        ready.wait(timeout=10)
+        return refresh(cloud_client, conn.client_id, conn.refresh_token)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        pending = [pool.submit(reuse) for _ in range(2)]
+        responses = [task.result(timeout=20) for task in pending]
+    assert [r.status_code for r in responses] == [400, 400]
+    assert all(r.json()["error"] == "invalid_grant" for r in responses)
+    assert mcp_status(cloud_client, current["access_token"]) == 401
+    (event,) = events(cloud_settings, "oauth.token_revoked")
+    assert event.meta == {"client_id": conn.client_id, "reason": "reuse_detected", "count": 2}
+
+
+def test_expired_rotated_token_still_detects_reuse(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    current = refresh(cloud_client, conn.client_id, conn.refresh_token).json()
+    update_rows(cloud_settings, models.OAuthToken, {"expires_at": utcnow() - timedelta(days=1)},
+                models.OAuthToken.token_hash == sha256_hex(conn.refresh_token))
+    assert refresh(cloud_client, conn.client_id, conn.refresh_token).json()["error"] == "invalid_grant"
+    assert mcp_status(cloud_client, current["access_token"]) == 401
+    assert events(cloud_settings, "oauth.token_revoked")[0].meta["reason"] == "reuse_detected"
+
+
+def test_expired_unused_token_is_not_reuse(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    update_rows(cloud_settings, models.OAuthToken, {"expires_at": utcnow() - timedelta(seconds=1)},
+                models.OAuthToken.token_hash == sha256_hex(conn.refresh_token))
+    assert refresh(cloud_client, conn.client_id, conn.refresh_token).json()["error"] == "invalid_grant"
+    assert mcp_status(cloud_client, conn.access_token) == 200
+    assert events(cloud_settings, "oauth.token_revoked") == []
+    assert all(t.revoked_at is None for t in tokens(cloud_settings))
+
+
+def test_foreign_client_or_unknown_token_changes_nothing(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    current = refresh(cloud_client, conn.client_id, conn.refresh_token).json()
+    other = register_ok(cloud_client)["client_id"]
+    before = [(t.id, t.revoked_at) for t in tokens(cloud_settings)]
+    for client_id, raw in ((other, conn.refresh_token), (other, current["refresh_token"]),
+                           (conn.client_id, REFRESH_PREFIX + "TEST-unknown"),
+                           (conn.client_id, current["access_token"])):
+        denied = refresh(cloud_client, client_id, raw)
+        assert denied.status_code == 400 and denied.json()["error"] == "invalid_grant"
+    assert revoke(cloud_client, other, conn.refresh_token).status_code == 200
+    assert [(t.id, t.revoked_at) for t in tokens(cloud_settings)] == before
+    assert events(cloud_settings, "oauth.token_revoked") == []
+    assert mcp_status(cloud_client, current["access_token"]) == 200
+    assert refresh(cloud_client, conn.client_id, current["refresh_token"]).status_code == 200
+
+
+@pytest.mark.parametrize("subject_missing", [False, True])
+def test_revoke_of_a_rotated_token_revokes_the_grant_as_client_revoked(
+        cloud_client, cloud_settings, org, subject_missing):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    current = refresh(cloud_client, conn.client_id, conn.refresh_token).json()
+    if subject_missing:
+        # The user FK uses SET NULL; reproduce the resulting rows without removing the test's owner.
+        update_rows(cloud_settings, models.OAuthToken, {"user_id": None})
+        update_rows(cloud_settings, models.OAuthGrant, {"user_id": None})
+    assert revoke(cloud_client, conn.client_id, conn.refresh_token).status_code == 200
+    assert all(t.revoked_at is not None for t in tokens(cloud_settings))
+    assert mcp_status(cloud_client, current["access_token"]) == 401
+    assert refresh(cloud_client, conn.client_id, current["refresh_token"]).json()["error"] == "invalid_grant"
+    assert refresh(cloud_client, conn.client_id, conn.refresh_token).json()["error"] == "invalid_grant"
+    assert revoke(cloud_client, conn.client_id, conn.refresh_token).status_code == 200
+    (event,) = events(cloud_settings, "oauth.token_revoked")
+    assert event.meta == {"client_id": conn.client_id, "reason": "client_revoked", "count": 2}
+
+
+@pytest.mark.parametrize("subject_missing", [False, True])
+def test_membership_end_revokes_the_whole_grant_and_restoring_membership_does_not_revive_it(
+        cloud_client, cloud_settings, org, subject_missing):
+    user_id = seed_member(cloud_settings, org.org_id, "TEST-member@example.test", "member")
+    conn = connect(cloud_client, cloud_settings, user_id, org.org_id, scope="runs:read")
+    current = refresh(cloud_client, conn.client_id, conn.refresh_token).json()
+
+    async def remove(db):
+        await db.execute(delete(models.Membership).where(models.Membership.org_id == org.org_id,
+                                                         models.Membership.user_id == user_id))
+
+    with_db(cloud_settings, remove)
+    if subject_missing:
+        update_rows(cloud_settings, models.OAuthToken, {"user_id": None})
+        update_rows(cloud_settings, models.OAuthGrant, {"user_id": None})
+    assert refresh(cloud_client, conn.client_id, current["refresh_token"]).json()["error"] == "invalid_grant"
+    assert all(t.revoked_at is not None for t in tokens(cloud_settings))
+    seed_member(cloud_settings, org.org_id, "TEST-member@example.test", "member")
+    assert mcp_status(cloud_client, current["access_token"]) == 401
+    assert refresh(cloud_client, conn.client_id, current["refresh_token"]).json()["error"] == "invalid_grant"
+    assert refresh(cloud_client, conn.client_id, conn.refresh_token).json()["error"] == "invalid_grant"
+    (event,) = events(cloud_settings, "oauth.token_revoked")
+    assert event.meta == {"client_id": conn.client_id, "reason": "membership_ended", "count": 2}
+
+
+def test_a_new_authorization_is_an_independent_grant(cloud_client, cloud_settings, org):
+    first = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    second = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read",
+                     client_id=first.client_id)
+    current = refresh(cloud_client, first.client_id, first.refresh_token).json()
+    assert refresh(cloud_client, first.client_id, first.refresh_token).json()["error"] == "invalid_grant"
+    assert mcp_status(cloud_client, current["access_token"]) == 401
+    assert mcp_status(cloud_client, second.access_token) == 200
+    assert refresh(cloud_client, second.client_id, second.refresh_token).status_code == 200
+    grants = get_rows(cloud_settings, models.OAuthGrant)
+    assert len(grants) == 2 and sum(g.revoked_at is not None for g in grants) == 1
+
+
+def test_cockpit_disconnect_revokes_the_whole_grant(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    (root,) = tokens(cloud_settings, models.OAuthToken.kind == "refresh")
+    first = refresh(cloud_client, conn.client_id, conn.refresh_token).json()
+    second = refresh(cloud_client, conn.client_id, first["refresh_token"]).json()
+    url = f"{API}/orgs/{org.org_id}/oauth/grants/{root.id}"
+    assert cloud_client.delete(url, headers=key_headers(org.api_key)).status_code == 204
+    assert cloud_client.delete(url, headers=key_headers(org.api_key)).status_code == 204
+    for pair in (first, second):
+        assert mcp_status(cloud_client, pair["access_token"]) == 401
+        assert refresh(cloud_client, conn.client_id, pair["refresh_token"]).json()["error"] == "invalid_grant"
+    (event,) = events(cloud_settings, "oauth.token_revoked")
+    assert event.meta == {"client_id": conn.client_id, "reason": "disconnected", "count": 2}
+
+
+def test_grant_revocation_is_committed_before_invalid_grant(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    refresh(cloud_client, conn.client_id, conn.refresh_token)
+    denied = refresh(cloud_client, conn.client_id, conn.refresh_token)
+    assert denied.status_code == 400 and denied.json()["error"] == "invalid_grant"
+    # A separate engine/session sees the commit after the HTTP error has been returned.
+    assert all(t.revoked_at is not None for t in tokens(cloud_settings))
+    (grant,) = get_rows(cloud_settings, models.OAuthGrant)
+    assert grant.revoked_at is not None and grant.revocation_reason == "reuse_detected"
+    assert len(events(cloud_settings, "oauth.token_revoked")) == 1
+
+
+def test_exchange_refresh_rechecks_a_token_loaded_before_rotation(cloud_client, cloud_settings, org):
+    from mcp.server.auth.provider import TokenError
+
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    provider = cloud_client.app.state.oauth
+
+    async def load():
+        client = await provider.get_client(conn.client_id)
+        loaded = await provider.load_refresh_token(client, conn.refresh_token)
+        assert loaded is not None
+        return client, loaded
+
+    client, loaded = run(load())
+    latest = refresh(cloud_client, conn.client_id, conn.refresh_token).json()
+    with pytest.raises(TokenError) as denied:
+        run(provider.exchange_refresh_token(client, loaded, ["runs:read"]))
+    assert denied.value.error == "invalid_grant"
+    assert mcp_status(cloud_client, latest["access_token"]) == 401
+    (grant,) = get_rows(cloud_settings, models.OAuthGrant)
+    assert grant.revoked_at is not None and grant.revocation_reason == "reuse_detected"
+    assert len(events(cloud_settings, "oauth.token_revoked")) == 1
+
+
+def _basic_header(client_id: str, secret: str) -> dict[str, str]:
+    credentials = f"{quote_plus(client_id)}:{quote_plus(secret)}".encode()
+    return {"Authorization": "Basic " + base64.b64encode(credentials).decode("ascii")}
+
+
+def _register_basic_client(http_client, settings, special_secret):
+    client = register_ok(http_client, auth_method="client_secret_basic", scope="runs:read")
+    if special_secret:
+        client["client_secret"] = "TEST-basic secret+colon:slash/percent%"
+        update_rows(settings, models.OAuthClient, {"info": client},
+                    models.OAuthClient.client_id == client["client_id"])
+    return client
+
+
+@pytest.mark.parametrize("special_secret", [False, True])
+def test_token_endpoint_accepts_client_secret_basic(cloud_client, cloud_settings, org, special_secret):
+    client = _register_basic_client(cloud_client, cloud_settings, special_secret)
+    request_id, verifier = start(cloud_client, client["client_id"])
+    code = code_from(decide(cloud_client, cloud_settings, org.user_id, request_id, org_id=org.org_id))
+    form = {"grant_type": "authorization_code", "code": code, "code_verifier": verifier,
+            "redirect_uri": REDIRECT}
+    headers = _basic_header(client["client_id"], client["client_secret"])
+    conflict = cloud_client.post("/token", data={**form, "client_id": "TEST-other-client"}, headers=headers)
+    assert conflict.status_code == 400 and conflict.json()["code"] == "invalid_request"
+    assert conflict.headers["content-type"].startswith("application/problem+json")
+    assert client["client_id"] not in conflict.text and client["client_secret"] not in conflict.text
+    response = cloud_client.post("/token", data=form, headers=headers)
+    assert response.status_code == 200, response.text
+    pair = response.json()
+    assert mcp_status(cloud_client, pair["access_token"]) == 200
+    rotated = cloud_client.post("/token", data={"grant_type": "refresh_token",
+                                               "refresh_token": pair["refresh_token"]}, headers=headers)
+    assert rotated.status_code == 200, rotated.text
+
+
+@pytest.mark.parametrize("special_secret", [False, True])
+def test_revoke_endpoint_accepts_client_secret_basic(cloud_client, cloud_settings, org, special_secret):
+    client = _register_basic_client(cloud_client, cloud_settings, special_secret)
+    request_id, verifier = start(cloud_client, client["client_id"])
+    code = code_from(decide(cloud_client, cloud_settings, org.user_id, request_id, org_id=org.org_id))
+    headers = _basic_header(client["client_id"], client["client_secret"])
+    issued = cloud_client.post("/token", data={"grant_type": "authorization_code", "code": code,
+                                               "code_verifier": verifier, "redirect_uri": REDIRECT,
+                                               "client_id": client["client_id"]}, headers=headers)
+    assert issued.status_code == 200, issued.text
+    pair = issued.json()
+    form = {"token": pair["refresh_token"], "token_type_hint": "refresh_token"}
+    conflict = cloud_client.post("/revoke", data={**form, "client_id": "TEST-other-client"}, headers=headers)
+    assert conflict.status_code == 400 and conflict.json()["code"] == "invalid_request"
+    assert conflict.headers["content-type"].startswith("application/problem+json")
+    assert mcp_status(cloud_client, pair["access_token"]) == 200
+    response = cloud_client.post("/revoke", data=form, headers=headers)
+    assert response.status_code == 200, response.text
+    assert mcp_status(cloud_client, pair["access_token"]) == 401
+    (event,) = events(cloud_settings, "oauth.token_revoked")
+    assert event.meta == {"client_id": client["client_id"], "reason": "client_revoked", "count": 2}
 
 
 def test_refresh_token_of_another_client_is_invalid_grant(cloud_client, cloud_settings, org):
@@ -584,10 +834,10 @@ def test_purge_removes_expired_codes_and_tokens(cloud_client, cloud_settings, or
     async def purge(db):
         return await purge_expired(db, now)
 
-    assert with_db(cloud_settings, purge) == (1, 1, 0)
+    assert with_db(cloud_settings, purge) == (1, 1, 0, 0)
     assert [c.status for c in get_rows(cloud_settings, models.OAuthCode)] == ["pending"]
     assert [t.kind for t in tokens(cloud_settings)] == ["refresh"]
-    assert with_db(cloud_settings, purge) == (0, 0, 0)
+    assert with_db(cloud_settings, purge) == (0, 0, 0, 0)
 
 
 def test_purge_removes_clients_left_without_codes_and_tokens(cloud_client, cloud_settings, org):
@@ -605,7 +855,7 @@ def test_purge_removes_clients_left_without_codes_and_tokens(cloud_client, cloud
     async def purge(db):
         return await purge_expired(db, now)
 
-    assert with_db(cloud_settings, purge) == (0, 0, 1)
+    assert with_db(cloud_settings, purge) == (0, 0, 0, 1)
     left = {c.client_id for c in get_rows(cloud_settings, models.OAuthClient)}
     assert left == {conn.client_id, abandoned_fresh, pending_old}
     assert mcp_status(cloud_client, conn.access_token) == 200
@@ -613,7 +863,7 @@ def test_purge_removes_clients_left_without_codes_and_tokens(cloud_client, cloud
     # zadanie `pending_old` wygasa i po dobie jest sprzatane -> w nastepnym przebiegu znika tez jego klient
     update_rows(cloud_settings, models.OAuthCode, {"expires_at": now - timedelta(days=2)},
                 models.OAuthCode.client_id == pending_old)
-    assert with_db(cloud_settings, purge) == (1, 0, 1)
+    assert with_db(cloud_settings, purge) == (1, 0, 0, 1)
     assert {c.client_id for c in get_rows(cloud_settings, models.OAuthClient)} == {conn.client_id, abandoned_fresh}
     assert register(cloud_client).status_code == 201  # sprzatniety klient rejestruje sie od nowa
 
@@ -632,9 +882,92 @@ def test_retention_loop_purges_oauth_rows(cloud_client, cloud_settings, org):
         finally:
             await engine.dispose()
 
-    assert run(go()) == (0, 2, 0)
+    assert run(go()) == (0, 2, 1, 0)
     assert tokens(cloud_settings) == []
     assert mcp_status(cloud_client, conn.access_token) == 401
+
+
+def test_purge_keeps_rotated_refresh_evidence_while_a_grant_is_live(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    current = refresh(cloud_client, conn.client_id, conn.refresh_token).json()
+    now = utcnow()
+    update_rows(cloud_settings, models.OAuthToken, {"expires_at": now - timedelta(days=40)},
+                models.OAuthToken.token_hash.in_([sha256_hex(conn.refresh_token), sha256_hex(conn.access_token)]))
+
+    async def purge(db):
+        return await purge_expired(db, now)
+
+    assert with_db(cloud_settings, purge) == (0, 1, 0, 0)
+    assert len(tokens(cloud_settings, models.OAuthToken.token_hash == sha256_hex(conn.refresh_token))) == 1
+    assert refresh(cloud_client, conn.client_id, conn.refresh_token).json()["error"] == "invalid_grant"
+    assert mcp_status(cloud_client, current["access_token"]) == 401
+
+
+def test_purge_keeps_refresh_evidence_until_revoked_grant_retention(cloud_client, cloud_settings, org):
+    conn = connect(cloud_client, cloud_settings, org.user_id, org.org_id, scope="runs:read")
+    assert revoke(cloud_client, conn.client_id, conn.refresh_token).status_code == 200
+    now = utcnow()
+    update_rows(cloud_settings, models.OAuthToken, {"expires_at": now - timedelta(days=40)},
+                models.OAuthToken.kind == "access")
+
+    async def purge(db):
+        return await purge_expired(db, now)
+
+    assert with_db(cloud_settings, purge) == (0, 1, 0, 0)
+    assert [t.kind for t in tokens(cloud_settings)] == ["refresh"]
+    update_rows(cloud_settings, models.OAuthGrant, {"revoked_at": now - timedelta(days=31)})
+    assert with_db(cloud_settings, purge) == (0, 1, 1, 0)
+    assert get_rows(cloud_settings, models.OAuthGrant) == []
+
+
+def test_migration_0006_revokes_legacy_tokens(tmp_path):
+    from app.control.db import create_engine, make_sessionmaker, upgrade_sync
+    from app.control.ids import new_ulid
+    from app.control.oauth import DaasOAuthProvider
+
+    settings = Settings(_env_file=None, daas_control_db_url=f"sqlite+aiosqlite:///{tmp_path / 'legacy.db'}",
+                        daas_cockpit_origin=ISSUER)
+    upgrade_sync(settings, "0005")
+    org = seed_org(settings)
+    raw = ACCESS_PREFIX + "TEST-legacy-token"
+    token_id = new_ulid()
+    old_revoked_id = new_ulid()
+    now = utcnow()
+    earlier = now - timedelta(days=1)
+
+    async def seed_legacy(db):
+        db.add(models.OAuthClient(client_id="TEST-legacy-client", info={}))
+        await db.flush()
+        # Raw SQL deliberately uses only the 0005 columns, independently of the current ORM model.
+        statement = text("INSERT INTO oauth_tokens "
+                         "(id, kind, token_hash, client_id, org_id, user_id, scopes, resource, created_at, "
+                         "expires_at, revoked_at) VALUES "
+                         "(:id, 'access', :token_hash, 'TEST-legacy-client', :org_id, :user_id, '[]', :resource, "
+                         ":created_at, :expires_at, :revoked_at)")
+        for row_id, value, revoked_at in ((token_id, raw, None), (old_revoked_id, raw + "-old", earlier)):
+            await db.execute(statement, {"id": row_id, "token_hash": sha256_hex(value), "org_id": org.org_id,
+                                         "user_id": org.user_id, "resource": RESOURCE, "created_at": earlier,
+                                         "expires_at": now + timedelta(days=1), "revoked_at": revoked_at})
+
+    with_db(settings, seed_legacy)
+    upgrade_sync(settings, "head")
+    rows = {row.id: row for row in tokens(settings)}
+    assert rows[token_id].revoked_at is not None and rows[token_id].revoked_at >= now
+    assert rows[old_revoked_id].revoked_at == earlier
+    assert all(row.grant_id is None and row.rotated_at is None for row in rows.values())
+    assert get_rows(settings, models.OAuthGrant) == []
+    assert events(settings, "oauth.token_revoked") == []
+
+    async def check_inactive():
+        engine = create_engine(settings)
+        try:
+            provider = DaasOAuthProvider(settings, make_sessionmaker(engine))
+            assert await provider.load_access_token(raw) is None
+            assert await provider.principal_for(raw) is None
+        finally:
+            await engine.dispose()
+
+    run(check_inactive())
 
 
 # ================================================================ caly przeplyw w jednym scenariuszu

@@ -10,6 +10,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Changed
 
+- Migration `0006` revokes existing connector tokens without assigning legacy grants. Existing OAuth
+  connections must be authorized again after upgrading.
 - Invitations can grant only a role whose scopes the caller holds; an API key with only `members:manage`
   cannot invite anyone, including a `member`.
 - All routes except `GET /health` and `GET /ready` require the `X-API-Key` header. Without a configured key the
@@ -102,7 +104,17 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
   `DAAS_OAUTH_*`; Caddy routes; the retention loop also drops registrations left a day without any code or token.
   Guide: `docs/MCP.md`.
 
+### Security
+
+- OAuth refresh and revocation share a database grant lock, so disconnecting also revokes a pair issued
+  by a concurrent refresh (P1-2).
+- Reusing a rotated refresh token revokes the entire grant and all its access and refresh tokens,
+  including when the presented token has expired; rotation history is retained with the grant (P1-3).
+
 ### Fixed
+
+- OAuth `/token` and `/revoke` accept credentials supplied only through `client_secret_basic`, including
+  form-encoded credentials, and reject conflicting client identities in the form (P2-9).
 
 - The cockpit raised a Content-Security-Policy violation (`script-src 'eval'`) in Chromium, Firefox and WebKit
   after sign-in: zod 4 probes `new Function("")` before choosing its JIT. zod now runs `jitless`
