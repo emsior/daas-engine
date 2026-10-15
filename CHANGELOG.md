@@ -27,6 +27,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Added
 
+- OAuth isolation matrix for all MCP resources and prompts: foreign identifiers, own-resource controls,
+  insufficient scopes, RFC 7009 and cockpit grant revocation, and immediate loss of access after membership removal.
 - Retention audit actions `upload.purge_failed` and `report.purge_failed`, with counts per organization
   and cycle, and a `failed` file count in the purge summary (P1-5).
 - Verification beyond SQLite and Chromium. The `postgres` CI job runs `tests/test_postgres.py` against the

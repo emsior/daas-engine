@@ -1,6 +1,6 @@
 """Izolacja najemcow dla tokenow OAuth konektorow MCP i brak sekretow OAuth w audycie, logach i bazie.
 
-Token wydany po zgodzie w organizacji A wola KAZDE narzedzie `/mcp` z identyfikatorami zasobow organizacji B
+Token wydany po zgodzie w organizacji A wola KAZDE narzedzie, zasob i prompt `/mcp` z identyfikatorami organizacji B
 (ten sam zestaw przypadkow co `tests/test_mcp_isolation.py` dla klucza API): obcy identyfikator = `not_found`,
 listy i opisy organizacji zwracaja wylacznie dane A. Uzytkownik nalezacy do obu organizacji dostaje token zwiazany
 z organizacja zgody. Kod, `code_verifier`, tokeny i sekret klienta nie trafiaja do `audit_events`, pliku audytu
@@ -11,15 +11,20 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import delete
 
 from app.control import models
+from app.control import scopes as sc
 from app.control.security import sha256_hex
 from app.control.tenancy import TenantPaths
 from app.core.config import Settings
 from app.main import create_app
+from app.mcp_server import prompts as mcp_prompts
+from app.mcp_server import resources as mcp_resources
 from tests.conftest import PROJECT_ROOT, TEST_SECRET_KEY
 from tests.mcp_helpers import call_tool, error_code, ok, post, rpc, text_of, wait_job
 from tests.oauth_helpers import (
@@ -34,9 +39,18 @@ from tests.oauth_helpers import (
     start,
     token,
 )
-from tests.test_mcp_isolation import CASES, UKSC_RUN_ID
+from tests.test_mcp_isolation import CASES, PROMPT_CASES, RESOURCE_CASES, UKSC_RUN_ID
 from tests.test_mcp_isolation import World as ToolWorld
-from tests.v1_helpers import API, get_rows, key_headers, seed_member, seed_org, with_db
+from tests.test_mcp_resources import ecommerce_run, rpc_body, rpc_error, rpc_error_code
+from tests.v1_helpers import (
+    API,
+    get_rows,
+    key_headers,
+    seed_member,
+    seed_org,
+    user_headers,
+    with_db,
+)
 
 CSV_TEXT = (PROJECT_ROOT / "data" / "fixtures" / "client_export_pl.csv").read_text(encoding="utf-8")
 #: Zakresy zgody A: odczyt i zapis, zeby kazde narzedzie doszlo do sprawdzenia organizacji (a nie zakresu).
@@ -65,7 +79,8 @@ def world(tmp_path_factory: pytest.TempPathFactory) -> World:
         daas_control_db_url=f"sqlite+aiosqlite:///{root / 'control.db'}",
         duckdb_path=str(root / "runtime" / "daas.duckdb"), reports_dir=str(root / "runtime" / "reports"),
         fixtures_dir=str(PROJECT_ROOT / "data" / "fixtures"), daas_cockpit_origin=ISSUER,
-        daas_rate_limit_ip_per_min=0, daas_metrics_token=None, daas_allow_console_mail=True)
+        daas_rate_limit_ip_per_min=0, daas_rate_limit_auth_fail_per_min=0,  # macierz wielu odmow 401
+        daas_metrics_token=None, daas_allow_console_mail=True)
     settings.ensure_dirs()
     with TestClient(create_app(settings), base_url="https://testserver") as client:
         a = seed_org(settings, name="Org A", owner_email="a-owner@example.test")
@@ -101,6 +116,157 @@ def test_token_of_a_never_reaches_resources_of_b(world: World, tool, args, expec
     serialized = repr(result)
     for secret in world.tools.b_secrets:
         assert secret not in serialized, (tool, secret)
+
+
+# ================================================================ zasoby i prompty OAuth
+@pytest.fixture
+def own_requests(world: World):
+    """Wlasne zasoby A w tym samym swiecie; po tescie list_runs A znow jest puste."""
+    tools = world.tools
+    upload_id, run_id = ecommerce_run(world.client, tools.a.api_key, filename="TEST-own.csv")
+    job = ok(call_tool(world.client, tools.a.api_key, "start_run",
+                       {"upload_id": upload_id, "pipeline": "ecommerce_demo"}))
+    previous = wait_job(world.client, tools.a.api_key, job["job_id"])
+    assert previous["status"] == "succeeded", previous
+    uksc_run_id = str(uuid4())
+
+    async def seed_uksc_run(db):
+        db.add(models.RunRecord(run_id=uksc_run_id, org_id=tools.a.org_id,
+                                pipeline="uksc_evidence", status="SUCCESS"))
+
+    with_db(world.settings, seed_uksc_run)
+    replacements = {tools.b_run_id: run_id, tools.b_upload_id: upload_id, UKSC_RUN_ID: uksc_run_id}
+    requests = {"resources/list": ("resources/list", {})}
+    for template, uri in RESOURCE_CASES:
+        own_uri = uri(tools)
+        for foreign, own in replacements.items():
+            own_uri = own_uri.replace(foreign, own)
+        requests[template] = ("resources/read", {"uri": own_uri})
+    for prompt, arguments in PROMPT_CASES:
+        args = {name: replacements.get(value, value) for name, value in arguments(tools).items()}
+        if prompt == "compare_runs":  # kontrola pozytywna potrzebuje dwoch runow tego samego pipeline'u
+            args["previous_run_id"] = previous["run_id"]
+        requests[prompt] = ("prompts/get", {"name": prompt, "arguments": args})
+    try:
+        yield requests
+    finally:
+        async def remove_own_records(db):
+            await db.execute(delete(models.Job).where(models.Job.org_id == tools.a.org_id,
+                                                      models.Job.upload_id == upload_id))
+            await db.execute(delete(models.RunRecord).where(models.RunRecord.org_id == tools.a.org_id,
+                                                            models.RunRecord.run_id.in_(
+                                                                (run_id, previous["run_id"], uksc_run_id))))
+            await db.execute(delete(models.Upload).where(models.Upload.org_id == tools.a.org_id,
+                                                         models.Upload.id == upload_id))
+
+        with_db(world.settings, remove_own_records)
+
+
+def _assert_nothing_of_b(world: World, payload, label: str) -> None:
+    serialized = repr(payload)
+    for secret in world.tools.b_secrets:
+        assert secret not in serialized, (label, secret)
+
+
+def test_oauth_matrix_covers_every_resource_and_prompt():
+    assert sorted(name for name, _ in RESOURCE_CASES) == sorted(spec.shape for spec in mcp_resources.SPECS)
+    assert sorted(name for name, _ in PROMPT_CASES) == sorted(spec.name for spec in mcp_prompts.SPECS)
+
+
+@pytest.mark.parametrize(("template", "uri"), RESOURCE_CASES, ids=[c[0] for c in RESOURCE_CASES])
+def test_token_of_a_never_reads_resources_of_b(world: World, template, uri):
+    body = rpc_body(world.client, world.a_conn.access_token, "resources/read", {"uri": uri(world.tools)})
+    assert "error" in body and rpc_error_code(body["error"]) == "not_found", body
+    assert "data" not in body["error"]
+    _assert_nothing_of_b(world, body, template)
+
+
+@pytest.mark.parametrize(("prompt", "arguments"), PROMPT_CASES, ids=[c[0] for c in PROMPT_CASES])
+def test_token_of_a_never_gets_prompts_about_resources_of_b(world: World, prompt, arguments):
+    body = rpc_body(world.client, world.a_conn.access_token, "prompts/get",
+                    {"name": prompt, "arguments": arguments(world.tools)})
+    assert "error" in body and rpc_error_code(body["error"]) == "not_found", body
+    assert "data" not in body["error"]
+    _assert_nothing_of_b(world, body, prompt)
+
+
+def test_resource_list_with_a_token_of_a_shows_nothing_of_b(world: World):
+    tools = world.tools
+    listed = rpc_body(world.client, world.a_conn.access_token, "resources/list")
+    assert "result" in listed, listed
+    _assert_nothing_of_b(world, listed, "resources/list")
+    to_b = connect(world.client, world.settings, tools.b.user_id, tools.b.org_id, scope=SCOPES,
+                   client_id=world.a_conn.client_id)
+    own = rpc_body(world.client, to_b.access_token, "resources/list")["result"]["resources"]
+    assert f"daas://runs/{tools.b_run_id}/report.md" in {r["uri"] for r in own}
+    for template, uri in RESOURCE_CASES:
+        body = rpc_body(world.client, to_b.access_token, "resources/read", {"uri": uri(tools)})
+        assert "result" in body, (template, body)
+    for prompt, arguments in PROMPT_CASES:
+        if prompt != "compare_runs":  # B ma runy roznych pipeline'ow, jak w macierzy kluczy
+            body = rpc_body(world.client, to_b.access_token, "prompts/get",
+                            {"name": prompt, "arguments": arguments(tools)})
+            assert "result" in body, (prompt, body)
+
+
+def test_insufficient_scope_is_refused_for_resources_and_prompts(world: World, own_requests):
+    # Osobne zgody tego samego klienta nie zuzywaja limitu dynamicznych rejestracji.
+    limited = connect(world.client, world.settings, world.tools.a.user_id, world.tools.a.org_id,
+                      scope="usage:read", client_id=world.a_conn.client_id)
+    for case, (method, params) in own_requests.items():
+        allowed = rpc_body(world.client, world.a_conn.access_token, method, params)
+        assert "result" in allowed, (case, allowed)
+        if method == "resources/list":
+            assert allowed["result"]["resources"]  # lista ograniczona zakresem, nie brakiem danych
+            body = rpc_body(world.client, limited.access_token, method, params)
+            assert body["result"]["resources"] == []
+        else:
+            error = rpc_error(world.client, limited.access_token, method, params)
+            assert rpc_error_code(error) == "insufficient_scope", (case, error)
+
+
+@pytest.mark.parametrize("via", ["rfc7009", "cockpit"], ids=["rfc7009", "cockpit"])
+def test_revoked_token_cannot_list_or_read_resources_or_get_prompts(world: World, own_requests, via):
+    tools = world.tools
+    conn = connect(world.client, world.settings, tools.a.user_id, tools.a.org_id, scope="runs:read reports:read",
+                   client_id=world.a_conn.client_id)
+    for case, (method, params) in own_requests.items():
+        body = rpc_body(world.client, conn.access_token, method, params)
+        assert "result" in body, (case, body)
+    if via == "rfc7009":
+        assert revoke(world.client, conn.client_id, conn.refresh_token).status_code == 200
+    else:
+        (grant,) = get_rows(world.settings, models.OAuthToken, models.OAuthToken.client_id == conn.client_id,
+                            models.OAuthToken.token_hash == sha256_hex(conn.refresh_token))
+        response = world.client.delete(f"{API}/orgs/{tools.a.org_id}/oauth/grants/{grant.id}",
+                                       headers=user_headers(world.settings, tools.a.user_id))
+        assert response.status_code == 204, response.text
+    for case, (method, params) in own_requests.items():
+        response = post(world.client, rpc(method, params), conn.access_token)
+        assert response.status_code == 401, (case, response.text)
+        assert response.headers["www-authenticate"].startswith("Bearer "), case
+
+
+def test_degraded_role_limits_resources_immediately(world: World, own_requests):
+    # Wszystkie role maja oba zakresy: degradacja nie odbierze reports:read. Sprawdzamy utrate czlonkostwa.
+    assert all({sc.RUNS_READ, sc.REPORTS_READ} <= scopes for scopes in sc.ROLE_SCOPES.values())
+    tools = world.tools
+    user_id = seed_member(world.settings, tools.a.org_id, "removed-member@example.test", "member")
+    conn = connect(world.client, world.settings, user_id, tools.a.org_id, scope="runs:read reports:read",
+                   client_id=world.a_conn.client_id)
+    for case, (method, params) in own_requests.items():
+        body = rpc_body(world.client, conn.access_token, method, params)
+        assert "result" in body, (case, body)
+
+    async def remove_member(db):
+        await db.execute(delete(models.Membership).where(models.Membership.org_id == tools.a.org_id,
+                                                         models.Membership.user_id == user_id))
+
+    with_db(world.settings, remove_member)
+    for case, (method, params) in own_requests.items():
+        response = post(world.client, rpc(method, params), conn.access_token)
+        assert response.status_code == 401, (case, response.text)
+        assert response.headers["www-authenticate"].startswith("Bearer "), case
 
 
 def test_a_user_in_both_organizations_gets_a_token_bound_to_the_consented_one(world: World):
