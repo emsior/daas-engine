@@ -78,3 +78,30 @@ Blokada techniczna to hook PreToolUse deny (~/.gemini/config/hooks.json +
 hooks/deny-push.ps1), nie ten zapis. Jeśli hook jest wyłączony (enabled: false)
 albo nie wiesz, czy działa — nie wykonuj takich operacji wcale, tylko wypisz
 komendę do ręcznego uruchomienia.
+
+## Zasady PPC dla Codexa (15.10.2026, rejestr STACK v3)
+
+Codex CLI jest tu **wykonawcą domyślnym** (`codex exec` ze spec-pliku); zmiany Codexa recenzuje Claude, zmiany Claude'a recenzuje Codex (reviewer ≠ autor). Pełne reguły: globalny `~/.codex/AGENTS.md` v3 oraz `STACK.md` w warsztacie. Skrót obowiązujący w tym repo bez wyjątków:
+
+1. **Zero nazwiska właściciela** w plikach, commitach, logach i promptach. Marka Proch PC / PPC, jedyny kontakt `prochpc@gmail.com`; stary adres z konta konektorów nie istnieje w treściach.
+2. **Słownictwo hazardowe zakazane** (art. 110a k.k.s.) w kodzie, commitach, docs i nazwach plików. Publicznie: „aplikacja analityczna z modelem EV” / *esports statistics*. Wzorce sprawdza skill `ppc-wyciek`; lista zostaje poza repozytorium.
+3. **Git tylko po ścieżkach:** `git add <plik>`, nigdy `-A` ani `.`; nigdy `--no-verify`; nie zmieniaj `core.hooksPath`; nie przepisuj historii. Tożsamość: `user.name = PPC`, `user.email = 267137654+emsior@users.noreply.github.com`. Commit tylko gdy spec na to pozwala, na gałęzi roboczej, komunikat bez nazwiska i zakazanych fraz.
+4. **Zero pusha, publikacji i zmian `main`** — bez wyjątków; push robi właściciel osobnym krokiem.
+5. **Zero `.env`, `.secrets/`, kluczy, tokenów i danych klienta** — nie czytaj, nie cytuj, nie commituj. Dane testowe wyłącznie syntetyczne.
+6. **Sandbox:** `workspace-write`, sieć wyłączona (`.codex/config.toml`). Instalacje (`pip`/`npm`/`composer`), Docker, sieć i kasowanie tylko gdy spec jawnie na to pozwala. Poza katalogiem repo nie piszesz.
+7. **Testy przed oddaniem:** komendy z `CLAUDE.md` tego repo; wynik liczbą z datą; wynik poniżej bazowego = regresja. Nie możesz uruchomić → 🚫 + powód, nigdy „zielone” bez dowodu.
+8. **Wzorzec zadania:** ŹRÓDŁO (co czytasz) · OPERACJA (co wolno zmienić) · ZAKAZ (czego nie robisz) · DOWÓD (co pokazujesz: test, diff, plik). Brak pola → pytasz w bloku, nie zgadujesz. Zmiany poza zakresem to błąd, nie bonus; znalezione obok = obserwacja, nie poprawka.
+9. **Wynik = blok dla Claude**, dopisany na końcu `DO_CLAUDE.md` w kanale `.handoff` warsztatu (append-only, UTF-8, nic nie kasuj):
+   ```
+   === DO CLAUDE === <data> — <ID-BLOKU>
+   TASK: … / SCOPE: … / ROLE: wykonawca|reviewer / ROLE_VERSION: 3 / ASSIGNEE: codex. Autor zmian: …
+   RESULT: DONE|ACCEPTED|CHANGES|BLOCKED — …
+   FINDINGS: … (plik:linie, priorytet P1/P2/P3)
+   EVIDENCE: … (komendy → wyniki z datą i godziną)
+   CONFIDENCE: …
+   ACTION_REQUIRED: …
+   STATE_CHANGE: … (pliki, commity; zero pushy)
+   RELEASED_BY: codex. ACCEPTED_BY: —
+   === KONIEC ===
+   ```
+10. Ćwiczenia `TODO(michal)` zostawiasz właścicielowi. Pliki z polskimi znakami w UTF-8. W repozytorium z remote — zero lokalnych ścieżek dysku.
