@@ -10,7 +10,7 @@ def resolve_report(reports_dir: Path, raw_path: str | None, *, raise_errors: boo
     Sciezka w bazie najemcy bywa bezwzgledna i po przeniesieniu katalogu runtime (inny host, inny punkt montowania)
     juz nie istnieje — wtedy szukamy pliku o tej samej nazwie w biezacym katalogu raportow. Zawsze bierzemy tylko
     nazwe pliku, wiec zadna sciezka z bazy nie wyprowadzi poza katalog raportow tej organizacji (po rozwiazaniu
-    symlinkow wynik musi lezec w tym katalogu). Retencja uzywa `raise_errors`, aby blad rozwiazania sciezki
+    symlinkow wynik musi lezec w tym katalogu). Retencja uzywa `raise_errors`, aby blad rozwiazania biezacej sciezki
     nie byl uznany za brak pliku; pozostali wolajacy zachowuja wyszukiwanie best-effort.
     """
     if not raw_path:
@@ -24,7 +24,8 @@ def resolve_report(reports_dir: Path, raw_path: str | None, *, raise_errors: boo
         try:
             resolved = candidate.resolve()
         except (OSError, RuntimeError):
-            if raise_errors:
+            # Rozstrzyga biezaca sciezka albo jedyny kandydat, gdy nie mozna wyznaczyc nazwy.
+            if raise_errors and candidate == candidates[-1]:
                 raise
             continue
         if resolved.is_relative_to(base) and resolved.is_file():

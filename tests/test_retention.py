@@ -184,6 +184,57 @@ def test_a_missing_file_still_counts_as_purged(cloud_client, cloud_settings, org
 
 # ================================================================ raporty i dane najemcy
 @pytest.mark.parametrize("error_type", [OSError, RuntimeError])
+@pytest.mark.parametrize(("current_report_exists", "removed_files"), [(True, 3), (False, 2)],
+                         ids=["current-report", "missing-report"])
+def test_a_stale_stored_path_resolution_error_does_not_block_report_purge(
+        cloud_client, cloud_settings, org, tmp_path, monkeypatch, error_type, current_report_exists, removed_files):
+    from app.control import report_paths
+
+    run_id = finished_run(cloud_client, org)["run_id"]
+    age_run(cloud_settings, run_id)
+    db = cloud_client.app.state.tenants.get(org.org_id).db
+    with db.connect() as con:
+        row = con.execute("SELECT report_path, report_json_path, report_html_path FROM runs WHERE run_id = ?",
+                          [run_id]).fetchone()
+        paths = [Path(raw) for raw in row]
+        current = paths[0]
+        stale = tmp_path / "TEST-old-runtime" / current.name
+        assert stale.is_absolute() and not stale.is_relative_to(current.parent)
+        assert stale != current and current.is_file()
+        con.execute("UPDATE runs SET report_path = ? WHERE run_id = ?", [str(stale), run_id])
+    if not current_report_exists:
+        current.unlink()
+    original_resolve = report_paths.Path.resolve
+
+    def deny_stale_path(self, *args, **kwargs):
+        if self == stale:
+            raise error_type("TEST stale report path resolution failed")
+        return original_resolve(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(report_paths.Path, "resolve", deny_stale_path)
+        report = mine(do_purge(cloud_settings), org.org_id)
+        assert (report.reports, report.files, report.rows, report.failed) == (1, removed_files, 1, 0)
+        assert all(not path.exists() for path in paths)
+        with db.connect() as con:
+            assert con.execute("SELECT count(*) FROM runs WHERE run_id = ?", [run_id]).fetchone()[0] == 0
+            assert con.execute("SELECT count(*) FROM cs2_matches WHERE run_id = ?", [run_id]).fetchone()[0] == 0
+        (done,) = get_rows(cloud_settings, models.RunRecord, models.RunRecord.run_id == run_id)
+        assert done.report_purged_at is not None
+        assert not get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purge_failed")
+        (purged,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purged")
+        assert purged.org_id == org.org_id and purged.actor_type == "system" and purged.meta == {"count": 1}
+
+        again = mine(do_purge(cloud_settings), org.org_id)
+        assert (again.reports, again.files, again.rows, again.failed) == (0, 0, 0, 0)
+        (unchanged,) = get_rows(cloud_settings, models.RunRecord, models.RunRecord.run_id == run_id)
+        assert unchanged.report_purged_at == done.report_purged_at
+        assert not get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purge_failed")
+        (same_event,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purged")
+        assert same_event.id == purged.id
+
+
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError])
 def test_a_report_whose_path_cannot_be_resolved_keeps_the_run_state_for_retry(
         cloud_client, cloud_settings, org, monkeypatch, error_type):
     from app.control import report_paths
