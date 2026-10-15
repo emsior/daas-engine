@@ -27,6 +27,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Added
 
+- Retention audit actions `upload.purge_failed` and `report.purge_failed`, with counts per organization
+  and cycle, and a `failed` file count in the purge summary (P1-5).
 - Verification beyond SQLite and Chromium. The `postgres` CI job runs `tests/test_postgres.py` against the
   PostgreSQL 16 of the `ubuntu-24.04` runner: Alembic upgrade → downgrade → upgrade compared with the models, the
   "at least one owner" guard with two concurrent sessions (`SELECT … FOR UPDATE`; the test proceeds only when the
@@ -113,6 +115,9 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Fixed
 
+- Retention preserves upload records and the affected run's DuckDB rows, report paths and unpurged status
+  when file removal fails, so later cycles can retry. Missing files still allow completion; successful
+  purges are counted and audited only for uploads and runs whose files were removed or already absent (P1-5).
 - Selfhost Markdown and JSON reports are served from the bytes used to compute `X-Report-SHA256`,
   even if the report file is replaced before the response is sent (P1-4).
 - Selfhost OpenAPI describes the required `POST /run` JSON body and the existing redacted legacy

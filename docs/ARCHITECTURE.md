@@ -87,7 +87,13 @@ In `cloud` mode a background task started with the application (every `DAAS_RETE
 - report files of runs older than `Org.retention_days` (`RunRecord` and hashes stay, `POST .../verify` keeps working, the report endpoint answers `410 report_expired` via the `report_purged_at` marker);
 - the tenant's DuckDB rows (`runs` and the run-keyed data tables) older than the same period.
 
-Each deletion is audited (`upload.purged`, `report.purged`) without customer file names. The operation is idempotent and takes the per-organization lock, so it never overlaps a run of that organization. Backups (`deploy/backup.sh`) are not touched by retention: see [`SECURITY.md`](SECURITY.md).
+Each deletion is audited (`upload.purged`, `report.purged`) without customer file names. A file removal error keeps
+the upload record or all DuckDB rows and report paths of the affected run, without setting `report_purged_at`,
+so the next cycle retries it. Files already removed are not restored; a missing file does not block completion.
+Failures are audited once per organization and cycle as `upload.purge_failed` (upload count) and
+`report.purge_failed` (run count), with only `count` in metadata. The purge summary's `failed` counts files
+that could not be removed. The operation is idempotent and takes the per-organization lock, so it never overlaps
+a run of that organization. Backups (`deploy/backup.sh`) are not touched by retention: see [`SECURITY.md`](SECURITY.md).
 
 ## Request path
 

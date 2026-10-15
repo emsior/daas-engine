@@ -120,7 +120,129 @@ def test_a_missing_file_does_not_block_removing_the_record(cloud_client, cloud_s
     assert not get_rows(cloud_settings, models.Upload)
 
 
+def test_an_upload_whose_file_cannot_be_removed_keeps_its_record_and_is_retried(
+        cloud_client, cloud_settings, org, monkeypatch, caplog):
+    upload_id = upload(cloud_client, org, "TEST-upload.csv", CSV_BYTES)
+    expire_upload(cloud_settings, upload_id)
+    (path,) = upload_files(cloud_settings, org.org_id)
+    (before,) = get_rows(cloud_settings, models.Upload)
+    original_unlink = Path.unlink
+
+    def deny_upload(self, *args, **kwargs):
+        if self == path:
+            raise PermissionError(13, "TEST removal denied", str(self))
+        return original_unlink(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", deny_upload)
+        report = mine(do_purge(cloud_settings), org.org_id)
+
+    assert path.exists()
+    (kept,) = get_rows(cloud_settings, models.Upload)
+    assert kept.id == upload_id and kept.retention_until == before.retention_until
+    assert report.uploads == 0 and report.failed == 1
+    assert "failed=1" in report.line()
+    assert not get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "upload.purged")
+    (event,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "upload.purge_failed")
+    assert event.org_id == org.org_id and event.actor_type == "system" and event.meta == {"count": 1}
+    (error,) = [r for r in caplog.records if r.name == "app.control.retention" and r.levelname == "ERROR"]
+    assert path.name in error.getMessage() and org.org_id in error.getMessage()
+    assert str(path.parent) not in error.getMessage() and error.exc_info is None
+
+    retry = mine(do_purge(cloud_settings), org.org_id)
+    assert retry.uploads == 1 and retry.failed == 0
+    assert not path.exists() and not get_rows(cloud_settings, models.Upload)
+    (purged,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "upload.purged")
+    assert purged.meta["upload_id"] == upload_id
+    assert len(get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "upload.purge_failed")) == 1
+
+
+@pytest.mark.parametrize("during_unlink", [False, True])
+def test_a_missing_file_still_counts_as_purged(cloud_client, cloud_settings, org, monkeypatch, caplog, during_unlink):
+    upload_id = upload(cloud_client, org, "TEST-missing.csv", CSV_BYTES)
+    (path,) = upload_files(cloud_settings, org.org_id)
+    original_unlink = Path.unlink
+
+    def disappear(self, *args, **kwargs):
+        result = original_unlink(self, *args, **kwargs)
+        if self == path:
+            raise FileNotFoundError(2, "TEST file already removed", str(self))
+        return result
+
+    if not during_unlink:
+        path.unlink()
+    expire_upload(cloud_settings, upload_id)
+    with monkeypatch.context() as patch:
+        if during_unlink:
+            patch.setattr(Path, "unlink", disappear)
+        report = mine(do_purge(cloud_settings), org.org_id)
+    assert report.uploads == 1 and report.failed == 0
+    assert not get_rows(cloud_settings, models.Upload)
+    assert not [e for e in get_rows(cloud_settings, models.AuditEvent) if e.action.endswith(".purge_failed")]
+    assert not [r for r in caplog.records if r.name == "app.control.retention" and r.levelname == "ERROR"]
+
+
 # ================================================================ raporty i dane najemcy
+@pytest.mark.parametrize(("with_clean_run", "failed_files"), [(False, 1), (True, 1), (True, 2)])
+def test_a_report_whose_file_cannot_be_removed_keeps_the_run_state_for_retry(
+        cloud_client, cloud_settings, org, monkeypatch, with_clean_run, failed_files):
+    job = finished_run(cloud_client, org)
+    run_id = job["run_id"]
+    age_run(cloud_settings, run_id)
+    db = cloud_client.app.state.tenants.get(org.org_id).db
+    with db.connect() as con:
+        before = con.execute("SELECT report_path, report_json_path, report_html_path FROM runs WHERE run_id = ?",
+                             [run_id]).fetchone()
+        before_rows = con.execute("SELECT count(*) FROM cs2_matches WHERE run_id = ?", [run_id]).fetchone()[0]
+    paths = [Path(raw) for raw in before]
+    blocked = paths[1:1 + failed_files]
+    clean_id = None
+    if with_clean_run:
+        clean_id = finished_run(cloud_client, org)["run_id"]
+        age_run(cloud_settings, clean_id)
+    original_unlink = Path.unlink
+
+    def deny_report(self, *args, **kwargs):
+        if self in blocked:
+            raise PermissionError(13, "TEST removal denied", str(self))
+        return original_unlink(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "unlink", deny_report)
+        report = mine(do_purge(cloud_settings), org.org_id)
+
+    assert all(p.exists() for p in blocked) and all(not p.exists() for p in paths if p not in blocked)
+    with db.connect() as con:
+        assert con.execute("SELECT report_path, report_json_path, report_html_path FROM runs WHERE run_id = ?",
+                           [run_id]).fetchone() == before
+        assert con.execute("SELECT count(*) FROM cs2_matches WHERE run_id = ?", [run_id]).fetchone()[0] == before_rows
+        if clean_id:
+            assert con.execute("SELECT count(*) FROM runs WHERE run_id = ?", [clean_id]).fetchone()[0] == 0
+    (kept,) = get_rows(cloud_settings, models.RunRecord, models.RunRecord.run_id == run_id)
+    assert kept.report_purged_at is None
+    assert report.failed == failed_files and report.reports == int(with_clean_run) and report.rows == int(with_clean_run)
+    assert report.files == 3 - failed_files + 3 * int(with_clean_run)
+    purged = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purged")
+    assert [e.meta for e in purged] == ([{"count": 1}] if with_clean_run else [])
+    (event,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purge_failed")
+    assert event.org_id == org.org_id and event.actor_type == "system" and event.meta == {"count": 1}
+    if clean_id:
+        (clean,) = get_rows(cloud_settings, models.RunRecord, models.RunRecord.run_id == clean_id)
+        assert clean.report_purged_at is not None
+
+    retry = mine(do_purge(cloud_settings), org.org_id)
+    assert (retry.reports, retry.files, retry.rows, retry.failed) == (1, failed_files, 1, 0)
+    assert all(not p.exists() for p in blocked)
+    with db.connect() as con:
+        assert con.execute("SELECT count(*) FROM runs WHERE run_id = ?", [run_id]).fetchone()[0] == 0
+        assert con.execute("SELECT count(*) FROM cs2_matches WHERE run_id = ?", [run_id]).fetchone()[0] == 0
+    (done,) = get_rows(cloud_settings, models.RunRecord, models.RunRecord.run_id == run_id)
+    assert done.report_purged_at is not None
+    purged = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purged")
+    assert len(purged) == 1 + int(with_clean_run) and all(e.meta == {"count": 1} for e in purged)
+    assert len(get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purge_failed")) == 1
+
+
 def test_old_reports_are_deleted_but_the_run_record_and_hashes_stay(cloud_client, cloud_settings, org):
     job = finished_run(cloud_client, org)
     fresh = finished_run(cloud_client, org)

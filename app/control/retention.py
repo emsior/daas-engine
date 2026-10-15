@@ -22,6 +22,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+from typing import Literal
 
 from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -50,35 +51,42 @@ class PurgeReport:
     files: int = 0        # usuniete pliki raportow
     rows: int = 0         # usuniete wiersze runow w tenantowym DuckDB
     dry_run: bool = False
+    failed: int = 0       # pliki, ktorych nie udalo sie usunac
 
     def line(self) -> str:
         mode = "dry-run " if self.dry_run else ""
         return (f"{mode}org={self.org_id} uploads={self.uploads} reports={self.reports} "
-                f"files={self.files} rows={self.rows}")
+                f"files={self.files} rows={self.rows} failed={self.failed}")
 
 
-def _unlink_inside(root: Path, candidate: Path, *, dry_run: bool) -> bool:
-    """Usuwa plik tylko, gdy po rozwiazaniu symlinkow lezy w `root`. True = plik istnial (i zostal/zostalby usuniety)."""
+UnlinkResult = Literal["removed", "missing", "failed"]
+
+
+def _unlink_inside(root: Path, candidate: Path, *, dry_run: bool, org_id: str) -> UnlinkResult:
+    """Usuwa tylko plik w `root`; brak pliku lub sciezka poza root nie sa bledem. Dry-run zwraca `removed`."""
     try:
         resolved = candidate.resolve()
         if not resolved.is_relative_to(root.resolve()) or not resolved.is_file():
-            return False
+            return "missing"
         if not dry_run:
-            resolved.unlink(missing_ok=True)
-        return True
+            resolved.unlink()
+        return "removed"
+    except FileNotFoundError:
+        return "missing"
     except OSError:
-        log.exception("retention: could not remove a file")
-        return False
+        log.error("retention: could not remove file=%s org=%s", candidate.name, org_id)
+        return "failed"
 
 
-def _purge_uploads_files(paths: TenantPaths, names: list[str], dry_run: bool) -> None:
-    for name in names:
-        _unlink_inside(paths.uploads, paths.uploads / name, dry_run=dry_run)
+def _purge_uploads_files(paths: TenantPaths, names: list[str], dry_run: bool, org_id: str) -> list[UnlinkResult]:
+    return [_unlink_inside(paths.uploads, paths.uploads / name, dry_run=dry_run, org_id=org_id) for name in names]
 
 
-def _purge_tenant(db, reports_root: Path, run_ids: list[str], cutoff: datetime, dry_run: bool) -> tuple[int, int]:
-    """Pliki raportow i wiersze DuckDB. Zwraca `(usuniete pliki, usuniete wiersze `runs`)`."""
-    files = rows = 0
+def _purge_tenant(db, reports_root: Path, run_ids: list[str], cutoff: datetime, dry_run: bool,
+                  org_id: str) -> tuple[int, int, set[str], int]:
+    """Zwraca usuniete pliki, usuniete wiersze `runs`, nieudane runy i liczbe bledow usuniecia plikow."""
+    files = rows = failed = 0
+    failed_run_ids: set[str] = set()
     with db.connect() as con:
         old = [r[0] for r in con.execute("SELECT run_id FROM runs WHERE started_at < ?", [cutoff]).fetchall()]
         targets = sorted(set(run_ids) | set(old))
@@ -89,16 +97,23 @@ def _purge_tenant(db, reports_root: Path, run_ids: list[str], cutoff: datetime, 
                 # ten sam resolver co w API: po przeniesieniu runtime sciezka bezwzgledna nie istnieje, a plik lezy
                 # w biezacym katalogu raportow pod ta sama nazwa
                 found = resolve_report(reports_root, raw)
-                if found is not None and _unlink_inside(reports_root, found, dry_run=dry_run):
+                if found is None:
+                    continue
+                result = _unlink_inside(reports_root, found, dry_run=dry_run, org_id=org_id)
+                if result == "removed":
                     files += 1
-        if targets:
-            rows = con.execute(f"SELECT count(*) FROM runs WHERE run_id IN ({', '.join('?' * len(targets))})",  # noqa: S608
-                               targets).fetchone()[0]
+                elif result == "failed":
+                    failed += 1
+                    failed_run_ids.add(run_id)
+        clean = [run_id for run_id in targets if run_id not in failed_run_ids]
+        if clean:
+            rows = con.execute(f"SELECT count(*) FROM runs WHERE run_id IN ({', '.join('?' * len(clean))})",  # noqa: S608
+                               clean).fetchone()[0]
             if not dry_run:
                 for table in RUN_TABLES:
-                    con.execute(f"DELETE FROM {table} WHERE run_id IN ({', '.join('?' * len(targets))})",  # noqa: S608
-                                targets)
-    return files, rows
+                    con.execute(f"DELETE FROM {table} WHERE run_id IN ({', '.join('?' * len(clean))})",  # noqa: S608
+                                clean)
+    return files, rows, failed_run_ids, failed
 
 
 async def purge_org(org: Org, sessionmaker: async_sessionmaker[AsyncSession], registry: TenantRegistry,
@@ -121,31 +136,47 @@ async def purge_org(org: Org, sessionmaker: async_sessionmaker[AsyncSession], re
                 Upload.org_id == org.id, Upload.retention_until < now, Upload.id.not_in(busy)))).scalars().all()
             report.uploads = len(expired)
             if expired and not dry_run:
-                await asyncio.to_thread(_purge_uploads_files, paths, [u.path for u in expired], False)
-                for upload in expired:
+                results = await asyncio.to_thread(_purge_uploads_files, paths, [u.path for u in expired], False, org.id)
+                clean_uploads = [u for u, result in zip(expired, results, strict=True) if result != "failed"]
+                report.uploads = len(clean_uploads)
+                report.failed = results.count("failed")
+                for upload in clean_uploads:
                     await record_event(db, None, org_id=org.id, actor_type="system", actor_id=None,
                                        action="upload.purged", target=f"upload:{upload.id}", settings=settings,
                                        meta={"upload_id": upload.id, "kind": upload.kind, "bytes": upload.bytes})
-                await db.execute(delete(Upload).where(Upload.id.in_([u.id for u in expired])))
+                if clean_uploads:
+                    await db.execute(delete(Upload).where(Upload.id.in_([u.id for u in clean_uploads])))
+                if report.failed:
+                    await record_event(db, None, org_id=org.id, actor_type="system", actor_id=None,
+                                       action="upload.purge_failed", target=f"org:{org.id}", settings=settings,
+                                       meta={"count": report.failed})
                 await db.commit()
             # ---- raporty i dane najemcy
             old_runs = (await db.execute(select(RunRecord.run_id).where(
                 RunRecord.org_id == org.id, RunRecord.created_at < cutoff,
                 RunRecord.report_purged_at.is_(None)))).scalars().all()
+        failed_run_ids: set[str] = set()
         if paths.root.exists():
             runner = await registry.aget(org.id, llm_narrative=effective_llm(settings, org))
-            report.files, report.rows = await asyncio.to_thread(
-                _purge_tenant, runner.db, paths.reports, list(old_runs), cutoff.replace(tzinfo=None), dry_run)
-        report.reports = len(old_runs)
-        if old_runs and not dry_run:
+            report.files, report.rows, failed_run_ids, failed_files = await asyncio.to_thread(
+                _purge_tenant, runner.db, paths.reports, list(old_runs), cutoff.replace(tzinfo=None), dry_run, org.id)
+            report.failed += failed_files
+        clean_runs = [run_id for run_id in old_runs if run_id not in failed_run_ids]
+        report.reports = len(clean_runs)
+        if (clean_runs or failed_run_ids) and not dry_run:
             async with sessionmaker() as db:
-                await db.execute(update(RunRecord).where(RunRecord.run_id.in_(old_runs)).values(
-                    report_purged_at=now))
-                await record_event(db, None, org_id=org.id, actor_type="system", actor_id=None,
-                                   action="report.purged", target=f"org:{org.id}", settings=settings,
-                                   meta={"count": len(old_runs)})
+                if clean_runs:
+                    await db.execute(update(RunRecord).where(RunRecord.run_id.in_(clean_runs)).values(
+                        report_purged_at=now))
+                    await record_event(db, None, org_id=org.id, actor_type="system", actor_id=None,
+                                       action="report.purged", target=f"org:{org.id}", settings=settings,
+                                       meta={"count": len(clean_runs)})
+                if failed_run_ids:
+                    await record_event(db, None, org_id=org.id, actor_type="system", actor_id=None,
+                                       action="report.purge_failed", target=f"org:{org.id}", settings=settings,
+                                       meta={"count": len(failed_run_ids)})
                 await db.commit()
-    if any((report.uploads, report.reports, report.rows)):
+    if any((report.uploads, report.reports, report.rows, report.failed)):
         log.info("retention %s", report.line())
     return report
 
