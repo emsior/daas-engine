@@ -687,6 +687,20 @@ def _register_basic_client(http_client, settings, special_secret):
     return client
 
 
+@pytest.mark.parametrize("path", ["/token", "/revoke"])
+def test_token_and_revoke_reject_a_form_body_that_is_not_utf8(cloud_client, path):
+    body = b"client_id=\xff\xfe&grant_type=refresh_token"
+    response = cloud_client.post(
+        path, content=body, headers={"content-type": "application/x-www-form-urlencoded"},
+    )
+    assert response.status_code == 400, response.text
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json()["code"] == "invalid_request"
+    assert body not in response.content
+    assert all(value not in response.text for value in ("client_id", "refresh_token", "\\xff", "\\xfe"))
+    assert "Traceback" not in response.text
+
+
 @pytest.mark.parametrize("special_secret", [False, True])
 def test_token_endpoint_accepts_client_secret_basic(cloud_client, cloud_settings, org, special_secret):
     client = _register_basic_client(cloud_client, cloud_settings, special_secret)
