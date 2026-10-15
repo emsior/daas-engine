@@ -124,8 +124,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - Cockpit CORS allows credentialed `PUT` preflights for schedule updates (P2-10).
 - API key validation reports unknown scopes without echoing the submitted values (P2-11).
 - Retention preserves upload records and the affected run's DuckDB rows, report paths and unpurged status
-  when file removal fails, so later cycles can retry. Missing files still allow completion; successful
-  purges are counted and audited only for uploads and runs whose files were removed or already absent (P1-5).
+  when file removal or report path resolution fails, so later cycles can retry. Missing files still allow completion;
+  successful purges are counted and audited only for uploads and runs whose files were removed or already absent (P1-5).
 - Selfhost Markdown and JSON reports are served from the bytes used to compute `X-Report-SHA256`,
   even if the report file is replaced before the response is sent (P1-4).
 - Selfhost OpenAPI describes the required `POST /run` JSON body and the existing redacted legacy

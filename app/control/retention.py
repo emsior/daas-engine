@@ -96,10 +96,15 @@ def _purge_tenant(db, reports_root: Path, run_ids: list[str], cutoff: datetime, 
             for raw in (row or ()):
                 # ten sam resolver co w API: po przeniesieniu runtime sciezka bezwzgledna nie istnieje, a plik lezy
                 # w biezacym katalogu raportow pod ta sama nazwa
-                found = resolve_report(reports_root, raw)
-                if found is None:
-                    continue
-                result = _unlink_inside(reports_root, found, dry_run=dry_run, org_id=org_id)
+                try:
+                    found = resolve_report(reports_root, raw, raise_errors=True)
+                except (OSError, RuntimeError):
+                    log.error("retention: could not resolve report path org=%s", org_id)
+                    result = "failed"
+                else:
+                    if found is None:
+                        continue
+                    result = _unlink_inside(reports_root, found, dry_run=dry_run, org_id=org_id)
                 if result == "removed":
                     files += 1
                 elif result == "failed":

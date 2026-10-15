@@ -183,6 +183,58 @@ def test_a_missing_file_still_counts_as_purged(cloud_client, cloud_settings, org
 
 
 # ================================================================ raporty i dane najemcy
+@pytest.mark.parametrize("error_type", [OSError, RuntimeError])
+def test_a_report_whose_path_cannot_be_resolved_keeps_the_run_state_for_retry(
+        cloud_client, cloud_settings, org, monkeypatch, error_type):
+    from app.control import report_paths
+
+    run_id = finished_run(cloud_client, org)["run_id"]
+    age_run(cloud_settings, run_id)
+    db = cloud_client.app.state.tenants.get(org.org_id).db
+    with db.connect() as con:
+        before = con.execute("SELECT report_path, report_json_path, report_html_path FROM runs WHERE run_id = ?",
+                             [run_id]).fetchone()
+        before_rows = con.execute("SELECT count(*) FROM cs2_matches WHERE run_id = ?", [run_id]).fetchone()[0]
+    paths = [Path(raw) for raw in before]
+    blocked = paths[0]
+    original_resolve = report_paths.Path.resolve
+
+    def deny_report(self, *args, **kwargs):
+        if self == blocked:
+            raise error_type("TEST report path resolution failed")
+        return original_resolve(self, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(report_paths.Path, "resolve", deny_report)
+        # API callers retain the resolver's existing best-effort behavior.
+        assert report_paths.resolve_report(blocked.parent, str(blocked)) is None
+        report = mine(do_purge(cloud_settings), org.org_id)
+
+    assert blocked.exists()
+    with db.connect() as con:
+        assert con.execute("SELECT report_path, report_json_path, report_html_path FROM runs WHERE run_id = ?",
+                           [run_id]).fetchone() == before
+        assert con.execute("SELECT count(*) FROM cs2_matches WHERE run_id = ?", [run_id]).fetchone()[0] == before_rows
+    (kept,) = get_rows(cloud_settings, models.RunRecord, models.RunRecord.run_id == run_id)
+    assert kept.report_purged_at is None
+    assert (report.reports, report.files, report.rows, report.failed) == (0, 2, 0, 1)
+    assert not get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purged")
+    (event,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purge_failed")
+    assert event.org_id == org.org_id and event.actor_type == "system" and event.meta == {"count": 1}
+
+    retry = mine(do_purge(cloud_settings), org.org_id)
+    assert (retry.reports, retry.files, retry.rows, retry.failed) == (1, 1, 1, 0)
+    assert all(not path.exists() for path in paths)
+    with db.connect() as con:
+        assert con.execute("SELECT count(*) FROM runs WHERE run_id = ?", [run_id]).fetchone()[0] == 0
+        assert con.execute("SELECT count(*) FROM cs2_matches WHERE run_id = ?", [run_id]).fetchone()[0] == 0
+    (done,) = get_rows(cloud_settings, models.RunRecord, models.RunRecord.run_id == run_id)
+    assert done.report_purged_at is not None
+    (purged,) = get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purged")
+    assert purged.meta == {"count": 1}
+    assert len(get_rows(cloud_settings, models.AuditEvent, models.AuditEvent.action == "report.purge_failed")) == 1
+
+
 @pytest.mark.parametrize(("with_clean_run", "failed_files"), [(False, 1), (True, 1), (True, 2)])
 def test_a_report_whose_file_cannot_be_removed_keeps_the_run_state_for_retry(
         cloud_client, cloud_settings, org, monkeypatch, with_clean_run, failed_files):
