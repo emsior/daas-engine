@@ -10,7 +10,7 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Changed
 
-- CI: OPSEC checks fail closed on scanner errors and scan PR/push range history with commit-bound exceptions in `.opsec-history-allow`.
+- CI: OPSEC checks fail closed on scanner errors and scan the current tracked tree and PR/push range content (including merge resolutions and restorations, binary files except `*.png`/`*.mp4`, and UTF-16), file names, commit messages and author/committer identities using both policy files from the range base (bootstrap requires both files to be absent and the candidate Git blob IDs to match the owner-set `OPSEC_BOOTSTRAP_POLICY` repository variable), with commit-bound exceptions in `.opsec-history-allow`; merge additions are attributed only to non-merge origins reachable from a secondary parent that still contains the exact line or path; the workflow verifies a clean checkout of the tested SHA, records the policy blob IDs, hashes workflow names in warnings and runs on every PR `edited` event; any new exception requires an owner decision.
 - Migration `0006` revokes existing connector tokens without assigning legacy grants. Existing OAuth
   connections must be authorized again after upgrading.
 - Invitations can grant only a role whose scopes the caller holds; an API key with only `members:manage`

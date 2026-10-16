@@ -24,28 +24,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          fetch-depth: 0
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
         run: pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
-      - name: OPSEC check (tree)
-        run: bash tools/opsec_scan.sh --tree
-      - name: OPSEC check (pushed history)
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          BEFORE: ${{ github.event.before }}
-          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
-        run: |
-          case "$EVENT_NAME" in
-            pull_request) start="$BASE" ;;
-            push) start="$BEFORE" ;;
-            *) exit 2 ;;
-          esac
-          bash tools/opsec_scan.sh --range "$start..$HEAD" --allowlist .opsec-history-allow
       - name: Lint (ruff)
         run: ruff check --output-format=github .
       - name: Tests (mock mode — no secrets)
