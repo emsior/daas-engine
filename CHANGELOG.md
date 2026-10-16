@@ -10,6 +10,7 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Changed
 
+- CI: OPSEC checks fail closed on scanner errors and scan PR/push range history with commit-bound exceptions in `.opsec-history-allow`.
 - Migration `0006` revokes existing connector tokens without assigning legacy grants. Existing OAuth
   connections must be authorized again after upgrading.
 - Invitations can grant only a role whose scopes the caller holds; an API key with only `members:manage`

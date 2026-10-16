@@ -1,0 +1,5 @@
+# Known historical OPSEC findings, bound to full commit SHA, path and rule.
+# Owner decision on 2026-10-16: keep the public history without rewriting it.
+# These exceptions do not permit new findings in other commits or in the tree.
+a4ad79b44ce6051bbeb8c2b5f60abec933836408:AGENTS.md:name
+87201cb92c9087231bd7edf107766712a04393c7:tests/test_openapi_export.py:email
