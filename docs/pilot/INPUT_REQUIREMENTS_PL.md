@@ -3,11 +3,12 @@
 DaaS Engine obsługuje elastyczne formaty plików, jednak aby raport był w 100% precyzyjny, zalecamy spełnienie poniższych wytycznych:
 
 ### 1. Formaty plików
-- Obsługiwane rozszerzenia: `.csv`, `.xlsx`, `.xls`, `.tsv`, `.txt`.
-- Maksymalny rozmiar pliku w pilocie: **25 MB**.
-- Formaty i limit powyżej dotyczą plików przekazanych w pilocie. Samoobsługowy endpoint
-  `POST /upload` przyjmuje wyłącznie `.csv` do 10 MiB.
-- Kodowanie: UTF-8 lub Windows-1250 (auto-detekcja).
+- Obsługiwane rozszerzenia: `.csv` i `.xlsx`. Plik w innym formacie (`.xls`, `.tsv`, `.txt`) zapisz najpierw jako CSV albo XLSX.
+- Kodowanie CSV: UTF-8 lub Windows-1250 (auto-detekcja); separator `;`, `,` lub tabulator.
+- **CSV:** do 10 MiB i 100 000 wierszy danych.
+- **XLSX:** do 10 MiB, do 200 000 wierszy i 256 kolumn. Skoroszyt bez makr (plik `.xlsm` i skoroszyty z makrami są odrzucane), z osadzonymi obiektami też nie. Gdy skoroszyt ma kilka arkuszy, wskaż arkusz z danymi (pole `sheet` w API). Formuły nie są liczone: odczytywane są zapisane wartości.
+- Pilot przewiduje pliki do 25 MB. Plik większy niż 10 MiB operator przetwarza lokalnie na instancji pilota albo prosi o podział na części.
+- Paczka z lokalnego kolektora artefaktów (`.json`, pipeline `uksc_evidence`): do 5 MiB, zgodna ze schematem kolektora.
 
 ### 2. Wymagane informacje w wierszach
 Plik powinien zawierać co najmniej informacje o:
@@ -20,3 +21,6 @@ Plik powinien zawierać co najmniej informacje o:
 - **Rabat:** procentowy (np. `10%`) lub kwotowy.
 - **Produkt / Kategoria:** umożliwia stworzenie zestawienia TOP produktów i TOP kategorii.
 - **Status zamówienia:** pozwala odfiltrować zwroty i anulowania (`Zrealizowane`, `Completed`, `Zwrot`, `Cancelled`).
+
+### 4. Czego nie wysyłać
+Dane transakcyjne wystarczą. Nie dołączaj imion, nazwisk, adresów, telefonów, adresów e-mail ani numerów kart konsumentów (zob. `SECURITY_SCOPE_PL.md`, sekcja 2).

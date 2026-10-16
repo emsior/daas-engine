@@ -1,0 +1,365 @@
+"""Modele control plane (SQLAlchemy 2.0, deklaratywne, typowane).
+
+Kontrakt: SPEC v2 sekcja 2.2. Dane klienta (CSV, raporty, metryki) NIE leza w tej bazie — tylko
+metadane. Klucze API, tokeny logowania i zaproszenia sa przechowywane wylacznie jako skrot SHA-256.
+Migracje: `alembic/versions/`; test `tests/test_control_plane.py` pilnuje zgodnosci modeli z migracja.
+"""
+from __future__ import annotations
+
+from datetime import date, datetime
+from typing import Any
+
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    Date,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
+from app.control.ids import new_ulid
+from app.control.types import UTCDateTime, utcnow
+
+
+class Base(DeclarativeBase):
+    """Baza deklaratywna; `Base.metadata` jest celem autogeneracji Alembic."""
+
+
+_ID = String(26)
+_CASCADE = "CASCADE"
+
+
+class Org(Base):
+    __tablename__ = "orgs"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    slug: Mapped[str] = mapped_column(String(80), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
+    plan: Mapped[str] = mapped_column(String(16), default="free")  # free | pro | selfhost
+    dpa_accepted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    dpa_version: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    locale: Mapped[str] = mapped_column(String(8), default="pl")
+    retention_days: Mapped[int] = mapped_column(Integer, default=90)
+    llm_narrative: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    email: Mapped[str] = mapped_column(String(254), unique=True)  # zawsze male litery
+    name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    locale: Mapped[str] = mapped_column(String(8), default="pl")
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class Membership(Base):
+    __tablename__ = "memberships"
+
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete=_CASCADE), primary_key=True)
+    role: Mapped[str] = mapped_column(String(8))  # owner | admin | member
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    __table_args__ = (Index("ix_memberships_user_id", "user_id"),)
+
+
+class ApiKey(Base):
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    name: Mapped[str] = mapped_column(String(120))
+    prefix: Mapped[str] = mapped_column(String(8), unique=True)
+    key_hash: Mapped[str] = mapped_column(String(64))  # SHA-256 hex; sam klucz nigdy nie jest zapisywany
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    created_by: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_api_keys_org_id", "org_id"),)
+
+
+class MagicLink(Base):
+    __tablename__ = "magic_links"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    email: Mapped[str] = mapped_column(String(254))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # SHA-256 nonce z cookie `daas_ml` ustawianego przegladarce, ktora poprosila o link (ochrona przed login CSRF)
+    nonce_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete=_CASCADE))
+    org_id: Mapped[str | None] = mapped_column(ForeignKey("orgs.id", ondelete="SET NULL"), nullable=True)
+    csrf_token: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    __table_args__ = (Index("ix_sessions_user_id", "user_id"),)
+
+
+class Invitation(Base):
+    __tablename__ = "invitations"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    email: Mapped[str] = mapped_column(String(254))
+    role: Mapped[str] = mapped_column(String(8))
+    token_hash: Mapped[str] = mapped_column(String(64))
+    invited_by: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    accepted_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_invitations_org_id", "org_id"), Index("ix_invitations_email", "email"))
+
+
+class Upload(Base):
+    __tablename__ = "uploads"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # = nazwa pliku w uploads/ (bez rozszerzenia)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    kind: Mapped[str] = mapped_column(String(8))  # csv | xlsx | package
+    filename: Mapped[str] = mapped_column(String(128))  # nazwa od klienta, wylacznie do wyswietlania
+    bytes: Mapped[int] = mapped_column(BigInteger)
+    sha256: Mapped[str] = mapped_column(String(64))  # skrot pliku w postaci, w jakiej przyszedl
+    path: Mapped[str] = mapped_column(String(64))  # nazwa pliku wzgledem uploads/ organizacji, nie sciezka
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    retention_until: Mapped[datetime] = mapped_column(UTCDateTime)
+
+    __table_args__ = (Index("ix_uploads_org_id", "org_id"),)
+
+
+class Job(Base):
+    __tablename__ = "jobs"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    pipeline: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(12), default="queued")  # queued|running|succeeded|failed|cancelled
+    progress: Mapped[int] = mapped_column(Integer, default=0)
+    message: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    run_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
+    upload_id: Mapped[str | None] = mapped_column(
+        ForeignKey("uploads.id", ondelete="SET NULL"), nullable=True)
+    client_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    force_mock: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_by: Mapped[str | None] = mapped_column(String(64), nullable=True)  # "user:<id>" | "key:<id>"
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    started_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    #: Zakres dat zamowiony przez klienta (`JobCreate.period_from/period_to`, Alembic 0005); None = cale dane pliku.
+    #: Faktyczny zakres danych runu jest w `RunRecord.period_*`.
+    period_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+
+    __table_args__ = (Index("ix_jobs_org_id_created_at", "org_id", "created_at"), Index("ix_jobs_status", "status"),
+                      Index("ix_jobs_org_id_id", "org_id", "id"))
+
+
+class RunRecord(Base):
+    """Slad runu w control plane: hashe raportow do weryfikacji (`POST /verify`). Tresci raportow tu nie ma."""
+
+    __tablename__ = "run_records"
+
+    run_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    pipeline: Mapped[str] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(12))  # SUCCESS | PARTIAL | FAILED
+    job_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    # `report_sha256` {html, md, json} rozbite na kolumny, zeby `verify` dzialalo przez indeks, nie skan.
+    sha256_html: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sha256_md: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sha256_json: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # zakres dat w danych runu (ecommerce_demo: min/max daty zamowienia; uksc_evidence: data zbioru paczki); NULL = brak
+    period_from: Mapped[date | None] = mapped_column(Date, nullable=True)
+    period_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    # kiedy retencja usunela pliki raportow tego runu (rekord i hashe zostaja, `verify` dziala dalej); NULL = pliki sa
+    report_purged_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    __table_args__ = (
+        Index("ix_run_records_org_id_created_at", "org_id", "created_at"),
+        Index("ix_run_records_org_sha_html", "org_id", "sha256_html"),
+        Index("ix_run_records_org_sha_md", "org_id", "sha256_md"),
+        Index("ix_run_records_org_sha_json", "org_id", "sha256_json"),
+    )
+
+    @property
+    def report_sha256(self) -> dict[str, str | None]:
+        return {"html": self.sha256_html, "md": self.sha256_md, "json": self.sha256_json}
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    org_id: Mapped[str | None] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE), nullable=True)
+    actor_type: Mapped[str] = mapped_column(String(8))  # user | key | system
+    actor_id: Mapped[str | None] = mapped_column(String(26), nullable=True)
+    action: Mapped[str] = mapped_column(String(40))
+    target: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+    ts: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    meta: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)  # wylacznie klucze z AUDIT_META_KEYS
+
+    __table_args__ = (Index("ix_audit_events_org_id_id", "org_id", "id"),
+                      Index("ix_audit_events_org_id_ts_id", "org_id", "ts", "id"))
+
+
+class UsageCounter(Base):
+    __tablename__ = "usage_counters"
+
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE), primary_key=True)
+    period: Mapped[str] = mapped_column(String(7), primary_key=True)  # YYYY-MM
+    runs: Mapped[int] = mapped_column(Integer, default=0)
+    upload_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+
+
+class Webhook(Base):
+    __tablename__ = "webhooks"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    url: Mapped[str] = mapped_column(Text)
+    secret_hash: Mapped[str] = mapped_column(String(64))  # SHA-256 sekretu podpisu (do weryfikacji, nie do podpisu)
+    events: Mapped[list[str]] = mapped_column(JSON, default=list)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    __table_args__ = (UniqueConstraint("org_id", "url", name="uq_webhooks_org_url"), Index("ix_webhooks_org_id", "org_id"))
+
+
+class OrgSchedule(Base):
+    """Harmonogram i powiadomienia organizacji (1:1 z `orgs`). Wiersz powstaje leniwie przy pierwszym `PUT`;
+    brak wiersza = wartosci domyslne. Godzina przypomnienia jest lokalna w `timezone` (IANA)."""
+
+    __tablename__ = "org_schedules"
+
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE), primary_key=True)
+    reminder_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    reminder_weekday: Mapped[int] = mapped_column(Integer, default=0)  # 0 = poniedzialek ... 6 = niedziela
+    reminder_hour: Mapped[int] = mapped_column(Integer, default=8)  # 0-23, czas lokalny w `timezone`
+    timezone: Mapped[str] = mapped_column(String(64), default="Europe/Warsaw")
+    reminder_skip_if_recent_upload: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_run_on_upload: Mapped[bool] = mapped_column(Boolean, default=False)
+    notify_on_finish: Mapped[bool] = mapped_column(Boolean, default=False)
+    #: Powiadomienie o runie na czacie zespolu (Alembic 0005): webhook przychodzacy Slacka / Teams (Workflows) albo
+    #: dowolny JSON. Adres zawiera sekret: API nigdy go nie zwraca w calosci (tylko host i koncowka).
+    notify_webhook_url: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    notify_webhook_kind: Mapped[str] = mapped_column(String(12), default="slack")  # slack | teams | generic
+    next_reminder_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    last_reminder_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    __table_args__ = (Index("ix_org_schedules_due", "reminder_enabled", "next_reminder_at"),)
+
+
+# ----------------------------------------------------------------------------- OAuth 2.1 dla konektorow MCP
+class OAuthClient(Base):
+    """Klient OAuth zarejestrowany dynamicznie (RFC 7591) przez konektor agenta (ChatGPT, Claude, ...).
+    `info` = pelne metadane rejestracji (`OAuthClientInformationFull` z SDK `mcp`) do odtworzenia w `get_client`;
+    kolumny obok sa do list, ekranu zgody i porzadkow. Sekret klienta (jesli klient nie jest publiczny) lezy
+    wylacznie w `info` — w logach i audycie wystepuje tylko `client_id`."""
+
+    __tablename__ = "oauth_clients"
+
+    client_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    client_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    redirect_uris: Mapped[list[str]] = mapped_column(JSON, default=list)
+    info: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_oauth_clients_created_at", "created_at"),)
+
+
+class OAuthCode(Base):
+    """Zadanie autoryzacji i kod autoryzacyjny w jednym wierszu: powstaje przy `/authorize` (`status=pending`,
+    bez organizacji), po zgodzie uzytkownika w kokpicie dostaje `org_id`, `user_id`, `code_hash` (`approved`),
+    po wymianie na token `exchanged`. Sam kod nie jest przechowywany — tylko SHA-256."""
+
+    __tablename__ = "oauth_codes"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    client_id: Mapped[str] = mapped_column(ForeignKey("oauth_clients.client_id", ondelete=_CASCADE))
+    org_id: Mapped[str | None] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    code_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, unique=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    code_challenge: Mapped[str] = mapped_column(String(128))
+    redirect_uri: Mapped[str] = mapped_column(String(512))
+    redirect_uri_provided_explicitly: Mapped[bool] = mapped_column(Boolean, default=True)
+    state: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    resource: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    status: Mapped[str] = mapped_column(String(12), default="pending")  # pending|approved|exchanged|denied|expired
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(UTCDateTime)
+    exchanged_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_oauth_codes_client_id", "client_id"), Index("ix_oauth_codes_expires_at", "expires_at"))
+
+
+class OAuthGrant(Base):
+    """Zgoda laczaca tokeny jednej autoryzacji; `lock_seq` serializuje zmiany jej stanu."""
+
+    __tablename__ = "oauth_grants"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    client_id: Mapped[str] = mapped_column(ForeignKey("oauth_clients.client_id", ondelete=_CASCADE))
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    resource: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    revocation_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    lock_seq: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+
+
+class OAuthToken(Base):
+    """Token dostepu albo odswiezania (`kind`), przechowywany jako SHA-256; organizacja i zakresy sa zamrozone
+    w chwili zgody. `parent_id` wiaze token dostepu z tokenem odswiezania, z ktorego powstal (rotacja)."""
+
+    __tablename__ = "oauth_tokens"
+
+    id: Mapped[str] = mapped_column(_ID, primary_key=True, default=new_ulid)
+    kind: Mapped[str] = mapped_column(String(8))  # access | refresh
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    client_id: Mapped[str] = mapped_column(ForeignKey("oauth_clients.client_id", ondelete=_CASCADE))
+    grant_id: Mapped[str | None] = mapped_column(
+        ForeignKey("oauth_grants.id", ondelete=_CASCADE, name="fk_oauth_tokens_grant_id_oauth_grants"),
+        nullable=True,
+    )
+    org_id: Mapped[str] = mapped_column(ForeignKey("orgs.id", ondelete=_CASCADE))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    scopes: Mapped[list[str]] = mapped_column(JSON, default=list)
+    resource: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    parent_id: Mapped[str | None] = mapped_column(_ID, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    rotated_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    __table_args__ = (Index("ix_oauth_tokens_org_id_kind", "org_id", "kind"),
+                      Index("ix_oauth_tokens_client_id", "client_id"),
+                      Index("ix_oauth_tokens_grant_id", "grant_id"))

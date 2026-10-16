@@ -1,0 +1,157 @@
+"""C3: parsowanie liczb — format ksiegowy, U+2212, notacja naukowa; niejednoznaczne -> None + ostrzezenie."""
+from __future__ import annotations
+
+import pandas as pd
+import pytest
+
+from app.sources.csv_mapper import _to_number, map_dataframe, to_number_series
+
+
+@pytest.mark.parametrize("raw,expected", [
+    # format ksiegowy i znak minus z Unicode
+    ("(100)", -100.0), ("(1 299,00)", -1299.0), ("(100,50) zł", -100.5), ("( 7 )", -7.0),
+    ("−100", -100.0), ("−1 000,50", -1000.5), ("−$5.00", -5.0),
+    # notacja naukowa
+    ("1.2E+06", 1200000.0), ("1e5", 100000.0), ("1,5e3", 1500.0), ("-2E-2", -0.02), ("3E0", 3.0),
+    # formaty PL / EN
+    ("1,299", 1.299), ("1.234.567", 1234567.0), ("7 255,95", 7255.95), ("-1 000,50", -1000.5),
+    ("$1,299.00", 1299.0), ("1 299,00 zł", 1299.0), ("1.299,00", 1299.0), ("1,299.00", 1299.0),
+    ("1.234.567,89", 1234567.89), ("1,234,567.89", 1234567.89), ("1,234,567", 1234567.0),
+    ("7 255,95", 7255.95), ("7 255,95", 7255.95), ("PLN 100", 100.0), ("100 PLN", 100.0),
+    ("12.5%", 12.5), ("-41", -41.0), ("  0,30 ", 0.3), ("+7", 7.0), (".5", 0.5), (",5", 0.5), ("5.", 5.0),
+    ("0.500", 0.5), (7, 7.0), (-3.5, -3.5),
+])
+def test_parsowanie_poprawnych_liczb(raw, expected):
+    assert _to_number(raw) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("raw", [
+    "", "  ", "nan", "NaN", "None", "null", "-", "abc", "zł",
+    "12abc34",            # smieci miedzy cyframi: dawniej 1234 (zmiana rzedu wielkosci)
+    "1-2", "--3", "100-", "(-100)", "-(100)",   # niejednoznaczny znak
+    "1.2.3", "1,2,3", "1.23.456", "1 23", "1 2345", "1,299.00,5", "12 345.6 7",
+    "1e999", "inf", "-inf", "Infinity", "0x10", "1e", "E5", "1e5e5", "1.2E+06E",
+    float("inf"), float("-inf"), float("nan"),
+])
+def test_niejednoznaczne_to_none_nigdy_inna_liczba(raw):
+    assert _to_number(raw) is None
+
+
+def test_serie_zgodna_ze_skalarem_dla_nowych_formatow():
+    raws = ["(100)", "−100", "1.2E+06", "1e5", "1,299", "1.234.567", "abc", "12abc34", None]
+    col = pd.Series(raws, dtype=object)
+    expected = col.map(_to_number).astype("float64")
+    pd.testing.assert_series_equal(to_number_series(col), expected, check_names=False)
+
+
+def _frame(**cols) -> pd.DataFrame:
+    n = len(next(iter(cols.values())))
+    return pd.DataFrame({"data": [f"2026-01-{5 + i:02d}" for i in range(n)], "numer": [f"N{i}" for i in range(n)], **cols})
+
+
+def test_nieczytelny_przychod_pomijany_z_ostrzezeniem_o_formacie():
+    out, rep = map_dataframe(_frame(kwota=["100", "12abc34", "(50)"]))
+    assert out["revenue"].tolist() == [100.0, -50.0]
+    assert any("12abc34" not in w and "kwota" in w and "nie da się" in w for w in rep.warnings)
+    assert any("1 wierszy" in w for w in rep.warnings)          # pominiecie wiersza bez przychodu
+
+
+def test_nieczytelny_koszt_nie_jest_cicho_zerem():
+    out, rep = map_dataframe(_frame(kwota=["100", "200"], koszt=["40", "dwadziescia"]))
+    assert out["cost"].tolist() == [40.0, 0.0]
+    assert any("koszt" in w and "nie da się" in w and "1" in w for w in rep.warnings)
+
+
+def test_znak_i_rzad_wielkosci_zachowane_end_to_end():
+    out, _ = map_dataframe(_frame(kwota=["(100)", "−200", "1.2E+06", "1e5"]))
+    assert out["revenue"].tolist() == [-100.0, -200.0, 1200000.0, 100000.0]
+
+
+# ---------------------------------------------------------------- C15: format niejednoznaczny
+AMBIGUOUS = "niejednoznaczn"
+
+
+@pytest.mark.parametrize("values", [
+    ["1.234.567", "100"],          # kropka jako separator tysiecy
+    ["1.299", "100"],              # tysiac czy ulamek?
+    ["1,299", "100"],
+])
+def test_niejednoznaczny_format_ostrzega(values):
+    out, rep = map_dataframe(_frame(kwota=values))
+    assert len(out) == 2                                  # wiersze zostaja
+    assert any(AMBIGUOUS in w and "kwota" in w for w in rep.warnings), rep.warnings
+
+
+def test_ostrzezenie_podaje_liczbe_wartosci_i_przyklad():
+    _, rep = map_dataframe(_frame(kwota=["1.234.567", "2.345.678", "5"]))
+    (warning,) = [w for w in rep.warnings if AMBIGUOUS in w]
+    assert warning.startswith("2 wartości") and "1.234.567" in warning
+
+
+@pytest.mark.parametrize("values", [
+    ["1.299,00", "1 299,00"], ["1,299.00", "7 255,95"], ["12,5", "0.5"], ["1234.567", "100"], ["10", "20"],
+    ["0.500", "0,500"],
+])
+def test_jednoznaczne_formaty_nie_ostrzegaja(values):
+    _, rep = map_dataframe(_frame(kwota=values))
+    assert not any(AMBIGUOUS in w for w in rep.warnings), rep.warnings
+
+
+def test_wartosci_niejednoznaczne_sa_czytane_wg_konwencji_pl_lub_tysiecy():
+    out, _ = map_dataframe(_frame(kwota=["1.234.567", "1,299", "1.299"]))
+    assert out["revenue"].tolist() == [1234567.0, 1.299, 1.299]
+
+
+# ---------------------------------------------------------------- ReDoS: czas parsowania nie zalezy kwadratowo od dlugosci
+import time  # noqa: E402
+
+from app.sources.csv_mapper import FLAG_INVALID, parse_number  # noqa: E402
+
+ADVERSARIAL = {
+    "digits": lambda n: "1" * n + "x",
+    "spaces": lambda n: "1" + " " * n + "x",
+    "commas": lambda n: "1," * n + "x",
+    "dots": lambda n: "1." * n + "x",
+    "paren_spaces": lambda n: "(" + " " * n + "x",
+    "affix_spaces": lambda n: "zł" + " " * n + "1" + " " * n + "x",
+    "long_valid_digits": lambda n: "1" * n,
+}
+
+
+@pytest.mark.parametrize("kind", sorted(ADVERSARIAL))
+@pytest.mark.parametrize("n", [20_000, 200_000])
+def test_parse_number_is_fast_on_adversarial_input(kind, n):
+    raw = ADVERSARIAL[kind](n)
+    started = time.perf_counter()
+    value, flag = parse_number(raw)
+    assert time.perf_counter() - started < 0.5
+    assert value is None and flag == FLAG_INVALID
+
+
+@pytest.mark.parametrize("kind", ["digits", "spaces", "commas", "dots", "paren_spaces"])
+def test_regexes_alone_are_not_quadratic_even_below_the_length_cap(kind):
+    """Zabezpieczenie niezalezne od limitu dlugosci: sam wzorzec ma byc liniowy (limit nie moze go maskowac)."""
+    from app.sources import csv_mapper as cm
+
+    s = ADVERSARIAL[kind](20_000)
+    started = time.perf_counter()
+    cm._CORE_RE.fullmatch(s)
+    if s.startswith("("):
+        cm._split_accounting(s)
+    assert time.perf_counter() - started < 0.5
+
+
+def test_cell_longer_than_64_chars_is_invalid_and_counted_in_the_warning():
+    assert parse_number("1" * 65) == (None, FLAG_INVALID)
+    assert parse_number(" " * 10 + "1" * 64 + " " * 10)[0] == pytest.approx(float("1" * 64))  # limit liczy po strip
+    out, rep = map_dataframe(_frame(kwota=["100", "1" * 500, "200"]))
+    assert out["revenue"].tolist() == [100.0, 200.0]
+    assert any("kwota" in w and "nie da się" in w for w in rep.warnings)
+
+
+def test_series_with_a_huge_cell_is_fast():
+    col = pd.Series(["100", "1" * 100_000 + "x", "1" + " " * 100_000 + "x", "7 255,95"], dtype=object)
+    started = time.perf_counter()
+    res = to_number_series(col)
+    assert time.perf_counter() - started < 0.5
+    assert res.tolist()[0] == 100.0 and res.isna().tolist() == [False, True, True, False]

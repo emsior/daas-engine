@@ -1,7 +1,11 @@
 """Streszczenie wykonawcze (executive summary) raportu.
 
 Zasada: LLM NIGDY nie liczy. Dostaje gotowe metryki z DuckDB/pandas i tylko je opisuje.
-Gdy brak ANTHROPIC_API_KEY (albo błąd sieci) -> deterministyczny szablon. Wynik zawsze jest.
+
+LLM jest OPT-IN: wywolanie zewnetrznego API nastepuje wylacznie, gdy wywolujacy poda `api_key`,
+a runner robi to tylko przy DAAS_LLM_NARRATIVE=true (`Settings.llm_api_key`). Sam ANTHROPIC_API_KEY
+w srodowisku niczego nie wysyla. Do dostawcy trafiaja wylacznie zagregowane metryki — bez order_id,
+nazw produktow, nazwy klienta i nazwy hosta. Brak klucza albo blad sieci -> deterministyczny szablon.
 
 narrative_source: "LLM" | "TEMPLATE"
 """
@@ -15,6 +19,7 @@ from typing import Any
 import httpx
 
 from app.core.models import CS2Metrics, EcommerceMetrics, UkscMetrics
+from app.reporting.fmt import pct, pln
 
 log = logging.getLogger(__name__)
 
@@ -30,18 +35,44 @@ SYSTEM_PROMPT = (
 )
 
 
-def build_narrative(pipeline: str, metrics: Any, client_name: str | None = None) -> tuple[str, str]:
-    """Zwraca (tekst, źródło) gdzie źródło ∈ {"LLM", "TEMPLATE"}."""
-    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
+#: Adnotacja w raporcie, gdy streszczenie pochodzi od modelu.
+LLM_ANNOTATION = "streszczenie wygenerowane przez model"
+
+#: Klucze, ktore nigdy nie opuszczaja serwera w payloadzie do LLM (identyfikatory i dane osobowe/handlowe).
+_NEVER_SEND = frozenset({"order_id", "product", "client_name", "host", "package_sha256"})
+
+
+def source_label(source: str | None) -> str:
+    """Etykieta zrodla streszczenia do raportu (Markdown/HTML)."""
+    if source == "LLM":
+        return f"{LLM_ANNOTATION} (LLM)"
+    return "streszczenie: TEMPLATE"
+
+
+def build_narrative(pipeline: str, metrics: Any, client_name: str | None = None, *,
+                    api_key: str | None = None) -> tuple[str, str]:
+    """Zwraca (tekst, źródło) gdzie źródło ∈ {"LLM", "TEMPLATE"}.
+
+    `api_key=None` (domyslnie) oznacza szablon i brak jakiegokolwiek ruchu sieciowego.
+    """
     if api_key:
         try:
-            return _llm_narrative(api_key, pipeline, metrics, client_name), "LLM"
+            return _llm_narrative(api_key, pipeline, metrics), "LLM"
         except Exception as exc:  # noqa: BLE001
-            log.warning("LLM narrative failed (%s) -> template", exc)
+            log.warning("LLM narrative failed (%s: %s) -> template", type(exc).__name__, exc)
     return template_narrative(pipeline, metrics, client_name), "TEMPLATE"
 
 
 # ----------------------------------------------------------------------
+def _strip(node: Any) -> Any:
+    """Rekurencyjnie usuwa klucze z `_NEVER_SEND`."""
+    if isinstance(node, dict):
+        return {k: _strip(v) for k, v in node.items() if k not in _NEVER_SEND}
+    if isinstance(node, list):
+        return [_strip(v) for v in node]
+    return node
+
+
 def _compact(metrics: Any) -> dict[str, Any]:
     d = metrics.model_dump() if hasattr(metrics, "model_dump") else dict(metrics)
     out = {k: v for k, v in d.items() if not isinstance(v, (list, dict))}
@@ -51,17 +82,17 @@ def _compact(metrics: Any) -> dict[str, Any]:
             out[key] = d[key][:3]
     if isinstance(d.get("wow"), dict):
         out["week_over_week"] = d["wow"]
-    return out
+    return _strip(out)
 
 
-def _llm_narrative(api_key: str, pipeline: str, metrics: Any, client_name: str | None) -> str:
+def _llm_narrative(api_key: str, pipeline: str, metrics: Any) -> str:
     payload = {
         "model": DEFAULT_MODEL,
         "max_tokens": 400,
         "system": SYSTEM_PROMPT,
         "messages": [{
             "role": "user",
-            "content": f"pipeline: {pipeline}\nklient: {client_name or 'demo'}\n\nJSON:\n"
+            "content": f"pipeline: {pipeline}\n\nJSON:\n"
                        + json.dumps(_compact(metrics), ensure_ascii=False, default=str),
         }],
     }
@@ -76,7 +107,7 @@ def _llm_narrative(api_key: str, pipeline: str, metrics: Any, client_name: str |
 
 # ----------------------------------------------------------------------
 def _pln(x: float) -> str:
-    return f"{x:,.2f}".replace(",", " ").replace(".", ",")
+    return pln(x)
 
 
 def template_narrative(pipeline: str, metrics: Any, client_name: str | None = None) -> str:
@@ -101,8 +132,8 @@ def template_narrative(pipeline: str, metrics: Any, client_name: str | None = No
             return "Brak zamówień w analizowanym pliku — streszczenie niedostępne."
         s = (f"Raport{who} obejmuje {m.orders_total} zamówień ({m.orders_completed} zrealizowanych, "
              f"{m.orders_refunded} zwrotów, {m.orders_cancelled} anulowanych). Przychód wyniósł {_pln(m.revenue_total)} "
-             f"przy koszcie {_pln(m.cost_total)}, co daje zysk {_pln(m.profit_total)} i marżę {m.margin_pct}%. "
-             f"Średnia wartość zamówienia to {_pln(m.avg_order_value)}, średni rabat {m.avg_discount_pct}%.")
+             f"przy koszcie {_pln(m.cost_total)}, co daje zysk {_pln(m.profit_total)} i marżę {pct(m.margin_pct, 2)}. "
+             f"Średnia wartość zamówienia to {'n/d' if m.avg_order_value is None else _pln(m.avg_order_value)}, średni rabat {pct(m.avg_discount_pct, 2)}.")
         if m.loss_orders_count:
             s += (f" Wykryto {m.loss_orders_count} zamówień stratnych o łącznym wyniku {_pln(m.loss_orders_total)} — "
                   f"to pierwszy obszar do naprawy.")
@@ -111,11 +142,12 @@ def template_narrative(pipeline: str, metrics: Any, client_name: str | None = No
             dr = w["revenue_delta_pct"]
             kier = "wzrósł" if (dr or 0) > 0 else "spadł" if (dr or 0) < 0 else "nie zmienił się"
             s += (f" Tydzień {w['week']} vs {w['prev_week']}: przychód {kier}"
-                  f"{f' o {abs(dr)}%' if dr else ''}, marża {w['margin_prev']}% → {w['margin_pct']}%"
+                  f"{f' o {pct(abs(dr))}' if dr else ''}, marża {pct(w['margin_prev'])} → {pct(w['margin_pct'])}"
                   f"{' (ostatni tydzień niepełny)' if w.get('partial_week') else ''}.")
         if m.top_categories:
             top = m.top_categories[0]
-            s += f" Największą kategorią jest {top['category']} ({top['revenue_share_pct']}% przychodu, marża {top['margin_pct']}%)."
+            s += (f" Największą kategorią jest {top['category']} ({pct(top['revenue_share_pct'])} przychodu, "
+                  f"marża {pct(top['margin_pct'])}).")
         rec = ("ograniczyć rabaty na produktach, które generują straty" if m.loss_orders_count
                else "utrzymać politykę cenową i monitorować marżę tydzień do tygodnia")
         s += f" Rekomendacja: {rec}."

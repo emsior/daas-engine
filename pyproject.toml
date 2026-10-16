@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "daas-engine"
-version = "0.3.0"
+version = "2.0.0"
 description = "Source-Agnostic B2B Data-as-a-Service Engine (FastAPI + DuckDB + n8n)"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -22,12 +22,19 @@ dependencies = [
     "python-multipart>=0.0.9",
     "markdown>=3.5",
     "openpyxl>=3.1",
+    "defusedxml>=0.7.1",  # openpyxl wykrywa go i parsuje XLSX bezpiecznie (XXE, billion laughs)
+    "sqlalchemy[asyncio]>=2.0",
+    "aiosqlite>=0.20",
+    "alembic>=1.13",
+    "mcp>=2.3,<3",  # serwer MCP (Streamable HTTP) pod /mcp: dostep agentow AI, docs/MCP.md
 ]
 
 [project.optional-dependencies]
+postgres = ["asyncpg>=0.29"]  # control plane na Postgresie: DAAS_CONTROL_DB_URL=postgresql+asyncpg://...
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "ruff==0.16.8",  # ta sama wersja co w CI; zależność wyłącznie developerska
 ]
 
 [tool.setuptools.packages.find]

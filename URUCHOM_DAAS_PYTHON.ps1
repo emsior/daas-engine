@@ -25,6 +25,20 @@ if ($LASTEXITCODE -ne 0) { Fail "pip install nie przeszedl - wklej komunikat do 
 
 Step "3/5 Konfiguracja .env"
 if (-not (Test-Path ".env")) { Copy-Item ".env.example" ".env"; Write-Host "Utworzono .env (puste klucze = tryb fixtures/MOCK dla API, pliki klienta = LIVE_DATA)" }
+# Klucz API (naglowek X-API-Key): jesli .env go nie ma, generujemy losowy (24 bajty hex) i zapisujemy bez BOM.
+$envPath = Join-Path $PSScriptRoot ".env"
+$keyLine = Select-String -Path $envPath -Pattern '^DAAS_API_KEY=(\S{16,})\s*$' | Select-Object -First 1
+if ($keyLine) {
+    $apiKey = $keyLine.Matches[0].Groups[1].Value
+} else {
+    $rnd = New-Object byte[] 24
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($rnd)
+    $apiKey = (($rnd | ForEach-Object { $_.ToString("x2") }) -join "")
+    $lines = @(Get-Content -Path $envPath | Where-Object { $_ -notmatch '^DAAS_API_KEY=' }) + "DAAS_API_KEY=$apiKey"
+    [System.IO.File]::WriteAllLines($envPath, $lines, (New-Object System.Text.UTF8Encoding($false)))
+    Write-Host "Wygenerowano DAAS_API_KEY w .env (naglowek X-API-Key)"
+}
+$authHeaders = @{ "X-API-Key" = $apiKey }
 
 Step "4/5 Testy"
 & $venvPy -m pytest -q
@@ -41,6 +55,7 @@ Write-Host "HEALTH: $($h.status) v$($h.version)"
 Write-Host "Demo: upload data\fixtures\client_export_pl.csv -> /run -> raport"
 Add-Type -AssemblyName System.Net.Http
 $client = New-Object System.Net.Http.HttpClient
+$client.DefaultRequestHeaders.Add("X-API-Key", $apiKey)
 $form = New-Object System.Net.Http.MultipartFormDataContent
 $bytes = [System.IO.File]::ReadAllBytes("$PSScriptRoot\data\fixtures\client_export_pl.csv")
 $fc = New-Object System.Net.Http.ByteArrayContent(,$bytes)
@@ -49,10 +64,13 @@ $form.Add($fc, "file", "client_export_pl.csv")
 $form.Add((New-Object System.Net.Http.StringContent("DemoSklep")), "client_name")
 $up = $client.PostAsync("http://127.0.0.1:8000/upload", $form).Result.Content.ReadAsStringAsync().Result | ConvertFrom-Json
 Write-Host "UPLOAD: rows=$($up.rows) confidence=$($up.confidence)"
-$run = Invoke-RestMethod -Uri "http://127.0.0.1:8000/run" -Method Post -ContentType "application/json" -Body ($up.run_payload | ConvertTo-Json -Compress)
+$run = Invoke-RestMethod -Uri "http://127.0.0.1:8000/run" -Method Post -Headers $authHeaders -ContentType "application/json" -Body ($up.run_payload | ConvertTo-Json -Compress)
 Write-Host "RUN: $($run.run_status) $($run.data_status) records=$($run.records_processed) margin=$($run.metrics.margin_pct)%"
 
-Start-Process "http://127.0.0.1:8000/reports/ecommerce_demo/latest?fmt=html"
+# Raport wymaga klucza, wiec przegladarka dostaje plik lokalny zamiast linku do API.
+$reportFile = Join-Path $PSScriptRoot "runtime\demo_report.html"
+Invoke-WebRequest -Uri "http://127.0.0.1:8000/reports/ecommerce_demo/latest?fmt=html" -Headers $authHeaders -OutFile $reportFile
+Start-Process $reportFile
 Start-Process "http://127.0.0.1:8000/docs"
 Write-Host ""
 Write-Host "GOTOWE. Raport otwarty w przegladarce. n8n (opcjonalnie, w drugim oknie):  npx n8n   -> http://localhost:5678" -ForegroundColor Green

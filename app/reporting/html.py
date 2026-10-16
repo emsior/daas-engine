@@ -5,7 +5,8 @@ from __future__ import annotations
 import html
 from datetime import datetime
 
-import markdown
+from app.reporting.narrative import source_label
+from app.reporting.safe import render_markdown
 
 CSS = """
 :root { --bg:#f7f7f5; --card:#fff; --ink:#1c1c1a; --muted:#6b6b66; --line:#e6e6e2; --accent:#0f6b52; --warn:#b5541b; --bad:#a32d2d; }
@@ -35,13 +36,15 @@ ul { padding-left:20px; } li { margin:4px 0; }
 
 def render_html(md_text: str, *, title: str, data_status: str, narrative: str | None,
                 narrative_source: str | None, client_name: str | None = None) -> str:
-    body = markdown.markdown(md_text, extensions=["tables", "fenced_code"])
+    body = render_markdown(md_text)
     badge_cls = {"LIVE_DATA": "b-live", "MOCK_DATA": "b-mock"}.get(data_status, "b-blocked")
     summary_html = ""
     if narrative:
+        src_text = (source_label(narrative_source) if narrative_source == "LLM"
+                    else f"źródło streszczenia: {narrative_source or 'TEMPLATE'}")
         summary_html = (
             f'<div class="summary"><strong>Streszczenie</strong><br>{html.escape(narrative)}'
-            f'<div class="src">źródło streszczenia: {narrative_source or "TEMPLATE"} · liczby pochodzą wyłącznie z policzonych metryk</div></div>'
+            f'<div class="src">{html.escape(src_text)} · liczby pochodzą wyłącznie z policzonych metryk</div></div>'
         )
     head = (
         f'<div class="meta">{html.escape(client_name) + " · " if client_name else ""}'

@@ -12,9 +12,11 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import logging
+import re
 import time
 import uuid
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,10 @@ MAX_FILENAME_LEN = 128                 # znakow oryginalnej nazwy
 MAX_RECORDS = 100_000                  # wierszy danych (bez naglowka)
 MAX_CSV_FIELD_BYTES = 65_536           # 64 KiB na pojedyncze pole
 CHUNK_SIZE = 65_536                    # 64 KiB na iteracje odczytu
-ALLOWED_SUFFIX = ".csv"                # jedyne dozwolone rozszerzenie
+ALLOWED_SUFFIX = ".csv"                # rozszerzenie pliku zapisanego na dysku (XLSX jest konwertowany do CSV)
+ALLOWED_UPLOAD_SUFFIXES = (".csv", ".xlsx")  # rozszerzenia przyjmowane od klienta
+
+log = logging.getLogger(__name__)
 
 #: Kolejnosc prob dekodowania. Bez heurystyk i bez errors="replace" —
 #: plik albo dekoduje sie jednym z tych trzech, albo jest odrzucany.
@@ -58,6 +63,21 @@ class ReasonCode:
     POLICY_DENIED = "policy_denied"
     PARSER_ERROR = "parser_error"
     INTERNAL_ERROR = "internal_error"
+    # uwierzytelnianie i uruchomienia (zdarzenia audytowe poza uploadem)
+    AUTH_MISSING = "auth_missing"
+    AUTH_INVALID = "auth_invalid"
+    AUTH_NOT_CONFIGURED = "auth_not_configured"
+    RUN_FAILED = "run_failed"
+    QUOTA_EXCEEDED = "quota_exceeded"
+    # import XLSX (app.core.xlsx_import)
+    XLSX_INVALID = "xlsx_invalid"
+    XLSX_MACROS = "xlsx_macros_not_allowed"
+    XLSX_UNPACKED_TOO_LARGE = "xlsx_unpacked_too_large"
+    XLSX_MULTIPLE_SHEETS = "xlsx_multiple_sheets"
+    XLSX_TOO_MANY_SHEETS = "xlsx_too_many_sheets"
+    XLSX_SHEET_NOT_FOUND = "xlsx_sheet_not_found"
+    XLSX_TOO_WIDE = "xlsx_too_wide"
+    XLSX_TIMEOUT = "xlsx_timeout"
 
 
 class UploadRejected(Exception):
@@ -101,13 +121,18 @@ def validate_original_filename(name: str | None) -> str:
                 "nazwa pliku zawiera niedozwolone znaki",
             )
 
-    if not name.lower().endswith(ALLOWED_SUFFIX):
+    if not name.lower().endswith(ALLOWED_UPLOAD_SUFFIXES):
         raise UploadRejected(
             ReasonCode.EXTENSION_NOT_ALLOWED, 415,
-            f"dozwolone jest wylacznie rozszerzenie {ALLOWED_SUFFIX}",
+            "dozwolone sa wylacznie rozszerzenia .csv i .xlsx",
         )
 
     return name
+
+
+def is_xlsx_name(name: str) -> bool:
+    """True dla nazwy z rozszerzeniem .xlsx (bez wzgledu na wielkosc liter). Wywolywac po walidacji nazwy."""
+    return name.lower().endswith(".xlsx")
 
 
 # --------------------------------------------------------------------------- sciezki
@@ -140,6 +165,74 @@ def temp_path_for(upload_id: str, root: Path) -> Path:
 
 def final_path_for(upload_id: str, root: Path) -> Path:
     return root / f"{upload_id}{ALLOWED_SUFFIX}"
+
+
+#: Wzorzec nazwy pliku tymczasowego tworzonego przez `temp_path_for` (obce pliki *.tmp nie sa ruszane).
+_TMP_NAME = re.compile(r"^[0-9a-f]{32}\.tmp$")
+
+#: Po tylu sekundach plik *.tmp po przerwanym uploadzie (np. zabity proces) uznajemy za porzucony.
+STALE_TMP_AGE_SEC = 900.0
+
+
+#: Proby usuniecia pliku, ktory inny uchwyt jeszcze trzyma (Windows: blad wspoldzielenia). Lacznie ok. 1 s.
+_REMOVE_BACKOFF_SEC = (0.05, 0.1, 0.2, 0.3, 0.4)
+
+
+def remove_quietly(path: Path, *, sleep: Callable[[float], None] = time.sleep) -> bool:
+    """Usuwa plik bez wyjatku: brak pliku = OK; `PermissionError` (plik jeszcze otwarty, Windows) = ponowienia.
+
+    Po wyczerpaniu prob plik zostaje i sprzata go `cleanup_stale_tmp` (nazwy `*.tmp`) albo retencja; zwraca False,
+    zeby wywolujacy mogl to zalogowac. Nigdy nie przerywa odpowiedzi HTTP.
+    """
+    for pause in (*_REMOVE_BACKOFF_SEC, None):
+        try:
+            path.unlink(missing_ok=True)
+            return True
+        except PermissionError:
+            if pause is None:
+                log.info("temp file still locked, left for the stale sweep: %s", path.name)
+                return False
+            sleep(pause)
+        except OSError as exc:
+            log.info("temp file not removed (%s): %s", type(exc).__name__, path.name)
+            return False
+    return False
+
+
+def cleanup_stale_tmp(root: Path, max_age_sec: float = STALE_TMP_AGE_SEC, now: float | None = None) -> int:
+    """Usuwa porzucone pliki `<uuid>.tmp` starsze niz `max_age_sec` (0 = wszystkie). Zwraca liczbe usunietych.
+
+    Normalna sciezka uploadu sprząta sama (blok finally w handlerze); ta funkcja zbiera to, co zostaje po
+    twardym przerwaniu procesu. Brak katalogu nie jest bledem.
+    """
+    if not root.is_dir():
+        return 0
+    cutoff = (time.time() if now is None else now) - max_age_sec
+    removed = 0
+    for entry in root.iterdir():
+        if not entry.is_file() or not _TMP_NAME.match(entry.name):
+            continue
+        try:
+            if max_age_sec <= 0 or entry.stat().st_mtime <= cutoff:
+                entry.unlink()
+                removed += 1
+        except OSError:
+            continue  # plik zniknal miedzy listowaniem a usunieciem (rownolegly upload) — nie jest bledem
+    return removed
+
+
+def dir_usage_bytes(root: Path) -> int:
+    """Suma rozmiarow plikow w katalogu uploadow (finalne i trwajace tymczasowe)."""
+    if not root.is_dir():
+        return 0
+    total = 0
+    for entry in root.iterdir():
+        try:
+            if entry.is_file():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
 
 
 # --------------------------------------------------------------------------- dekodowanie
@@ -186,7 +279,7 @@ def _sniff_delimiter(sample: str) -> str:
         return best if counts[best] > 0 else ","
 
 
-def iter_validated_rows(text: str) -> Iterator[list[str]]:
+def iter_validated_rows(text: str, max_records: int = MAX_RECORDS) -> Iterator[list[str]]:
     """Przechodzi CSV wiersz po wierszu, pilnujac limitow.
 
     Iteracyjnie, bez budowania listy wszystkich wierszy — inaczej limit
@@ -234,10 +327,10 @@ def iter_validated_rows(text: str) -> Iterator[list[str]]:
             continue
 
         count += 1
-        if count > MAX_RECORDS:
+        if count > max_records:
             raise UploadRejected(
                 ReasonCode.TOO_MANY_RECORDS, 413,
-                f"plik zawiera wiecej niz {MAX_RECORDS} rekordow",
+                f"plik zawiera wiecej niz {max_records} rekordow",
             )
         yield row
 
@@ -249,18 +342,19 @@ class CsvValidationResult:
     record_count: int
 
 
-def validate_csv_bytes(raw: bytes) -> CsvValidationResult:
+def validate_csv_bytes(raw: bytes, *, max_records: int = MAX_RECORDS) -> CsvValidationResult:
     """Pelna walidacja zawartosci przed finalizacja zapisu.
 
     Kolejnosc ma znaczenie: dekodowanie -> naglowek -> limity -> schemat.
-    Kazdy krok konczy sie odmowa z wlasnym reason code.
+    Kazdy krok konczy sie odmowa z wlasnym reason code. `max_records` to limit wierszy danych
+    (CSV: `MAX_RECORDS`; CSV skonwertowany z XLSX: `xlsx_import.MAX_XLSX_ROWS`).
     """
     if not raw.strip():
         raise UploadRejected(ReasonCode.FILE_EMPTY, 400, "plik jest pusty")
 
     text, encoding = decode_strict(raw)
 
-    rows = iter_validated_rows(text)
+    rows = iter_validated_rows(text, max_records)
     header = next(rows)
     count = sum(1 for _ in rows)
 
@@ -288,44 +382,57 @@ def _assert_schema(header: list[str]) -> None:
 
 
 # --------------------------------------------------------------------------- audyt
+#: Dozwolone wartosci pola `action` w zdarzeniu audytowym.
+AUDIT_ACTIONS: frozenset[str] = frozenset({"upload", "run", "auth_denied"})
+
+
 def build_audit_event(
     *,
     allowed: bool,
     reason: str,
     deployment_id: str,
-    size_bytes: int,
+    size_bytes: int = 0,
+    action: str = "upload",
     upload_id: str | None = None,
     encoding: str | None = None,
     content_sha256: str | None = None,
+    pipeline: str | None = None,
+    run_id: str | None = None,
+    request_id: str | None = None,
+    client_ip: str | None = None,
+    route: str | None = None,
 ) -> dict[str, Any]:
-    """Buduje zdarzenie audytowe o scisle ograniczonym zestawie pol.
+    """Buduje zdarzenie audytowe o scisle ograniczonym zestawie pol (`AUDIT_ALLOWED_KEYS`).
 
-    Swiadomie NIE przyjmuje nazwy pliku od klienta ani sciezki — funkcja nie
-    ma jak ich wyciec, bo ich nie widzi. To mocniejsza gwarancja niz
-    filtrowanie na wyjsciu.
+    Swiadomie NIE przyjmuje nazwy pliku od klienta, sciezki, nazwy klienta ani podanego klucza API —
+    funkcja nie ma jak ich wyciec, bo ich nie widzi. To mocniejsza gwarancja niz filtrowanie na wyjsciu.
+    `action` ∈ AUDIT_ACTIONS: `upload`, `run`, `auth_denied`.
     """
+    if action not in AUDIT_ACTIONS:
+        raise ValueError(f"unknown audit action: {action!r}")
     event: dict[str, Any] = {
         "event_id": uuid.uuid4().hex,
         "ts": round(time.time(), 3),
         "deployment_id": deployment_id,
-        "action": "upload",
+        "action": action,
         "decision": "allow" if allowed else "deny",
         "reason_code": reason,
         "size_bytes": size_bytes,
     }
-    if upload_id:
-        event["upload_id"] = upload_id
-    if encoding:
-        event["encoding"] = encoding
-    if content_sha256:
-        event["content_sha256"] = content_sha256
+    optional = {
+        "upload_id": upload_id, "encoding": encoding, "content_sha256": content_sha256,
+        "pipeline": pipeline, "run_id": run_id, "request_id": request_id,
+        "client_ip": client_ip, "route": route,
+    }
+    event.update({key: value for key, value in optional.items() if value})
     return event
 
 
-#: Jedyne dopuszczalne klucze zdarzenia audytowego uploadu.
+#: Jedyne dopuszczalne klucze zdarzenia audytowego (upload, run, auth_denied).
 AUDIT_ALLOWED_KEYS: frozenset[str] = frozenset({
     "event_id", "ts", "deployment_id", "action", "decision",
     "reason_code", "size_bytes", "upload_id", "encoding", "content_sha256",
+    "pipeline", "run_id", "request_id", "client_ip", "route",
 })
 
 

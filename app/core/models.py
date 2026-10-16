@@ -5,7 +5,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 PipelineName = Literal["cs2_demo", "ecommerce_demo", "uksc_evidence"]
 
@@ -25,20 +25,72 @@ class RunStatus(str, Enum):
 # ---------------------------------------------------------------------------
 # API: żądania / odpowiedzi
 # ---------------------------------------------------------------------------
+#: Granice okresu raportu (`period_from`/`period_to`) wspolne dla selfhost `POST /run`, v1 `POST .../jobs` i MCP
+#: `start_run`: nie wczesniej niz 2000-01-01, nie dluzej niz 400 dni liczac oba konce.
+PERIOD_MIN_DATE = date(2000, 1, 1)
+PERIOD_MAX_DAYS = 400
+
+
+def check_period_date(value: date | None) -> date | None:
+    """Pojedyncza granica okresu: nie wczesniej niz `PERIOD_MIN_DATE` (walidator pola)."""
+    if value is not None and value < PERIOD_MIN_DATE:
+        raise ValueError(f"date must not be earlier than {PERIOD_MIN_DATE.isoformat()}")
+    return value
+
+
+def check_period_range(start: date | None, end: date | None) -> None:
+    """Kolejnosc i dlugosc zakresu (walidator `period_to`, gdy obie granice sa podane)."""
+    if start is None or end is None:
+        return
+    if end < start:
+        raise ValueError("period_to must not be earlier than period_from")
+    if (end - start).days + 1 > PERIOD_MAX_DAYS:
+        raise ValueError(f"the period must not be longer than {PERIOD_MAX_DAYS} days")
+
+
 class RunRequest(BaseModel):
     pipeline: PipelineName = Field(..., description="Nazwa pipeline'u do uruchomienia")
     force_mock: bool = Field(default=False, description="Wymuś fixtures nawet gdy sekret istnieje")
     notify: bool = Field(default=False, description="Wyślij podsumowanie na Discord (jeśli webhook skonfigurowany)")
+    upload_id: str | None = Field(
+        default=None,
+        pattern=r"^[0-9a-f]{32}$",
+        description="Identyfikator pliku z POST /upload — ma priorytet nad API i fixtures; wynik = LIVE_DATA",
+    )
     source_path: str | None = Field(
         default=None,
-        description="Ścieżka do pliku klienta (z POST /upload) — ma priorytet nad API i fixtures; wynik = LIVE_DATA",
+        description="Zaawansowane: ścieżka lokalna wewnątrz katalogu uploads/ (np. paczka UKSC). "
+                    "Dla plików z POST /upload użyj upload_id. Wykluczone z upload_id.",
     )
     client_name: str | None = Field(default=None, description="Nazwa klienta do nagłówka raportu")
+    language: str = Field(default="pl", description="Język raportu (locale organizacji); 'pl' lub 'en'")
+    period_from: date | None = Field(
+        default=None, description="First day of the requested period (inclusive, not before 2000-01-01); "
+                                  "ecommerce_demo counts only orders dated on or after it. Null = no lower bound")
+    period_to: date | None = Field(
+        default=None, description="Last day of the requested period (inclusive; not before period_from and at most "
+                                  "400 days after it); ecommerce_demo counts only orders dated on or before it. "
+                                  "Null = no upper bound")
+
+    @field_validator("period_from", "period_to")
+    @classmethod
+    def _period_dates(cls, value: date | None) -> date | None:
+        return check_period_date(value)
+
+    @model_validator(mode="after")
+    def _one_source(self) -> RunRequest:
+        if self.upload_id and self.source_path:
+            raise ValueError("podaj upload_id albo source_path, nie oba")
+        return self
+
+    @model_validator(mode="after")
+    def _period_order(self) -> RunRequest:
+        check_period_range(self.period_from, self.period_to)
+        return self
 
 
 class UploadResponse(BaseModel):
     upload_id: str
-    source_path: str
     filename: str
     rows: int
     columns: list[str]
@@ -80,13 +132,16 @@ class PipelineInfo(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    """Publiczny, zredagowany status: bez sciezek, bez konfiguracji, bez mapy sekretow."""
     status: Literal["ok"] = "ok"
     app: str
     version: str
-    env: str
-    duckdb_path: str
-    secrets: dict[str, bool]
+    mode: Literal["selfhost", "cloud"] = "selfhost"
     timestamp: datetime
+
+
+class ReadyResponse(BaseModel):
+    status: Literal["ready", "not_ready"]
 
 
 # ---------------------------------------------------------------------------
@@ -148,8 +203,8 @@ class EcommerceOrder(BaseModel):
     date: date
     product: str
     category: str
-    revenue: float = Field(ge=0)
-    cost: float = Field(ge=0)
+    revenue: float   # ujemny przychod i koszt = korekta/zwrot (mapper przepuszcza je z ostrzezeniem)
+    cost: float
     profit: float
     discount: float = Field(ge=0, le=1, description="udział rabatu 0-1")
     status: Literal["completed", "refunded", "cancelled", "pending"]
@@ -169,8 +224,8 @@ class EcommerceMetrics(BaseModel):
     revenue_total: float
     cost_total: float
     profit_total: float
-    margin_pct: float
-    avg_order_value: float
+    margin_pct: float | None       # None gdy przychod calkowity <= 0 (marza nieokreslona)
+    avg_order_value: float | None  # None gdy przychod calkowity <= 0
     avg_discount_pct: float
     loss_orders: list[dict[str, Any]]
     loss_orders_count: int
@@ -183,7 +238,7 @@ class EcommerceMetrics(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# UKSC EVIDENCE (dowody zgodnosci technicznej ze stacji Windows)
+# UKSC EVIDENCE (artefakty techniczne stacji (raport statusu))
 # ---------------------------------------------------------------------------
 UKSC_SCHEMA_VERSION = "1.0"
 

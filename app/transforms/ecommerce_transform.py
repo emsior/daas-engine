@@ -6,6 +6,7 @@ from typing import Any
 import pandas as pd
 
 from app.core.models import EcommerceMetrics
+from app.reporting.fmt import pct, pln, sanitize_floats
 
 # Statusy liczone do przychodu/zysku (refund/cancel wykluczone z P&L, ale raportowane).
 REVENUE_STATUSES = {"completed", "pending"}
@@ -17,7 +18,9 @@ def detect_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
     - DEEP_DISCOUNT: rabat >= 25%
     - MARGIN_OUTLIER: marża poniżej (mediana - 2*MAD) w danej kategorii
     - REVENUE_OUTLIER: przychód > Q3 + 1.5*IQR
+    Wiersze z ujemnym przychodem (korekty/zwroty) nie są analizowane — to nie są transakcje sprzedaży.
     """
+    df = df[df["revenue"] >= 0]
     if df.empty:
         return []
     out: list[dict[str, Any]] = []
@@ -33,9 +36,9 @@ def detect_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
         })
 
     for _, r in df[df["profit"] < 0].iterrows():
-        add(r, "NEGATIVE_PROFIT", f"strata {r['profit']:.2f} przy rabacie {100*r['discount']:.0f}%")
+        add(r, "NEGATIVE_PROFIT", f"strata {pln(-r['profit'])} przy rabacie {pct(100 * r['discount'], 0)}")
     for _, r in df[(df["discount"] >= 0.25) & (df["profit"] >= 0)].iterrows():
-        add(r, "DEEP_DISCOUNT", f"rabat {100*r['discount']:.0f}% zjada marżę do {r['margin_pct']:.1f}%")
+        add(r, "DEEP_DISCOUNT", f"rabat {pct(100 * r['discount'], 0)} zjada marżę do {pct(r['margin_pct'])}")
 
     for _cat, g in df.groupby("category"):
         if len(g) < 3:
@@ -44,12 +47,12 @@ def detect_anomalies(df: pd.DataFrame) -> list[dict[str, Any]]:
         mad = (g["margin_pct"] - med).abs().median() or 1.0
         thr = med - 2 * mad
         for _, r in g[(g["margin_pct"] < thr) & (g["profit"] >= 0)].iterrows():
-            add(r, "MARGIN_OUTLIER", f"marża {r['margin_pct']:.1f}% vs mediana kategorii {med:.1f}%")
+            add(r, "MARGIN_OUTLIER", f"marża {pct(r['margin_pct'])} vs mediana kategorii {pct(med)}")
 
     q1, q3 = df["revenue"].quantile([0.25, 0.75])
     hi = q3 + 1.5 * (q3 - q1)
     for _, r in df[df["revenue"] > hi].iterrows():
-        add(r, "REVENUE_OUTLIER", f"przychód {r['revenue']:.2f} > próg {hi:.2f}")
+        add(r, "REVENUE_OUTLIER", f"przychód {pln(r['revenue'])} > próg {pln(hi)}")
     return out
 
 
@@ -98,7 +101,7 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
     if df.empty:
         return EcommerceMetrics(
             orders_total=0, orders_completed=0, orders_refunded=0, orders_cancelled=0,
-            revenue_total=0.0, cost_total=0.0, profit_total=0.0, margin_pct=0.0, avg_order_value=0.0,
+            revenue_total=0.0, cost_total=0.0, profit_total=0.0, margin_pct=None, avg_order_value=None,
             avg_discount_pct=0.0, loss_orders=[], loss_orders_count=0, loss_orders_total=0.0,
             top_categories=[], top_products=[], anomalies=[], weekly=[], wow=None,
         )
@@ -109,7 +112,8 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
     cost = float(pnl["cost"].sum())
     profit = float(pnl["profit"].sum())
 
-    loss = pnl[pnl["profit"] < 0].sort_values("profit")
+    # Korekta/zwrot (przychod < 0) obniza sumy, ale nie jest "zamowieniem stratnym" do blokowania rabatow.
+    loss = pnl[(pnl["profit"] < 0) & (pnl["revenue"] >= 0)].sort_values("profit")
     loss_rows = loss[["order_id", "date", "product", "category", "revenue", "cost", "profit", "discount"]].copy()
     loss_rows["date"] = loss_rows["date"].astype(str)
     loss_rows = loss_rows.round(2)
@@ -119,7 +123,8 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
         .agg(orders=("order_id", "count"), revenue=("revenue", "sum"), profit=("profit", "sum"))
         .reset_index()
     )
-    by_cat["margin_pct"] = (100 * by_cat["profit"] / by_cat["revenue"]).round(1)
+    # przychod kategorii = 0 -> marza nieokreslona (None w wyniku), nigdy inf/nan
+    by_cat["margin_pct"] = (100 * by_cat["profit"] / by_cat["revenue"].where(by_cat["revenue"] != 0)).round(1)
     by_cat["revenue_share_pct"] = (100 * by_cat["revenue"] / revenue).round(1) if revenue else 0.0
     by_cat = by_cat.sort_values("revenue", ascending=False).round(2)
 
@@ -142,15 +147,16 @@ def transform_ecommerce(records: list[dict[str, Any]]) -> EcommerceMetrics:
         revenue_total=round(revenue, 2),
         cost_total=round(cost, 2),
         profit_total=round(profit, 2),
-        margin_pct=round(100 * profit / revenue, 2) if revenue else 0.0,
-        avg_order_value=round(revenue / len(pnl), 2) if len(pnl) else 0.0,
+        # przychod calkowity <= 0 (np. korekta znosi sprzedaz): marza i AOV sa nieokreslone, nie 0,00
+        margin_pct=round(100 * profit / revenue, 2) if revenue > 0 else None,
+        avg_order_value=round(revenue / len(pnl), 2) if len(pnl) and revenue > 0 else None,
         avg_discount_pct=round(100 * float(pnl["discount"].mean()), 2) if len(pnl) else 0.0,
-        loss_orders=loss_rows.to_dict(orient="records"),
+        loss_orders=sanitize_floats(loss_rows.to_dict(orient="records")),
         loss_orders_count=int(len(loss)),
         loss_orders_total=round(float(loss["profit"].sum()), 2),
-        top_categories=by_cat.to_dict(orient="records"),
-        top_products=by_prod.to_dict(orient="records"),
-        anomalies=detect_anomalies(pnl),
-        weekly=weekly,
-        wow=wow,
+        top_categories=sanitize_floats(by_cat.to_dict(orient="records")),
+        top_products=sanitize_floats(by_prod.to_dict(orient="records")),
+        anomalies=sanitize_floats(detect_anomalies(pnl)),
+        weekly=sanitize_floats(weekly),
+        wow=sanitize_floats(wow),
     )
