@@ -1,5 +1,4 @@
 # DaaS Engine — automatyczny raport tygodniowy z Twoich danych
-Live: https://prochpc.pl
 
 *[English README →](README.md)*
 
