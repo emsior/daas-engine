@@ -3,6 +3,7 @@ wiadra uploadow/jobow/raportow, seria tygodni z raportem, reguly `issues`, param
 Izolacja organizacji: macierz w `test_tenant_isolation.py` obejmuje trase automatycznie; tutaj dodatkowo dane."""
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, date, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -189,14 +190,23 @@ def test_weeks_parameter_limits_the_list(cloud_client, org, weeks):
 
 
 @pytest.mark.parametrize("weeks", ["0", "27", "-1", "abc"])
-def test_weeks_outside_1_26_is_422_naming_the_parameter(cloud_client, org, weeks):
-    r = cloud_client.get(url(org.org_id), params={"weeks": weeks}, headers=key_headers(org.api_key))
+@pytest.mark.parametrize(
+    "request_id", [None, "TEST-abc-request"], ids=["generated-id", "id-containing-input"]
+)
+def test_weeks_outside_1_26_is_422_naming_the_parameter(cloud_client, org, weeks, request_id):
+    headers = key_headers(org.api_key)
+    if request_id is not None:
+        headers["X-Request-ID"] = request_id
+    r = cloud_client.get(url(org.org_id), params={"weeks": weeks}, headers=headers)
     assert r.status_code == 422, r.text
     assert r.headers["content-type"].startswith("application/problem+json")
     body = r.json()
+    if request_id is not None:
+        assert body["request_id"] == request_id
     assert body["code"] == "validation_error"
     assert any(e["loc"] == ["query", "weeks"] for e in body["errors"]), body
-    assert "abc" not in r.text  # wartosc klienta nie jest odbijana
+    redacted_body = {key: value for key, value in body.items() if key != "request_id"}
+    assert "abc" not in json.dumps(redacted_body)  # wartosc klienta nie jest odbijana
 
 
 def test_scope_runs_read_is_required(cloud_client, cloud_settings, org):
