@@ -1056,6 +1056,11 @@ export interface components {
             /** App */
             app: string;
             /**
+             * Maintenance
+             * @default false
+             */
+            maintenance: boolean;
+            /**
              * Mode
              * @default selfhost
              * @enum {string}
@@ -2068,6 +2073,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Sign-in e-mails are paused for maintenance (code: maintenance) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     verify_magic_link_api_v1_auth_magic_link_verify_post: {
@@ -2744,6 +2758,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Problem"];
                 };
             };
+            /** @description Invitations are paused for maintenance (code: maintenance) */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
         };
     };
     revoke_invitation_api_v1_orgs__org_id__invitations__invitation_id__delete: {
@@ -2867,6 +2890,15 @@ export interface operations {
             };
             /** @description Validation error (RFC 9457 problem details) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Pipeline runs are paused for maintenance */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -3682,6 +3714,15 @@ export interface operations {
             };
             /** @description Validation error (RFC 9457 problem details) */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Problem"];
+                };
+            };
+            /** @description Webhook delivery is paused for maintenance */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

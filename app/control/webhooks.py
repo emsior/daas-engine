@@ -279,6 +279,8 @@ class WebhookDispatcher:
     # ------------------------------------------------------------------ run.finished
     async def on_run_finished(self, event: RunFinished) -> None:
         """Listener executora: wybiera webhooki organizacji i startuje dostawy w tle (nie blokuje runu)."""
+        if self.settings.daas_maintenance_mode:
+            return
         async with self.sessionmaker() as db:
             hooks = (await db.execute(select(Webhook).where(Webhook.org_id == event.org_id, Webhook.active.is_(True))
                                       .order_by(Webhook.id))).scalars().all()
@@ -326,6 +328,8 @@ class WebhookDispatcher:
                       max_attempts: int = MAX_ATTEMPTS) -> DeliveryResult:
         """Wysyla `body` do webhooka (z ponowieniami). Nie rzuca przy bledach sieci/odbiorcy — zwraca wynik."""
         delivery_id = new_ulid()
+        if self.settings.daas_maintenance_mode:
+            return DeliveryResult(False, None, 0, delivery_id, "maintenance")
         secret = self.signing_secret(hook)
         if secret is None:
             log.warning("webhook skipped: signing secret unavailable webhook_id=%s", hook.id)

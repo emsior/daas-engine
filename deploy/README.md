@@ -88,30 +88,41 @@ Zasady:
 
 ## Rollback
 
-Kolejność zależy od tego, czy nowa wersja zdążyła zmienić schemat bazy (sprawdź `CHANGELOG.md`: wpis o migracji).
+Choose the path from the migration entries in `CHANGELOG.md`. Prepare the required images locally before the maintenance window.
 
-**A. Wersja bez migracji, albo awaria widoczna zaraz po starcie**
+**A. Image only, with a compatible current database schema**
 
 ```bash
 cd /opt/daas-engine/deploy
-sed -i 's/^DAAS_VERSION=.*/DAAS_VERSION=2.0.0/' .env     # poprzedni tag; obrazy api i web są lokalnie
-docker compose --profile edge up -d                      # bez --build: używa istniejącego obrazu
+sed -i 's/^DAAS_VERSION=.*/DAAS_VERSION=2.0.0/' .env     # previous local image tag
+docker compose --profile edge up -d --no-build --pull never
 ./smoke.sh --wait 90 --expect-version 2.0.0
 ```
 
-Gdy obrazu nie ma już lokalnie: `git checkout v2.0.0 && docker compose build`, potem `up -d`.
+Use this only when the previous image understands the current schema. An early failure after an update is not proof that no migration ran.
 
-**B. Nowa wersja zmigrowała control plane**
+**B. Restore the database and runtime data**
 
-Starszy obraz nie musi rozumieć nowszego schematu, więc przywróć kopię z kroku 1 aktualizacji razem z poprzednim tagiem:
+Follow [RUNBOOK section 5](RUNBOOK.md#5-restore-drill-and-isolated-recovery-monthly) before running a restore. The required sequence is:
+
+1. Close public ingress, then block host and forwarded Docker egress for IPv4 and IPv6 on every interface. Establish successful controls before the block, repeat them with failures afterward, and verify matching rule-counter increases. A timeout alone is not evidence. Have all images, tools and archives locally first.
+2. Persist `DAAS_MAINTENANCE_MODE=true` in the private deployment configuration; keep it exported across Compose commands. Select a schema-compatible image with maintenance and quarantine support.
+3. Restore without starting services, then start only the API in maintenance:
 
 ```bash
-sed -i 's/^DAAS_VERSION=.*/DAAS_VERSION=2.0.0/' .env
-./restore.sh backups/daas-20261010T120000Z.tar.gz        # sprawdza SHA-256, robi kopię pre-restore, podmienia dane
-./smoke.sh --wait 90 --expect-version 2.0.0
+export DAAS_MAINTENANCE_MODE=true
+./restore.sh backups/daas-20261010T120000Z.tar.gz --no-start
+DAAS_MAINTENANCE_MODE=true docker compose up -d --no-build --pull never --force-recreate --wait --wait-timeout 90 api
+docker compose stop api
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --dry-run --revoke-all
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --revoke-all
 ```
 
-Dane zapisane po wykonaniu kopii przepadają (kopia pre-restore w `backups/pre-restore-*.tar.gz` pozwala je odzyskać ręcznie). Przy rollbacku Caddy nie wymaga żadnych zmian; konfigurację Caddy wycofuje się przez `git checkout` pliku `Caddyfile` i `docker compose --profile edge up -d`.
+4. API stays stopped during the CLI transaction. Keep the unique pre-restore archive path printed by the script. A failed pre-restore backup, failed stop, running API/web or failed SQLite consistency check stops restoration. `--no-pre-backup` is an explicit exception for lost current data and requires the conservative reset.
+5. **D21b reconciliation is unavailable.** Use `--revoke-all` even with a pre-restore copy. Owners must confirm and correct accounts, memberships and roles; review resurrected deleted data, notification settings and stale queued jobs before release. Quarantine does not make those records current.
+6. Restart only API in maintenance and run the API-only smoke in the runbook. Persist maintenance `false`, force-recreate API and verify the health field is false; then remove the egress block, start web and pass the full local smoke. Reopen ingress last and run the public smoke. Keep isolation if any prerequisite fails.
+
+Restored sessions and one-time credentials cannot be reused after quarantine; conservative reset also revokes stored organization API keys and OAuth access, removes unaccepted invitations, disables webhooks/reminders and clears schedule chat-webhook addresses. It does not reset deployment secrets, automatically repair roles, cancel queued jobs or remove resurrected data. Preserve the pre-restore archive for controlled recovery of post-backup changes and notify affected customers of any loss. A monthly drill remains isolated and never reaches the production release steps.
 
 ## Kopie zapasowe
 

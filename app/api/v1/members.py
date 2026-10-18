@@ -66,10 +66,13 @@ async def list_members(ctx: OrgContext = Depends(_READ), db: AsyncSession = Depe
                 "already has an account or is already a member (nothing is sent in that case). Repeating it for the "
                 "same address refreshes the invitation. Limits: 20 per organization per 24 hours and 5 per minute "
                 "per caller (`429 invitation_limit`). Use `GET /invitations` to list and `DELETE` to revoke.",
-    responses={429: {"description": "Invitation limit reached"}},
+    responses={429: {"description": "Invitation limit reached"},
+               503: {"description": "Invitations are paused for maintenance (code: maintenance)"}},
 )
 async def invite(body: InvitationCreate, request: Request, ctx: OrgContext = Depends(_MANAGE),
                  db: AsyncSession = Depends(get_db)) -> InvitationAccepted:
+    if request.app.state.settings.daas_maintenance_mode:
+        raise ProblemError(503, "maintenance", "invitations are paused for maintenance")
     _check_role_grant(ctx, body.role)
     since = utcnow() - INVITATION_DAILY_WINDOW
     sent = (await db.execute(select(func.count()).select_from(AuditEvent).where(

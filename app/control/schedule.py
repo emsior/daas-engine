@@ -159,6 +159,8 @@ class ReminderResult:
 async def send_reminder(sessionmaker: async_sessionmaker[AsyncSession], settings: Settings, mailer: Mailer,
                         org_id: str, *, now: datetime | None = None) -> ReminderResult | None:
     """Przypomnienie jednej organizacji. None = termin juz zajety (inny tick, restart) albo nieaktualny."""
+    if settings.daas_maintenance_mode:
+        return None
     now = now or utcnow()
     async with sessionmaker() as db:
         schedule = await db.get(OrgSchedule, org_id)
@@ -230,7 +232,7 @@ class SchedulerLoop:
         return self._task is not None and not self._task.done()
 
     def start(self) -> None:
-        if self.running:
+        if self.settings.daas_maintenance_mode or self.running:
             return
         self._task = asyncio.get_running_loop().create_task(self._loop(), name="scheduler")
 
@@ -243,6 +245,8 @@ class SchedulerLoop:
 
     async def tick(self, now: datetime | None = None) -> list[ReminderResult]:
         """Jedna iteracja (uzywana przez petle i testy)."""
+        if self.settings.daas_maintenance_mode:
+            return []
         now = now or utcnow()
         async with self.sessionmaker() as db:
             due = await due_schedules(db, now)

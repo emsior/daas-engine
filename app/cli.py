@@ -1,10 +1,11 @@
-"""Polecenia operatora: `python -m app.cli <migrate|migrate-runtime|create-org|set-plan|purge>`.
+"""Polecenia operatora: `python -m app.cli <command>`.
 
     migrate           alembic upgrade head dla bazy control plane (idempotentne)
     migrate-runtime   przeniesienie runtime/ sprzed 2.0 do runtime/tenants/default/ (idempotentne)
     create-org        nowa organizacja z kontem wlasciciela i jednorazowym kluczem API
     set-plan          zmiana planu organizacji (free|pro|selfhost) — jedyna sciezka zmiany planu w 2.0
     purge             retencja: kasowanie uploadow, raportow i danych najemcow po terminie (--dry-run, --org)
+    restore-quarantine invalidate restored credentials (--dry-run, --revoke-all; stop the API first)
 """
 from __future__ import annotations
 
@@ -143,6 +144,23 @@ def cmd_purge(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_restore_quarantine(settings: Settings, args: argparse.Namespace) -> int:
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.control.restore import restore_quarantine
+
+    # The restored schema must already exist; this command never applies migrations.
+    try:
+        counts = asyncio.run(restore_quarantine(settings, dry_run=args.dry_run, revoke_all=args.revoke_all))
+    except (SQLAlchemyError, OSError):
+        # Database errors can contain SQL parameters, including restored credentials.
+        print("error: restore quarantine failed; keep the API stopped and inspect the database", file=sys.stderr)
+        return 1
+    for category, count in counts.items():
+        print(f"{category}: {count}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -154,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
     pu.add_argument("--dry-run", action="store_true", help="count what would be deleted, delete nothing")
     pu.add_argument("--org", help="limit to one organization id")
     pu.set_defaults(func=cmd_purge)
+    rq = sub.add_parser("restore-quarantine", help="invalidate restored credentials while the API is stopped")
+    rq.add_argument("--dry-run", action="store_true", help="print counts without changing data or audit events")
+    rq.add_argument("--revoke-all", action="store_true",
+                    help="also revoke stored long-lived credentials, pending invitations and outbound webhooks/reminders")
+    rq.set_defaults(func=cmd_restore_quarantine)
     co = sub.add_parser("create-org", help="create an organization and print a one-time API key")
     co.add_argument("--name", required=True)
     co.add_argument("--owner-email", required=True)

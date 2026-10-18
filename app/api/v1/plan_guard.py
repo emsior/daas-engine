@@ -78,6 +78,8 @@ async def check_plan_limit(db: AsyncSession, request: Request, *, principal: Pri
     """429 `plan_limit` (z audytem `auth_denied`), gdy miesieczny limit planu jest wyczerpany — wspolne dla v1 i /mcp.
 
     `runs`: zuzyte runy + zadania w toku >= limit. `upload_bytes`: zuzyte bajty + `declared_bytes` >= limit."""
+    if resource == "runs" and request.app.state.settings.daas_maintenance_mode:
+        raise ProblemError(503, "maintenance", "pipeline runs are paused for maintenance")
     org_id = org.id
     limits = limits_for(org.plan)
     counter = await db.get(UsageCounter, (org_id, service.current_period()))

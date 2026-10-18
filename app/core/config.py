@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     #: `selfhost` = jeden najemca (`default`), klucz z DAAS_API_KEY, trasy legacy dzialaja.
     #: `cloud` = wielu najemcow, wszystko przez /api/v1, trasy legacy odpowiadaja 404.
     daas_mode: Literal["selfhost", "cloud"] = "selfhost"
+    #: Freeze restored workloads and notifications until the operator finishes recovery.
+    daas_maintenance_mode: bool = False
     #: Baza control plane (SQLAlchemy async URL). SQLite domyslnie; Postgres: postgresql+asyncpg://...
     daas_control_db_url: str = "sqlite+aiosqlite:///runtime/control.db"
     #: Przy starcie aplikacji wykonaj `alembic upgrade head` (idempotentne). Wylacz, gdy migracje robi operator.

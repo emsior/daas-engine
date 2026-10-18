@@ -150,6 +150,8 @@ class JobExecutor:
     # ------------------------------------------------------------------ cykl zycia
     async def start(self) -> None:
         """Ustawia semafor i odzyskuje stan po restarcie: `running` -> `failed:abandoned`, `queued` -> kolejka."""
+        if self.settings.daas_maintenance_mode:
+            return
         self._loop = asyncio.get_running_loop()
         self._global = asyncio.Semaphore(self.settings.daas_max_concurrent_runs)
         async with self.sessionmaker() as db:
@@ -176,6 +178,8 @@ class JobExecutor:
 
     # ------------------------------------------------------------------ kolejka
     def submit(self, job_id: str, org_id: str) -> None:
+        if self.settings.daas_maintenance_mode:
+            return
         task = asyncio.get_running_loop().create_task(self._run(job_id, org_id), name=f"job-{job_id}")
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -194,6 +198,8 @@ class JobExecutor:
 
     # ------------------------------------------------------------------ wykonanie
     async def _execute(self, job_id: str, org_id: str) -> None:
+        if self.settings.daas_maintenance_mode:
+            return
         async with self.sessionmaker() as db:
             claimed = await db.execute(update(Job).where(Job.id == job_id, Job.status == "queued").values(
                 status="running", started_at=utcnow(), progress=5, message="starting"))

@@ -694,6 +694,11 @@
             "title": "App",
             "type": "string"
           },
+          "maintenance": {
+            "default": false,
+            "title": "Maintenance",
+            "type": "boolean"
+          },
           "mode": {
             "default": "selfhost",
             "enum": [
@@ -3037,6 +3042,16 @@
               }
             },
             "description": "Validation error (RFC 9457 problem details)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sign-in e-mails are paused for maintenance (code: maintenance)"
           }
         },
         "summary": "Request a sign-in link",
@@ -3980,6 +3995,16 @@
               }
             },
             "description": "Invitation limit reached"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invitations are paused for maintenance (code: maintenance)"
           }
         },
         "summary": "Invite by e-mail",
@@ -4206,6 +4231,16 @@
               }
             },
             "description": "Validation error (RFC 9457 problem details)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Pipeline runs are paused for maintenance"
           }
         },
         "summary": "Start a job",
@@ -5442,6 +5477,16 @@
               }
             },
             "description": "Validation error (RFC 9457 problem details)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Webhook delivery is paused for maintenance"
           }
         },
         "summary": "Send a test event",

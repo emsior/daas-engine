@@ -118,10 +118,13 @@ async def delete_webhook(webhook_id: str, request: Request, ctx: OrgContext = De
     "/orgs/{org_id}/webhooks/{webhook_id}/ping", response_model=WebhookPingOut, summary="Send a test event",
     description="Sends one signed `ping` event (single attempt) and reports whether the endpoint answered 2xx and the "
                 "class of its answer (`status_class`); the exact status code is not returned.",
-    responses={404: {"description": "Webhook not found"}},
+    responses={404: {"description": "Webhook not found"},
+               503: {"description": "Webhook delivery is paused for maintenance"}},
 )
 async def ping_webhook(webhook_id: str, request: Request, ctx: OrgContext = Depends(_MANAGE),
                        db: AsyncSession = Depends(get_db)) -> WebhookPingOut:
+    if request.app.state.settings.daas_maintenance_mode:
+        raise ProblemError(503, "maintenance", "webhook delivery is paused for maintenance")
     hook = await _load(db, ctx.org_id, webhook_id)
     dispatcher = request.app.state.webhooks
     result = await dispatcher.deliver(hook, EVENT_PING, build_body(EVENT_PING, {"org_id": ctx.org_id}),

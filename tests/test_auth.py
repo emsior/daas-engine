@@ -177,7 +177,8 @@ def test_health_is_minimal_and_has_no_paths_or_secrets(anon_client: TestClient):
     r = anon_client.get("/health")
     assert r.status_code == 200
     body = r.json()
-    assert set(body) == {"status", "app", "version", "mode", "timestamp"}
+    assert set(body) == {"status", "app", "version", "mode", "maintenance", "timestamp"}
+    assert body["maintenance"] is False
     assert body["status"] == "ok" and body["mode"] == "selfhost"
     text = r.text
     for needle in ("duckdb", "secrets", "FACEIT", "ANTHROPIC", "/tmp", "runtime", TEST_API_KEY):

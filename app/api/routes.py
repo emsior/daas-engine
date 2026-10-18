@@ -94,7 +94,7 @@ def health(request: Request) -> HealthResponse:
     """Liveness. Publiczny i minimalny: status, wersja, tryb. Bez sciezek, konfiguracji i sekretow."""
     s = request.app.state.settings
     return HealthResponse(app=s.app_name, version=installed_version(s.app_version), mode=s.daas_mode,
-                          timestamp=datetime.utcnow())
+                          maintenance=s.daas_maintenance_mode, timestamp=datetime.utcnow())
 
 
 def _probe_runtime_dir(directory: Path) -> None:
@@ -152,6 +152,7 @@ async def _read_run_request(request: Request) -> RunRequest | JSONResponse:
 
 @router.post(
     "/run", response_model=RunResultWithHash, tags=["pipelines"], dependencies=[Depends(limit_run)],
+    responses={503: {"description": "Pipeline runs are paused for maintenance (code: maintenance)"}},
     openapi_extra={
         "requestBody": {
             "required": True,
@@ -189,6 +190,9 @@ async def _read_run_request(request: Request) -> RunRequest | JSONResponse:
     },
 )
 async def run(request: Request):
+    if request.app.state.settings.daas_maintenance_mode:
+        return JSONResponse({"detail": "pipeline runs are paused for maintenance", "code": "maintenance",
+                             "request_id": get_request_id()}, status_code=503)
     body = await _read_run_request(request)
     if isinstance(body, JSONResponse):   # walidacja ciala nie przeszla -> 422 bez echa
         return body

@@ -329,48 +329,123 @@ cat "backups/$(ls -1 backups | grep '\.meta$' | tail -n 1)"   # created_utc, daa
 
 Dowód: po pierwszym ręcznym `~/daas-nightly.sh` pojawia się archiwum z `.sha256` i `.meta` (`mode=cold`), `sha256sum -c` zwraca `OK`, `restic snapshots` pokazuje nową migawkę, a usługa heartbeat odnotowuje wywołanie. Następnego dnia po 03:15 UTC ten sam obraz bez udziału człowieka.
 
-## 5. Test odtworzenia (co miesiąc)
+## 5. Restore drill and isolated recovery (monthly)
 
-Kopia, której nie odtworzono, nie jest kopią. Robisz to na **osobnej maszynie** (sekcja 0), nie na produkcji. Ta maszyna chwilowo przechowuje dane klienta: używaj jej w tym samym regionie i na tych samych warunkach co serwer pilota, a po teście zniszcz ją razem z dyskiem.
+Run the monthly drill on a **separate approved host** in the same region and under the same data-handling conditions as production. Prepare the matching application images, Compose, `nft`, `curl`, the archive and its `.sha256`, and the private deployment configuration **before isolation**. All commands below run from `deploy/`; no image pulls, builds or package installations belong inside the isolated phase. Keep the pre-restore archive and checksum: they contain the previous state, not an automatically reconciled database.
 
-Na maszynie testowej wykonaj z sekcji 1 tylko Docker (1.5) i narzędzia (1.4: `git`, `curl`, `openssl`, `restic`). Potem:
+### 5.1 Close ingress and prove the egress block
 
-```bash
-git clone <adres repozytorium z README> /opt/daas-engine && cd /opt/daas-engine
-git checkout <tag>                                    # ten sam co na produkcji (jego wersja = daas_version z pliku .meta kopii)
-cd deploy
-install -m 600 /dev/null .env && $EDITOR .env         # wklej .env z menedżera haseł (sprawdza też, że kopia tam jest kompletna)
-docker compose build                                  # restore.sh używa obrazu z tagiem DAAS_VERSION; bez builda zatrzyma się
-```
+Close every public ingress path first. With the bundled proxy, run `docker compose --profile edge stop caddy`; with a shared proxy, put the DaaS routes into maintenance and verify that public access is closed. Use the provider console for the following host-wide firewall change: it also blocks SSH replies and other services' outgoing traffic. Do not rely on stopping Caddy to block outbound messages.
 
-Przenieś na maszynę testową `~/.config/daas-backup.env` i plik z hasłem repozytorium (z menedżera haseł; usuń z kopii linię `HEARTBEAT_URL`, żeby test nie wołał heartbeatu), pobierz najnowszą kopię z magazynu poza serwerem i odtwórz:
+Use operator-controlled HTTP probe endpoints with reachable **literal IPv4 and IPv6 addresses**, not DNS names. Set `PROBE_V4`, `PROBE_V6` and `PROBE_PORT` to those endpoints. Before adding rules, each applicable probe below must succeed; retain the results and time. The container probe uses the same network configuration as the API without starting the application:
 
 ```bash
-. ~/.config/daas-backup.env
-restic restore latest --tag daas --target ~/restore-test
-mkdir -p backups && cp ~/restore-test/opt/daas-engine/deploy/backups/daas-<data UTC>.tar.gz* backups/
+probe_container() {
+  docker compose run --rm --pull never --no-deps --entrypoint python api -c \
+    'import socket,sys; socket.create_connection((sys.argv[1], int(sys.argv[2])), timeout=5).close()' \
+    "$1" "$PROBE_PORT"
+}
+curl --noproxy '*' -4 -fsS --connect-timeout 5 --max-time 10 -o /dev/null "http://$PROBE_V4:$PROBE_PORT/"
+curl --noproxy '*' -6 -fsS --connect-timeout 5 --max-time 10 -o /dev/null "http://[$PROBE_V6]:$PROBE_PORT/"
+probe_container "$PROBE_V4"
+probe_container "$PROBE_V6"
 ```
 
-**Zanim uruchomisz `restore.sh`, odetnij kontenerom ruch wychodzący.** `restore.sh` kończy się `docker compose up -d api web`, a `api` po starcie wznawia zadania `queued` z kopii; po ich zakończeniu wysyłane są webhooki `run.finished` na adresy klienta, a `.env` zawiera prawdziwe dane SMTP. Poniższa reguła blokuje ruch kontenerów na zewnątrz (host, czyli `restic` i `smoke.sh`, działa dalej), znika po restarcie maszyny, a maszynę i tak zniszczysz po teście:
+If a family is disabled, record interface, per-interface disable settings and route evidence from the host **and every relevant container network namespace** before marking its probes not applicable. A timeout or missing route alone is not proof of isolation. If a family is enabled and its positive control cannot be established, stop. These commands cover the standard Linux bridge deployment; any additional network driver or namespace needs the same verified isolation before recovery.
+
+Add a dedicated `inet` table, with no interface restriction and no established-connection bypass. Its `output` hook blocks host traffic and its `forward` hook blocks Docker traffic, for both address families. Host loopback remains available. Inspect an existing table with this name instead of replacing it; never flush the host ruleset.
 
 ```bash
-IF="$(ip route show default | awk '{print $5; exit}')"   # interfejs z trasą domyślną, np. eth0
-sudo iptables -I DOCKER-USER -o "$IF" -j REJECT          # kontenery nie wyślą nic na zewnątrz
-sudo iptables -S DOCKER-USER | head -n 3                 # pierwsza reguła: REJECT na tym interfejsie
+if sudo nft list table inet daas_restore_guard >/dev/null 2>&1; then
+  echo 'Existing restore guard: inspect it before proceeding.' >&2
+  exit 1
+fi
+sudo nft -f - <<'NFT'
+table inet daas_restore_guard {
+  chain output {
+    type filter hook output priority -300; policy drop;
+    oifname "lo" accept
+    meta nfproto ipv4 counter drop
+    meta nfproto ipv6 counter drop
+  }
+  chain forward {
+    type filter hook forward priority -300; policy drop;
+    meta nfproto ipv4 counter drop
+    meta nfproto ipv6 counter drop
+  }
+}
+NFT
+sudo nft -a list table inet daas_restore_guard
 ```
 
-W czasie odtwarzania nic w `restore.sh` ani `compose.yml` nie wymaga sieci z wnętrza kontenera: `maint` ma `network_mode: none` i `pull_policy: never` (obraz musi być zbudowany wcześniej, stąd `docker compose build` przed regułą), a `api` i `web` startują z lokalnych obrazów. Dopiero teraz:
+Repeat **each applicable positive-control command unchanged**: each must now fail. Compare the rule counters before and after: host probes must increment the matching `output` counter and container probes the matching `forward` counter. Save both snapshots. A failed request without a matching counter increase does not prove the block. Stop on any unexpected success or missing evidence. Keep the rules for the entire recovery; do not reboot or change networking without reinstalling and rechecking the block. The rules above are not a persistent boot configuration.
+
+### 5.2 Restore without starting services, then quarantine
+
+Persist `DAAS_MAINTENANCE_MODE=true` in the private deployment configuration and export it in the operator shell. An inline assignment alone does not protect a later Compose recreation from another shell. Confirm the required images are already local; set `RESTORE_ARCHIVE` to the selected archive path, `EXPECTED_VERSION` to its compatible image version and `PUBLIC_ORIGIN` to the deployment's HTTPS origin. Then:
 
 ```bash
-./restore.sh backups/daas-<data UTC>.tar.gz --yes     # sprawdza SHA-256, robi kopię pre-restore, podmienia dane
-./smoke.sh --wait 90 --expect-version <wersja>
-curl -fsS -H "X-API-Key: $KEY" http://127.0.0.1:8000/api/v1/me
-docker compose exec api python -c "import urllib.request as u; u.urlopen('https://example.com', timeout=5)"   # ma skończyć się błędem
+export DAAS_MAINTENANCE_MODE=true
+./restore.sh "$RESTORE_ARCHIVE" --yes --no-start
+DAAS_MAINTENANCE_MODE=true docker compose up -d --no-build --pull never --force-recreate --wait --wait-timeout 90 api
+docker compose exec -T api python -c \
+  'import json,urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health"))["maintenance"] is True'
+docker compose stop api
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --dry-run --revoke-all
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --revoke-all
 ```
 
-`$KEY` to klucz API z menedżera haseł (`read -rs KEY` przed poleceniem, żeby nie trafił do historii). Odpowiedź `/api/v1/me` ma zawierać `principal.org_id` równe `org_id` z produkcji: to dowód, że odtworzyła się baza control plane, w tym skróty kluczy. Dla pewności sprawdź jeszcze `GET /api/v1/orgs/<org_id>/runs?limit=1` tym samym kluczem. Nie uruchamiaj na tej maszynie zadań ani nie wysyłaj poczty (w `.env` są prawdziwe dane SMTP); sama ta zasada nie wystarcza, dlatego jest reguła zapory. Zmierz czas od pobrania kopii do `SMOKE OK`: to rzeczywisty czas odtworzenia. Na koniec usuń `~/restore-test`, `backups/` i `.env`, a maszynę zniszcz.
+Any failed command stops this procedure; keep ingress and egress closed. `restore.sh` refuses a failed pre-restore backup, failed stop, still-running API/web or failed SQLite integrity/foreign-key checks. Record its unique pre-restore archive path. Use `--no-pre-backup` only when the current data cannot be backed up; it explicitly removes the reconciliation source and requires the conservative reset. The backup may stop and restart the previous API, which is why the firewall is installed first. `--no-start` leaves the restored API and web stopped.
 
-Dowód: `iptables -S DOCKER-USER` pokazuje regułę `REJECT`, a próba połączenia z kontenera `api` z `https://example.com` kończy się błędem; `restore.sh` kończy komunikatem `Gotowe`, `smoke.sh` zwraca `SMOKE OK` z oczekiwaną wersją, `/api/v1/me` zwraca `principal.org_id` produkcji, a notatka z testu (data, czas odtworzenia, wynik) leży w dzienniku operatora.
+Run the CLI with API stopped so no sign-in or authorization request races the quarantine transaction. Dry-run changes neither rows nor audit events. Apply removes all sessions, consumes unused magic links and expires pending/approved OAuth codes. `--revoke-all` also revokes stored organization API keys, OAuth grants/tokens and dynamic clients, removes all unaccepted invitations, disables registered webhooks and schedule reminders, and clears schedule chat-webhook destinations. Output contains counts only; applied changes are audited as `restore.*`. This does not rotate deployment secrets or the self-hosted environment API key.
+
+**D21b reconciliation is not available in this release. Use `--revoke-all` even when a pre-restore archive exists.** Before release, organization owners must confirm and correct restored accounts, memberships and roles using independent current records. Review deleted organizations/accounts, invitations, uploads/reports and outstanding deletion requests; remove any resurrected data through an approved recovery procedure. Review and cancel stale `queued` jobs before leaving maintenance. Also review automatic runs, run e-mail notifications and every notification destination; `notify_on_finish` and `auto_run_on_upload` are not reset by quarantine. If these checks or corrections cannot be completed, stay in maintenance with both network gates closed. Quarantine alone is not proof that restored authorization or data is current.
+
+### 5.3 Local smoke test and release gates
+
+Start only the API in maintenance and test from its own loopback; the host firewall intentionally blocks host-to-container and container-to-container traffic. Do not submit a sample job or send mail:
+
+```bash
+DAAS_MAINTENANCE_MODE=true docker compose up -d --no-build --pull never --wait --wait-timeout 90 api
+docker compose exec -T api python - <<'PY'
+import json
+from urllib.error import HTTPError
+from urllib.request import urlopen
+
+base = "http://127.0.0.1:8000"
+for path in ("/health", "/ready", "/api/v1/health"):
+    with urlopen(base + path, timeout=5) as response:
+        payload = json.load(response)
+        assert response.status == 200
+        if path == "/api/v1/health":
+            assert payload["maintenance"] is True
+try:
+    urlopen(base + "/api/v1/me", timeout=5)
+except HTTPError as error:
+    assert error.code == 401
+else:
+    raise AssertionError("Unauthenticated access was accepted")
+print("Maintenance API smoke OK")
+PY
+```
+
+For a **drill**, stop here: retain isolation until the approved test host and its data are destroyed. Record elapsed restore time, image version, checksum, pre-restore path, firewall controls/counters, quarantine counts/audit and the smoke result. This is not a production release.
+
+For **production recovery**, only after the owner/data/queue checks above and the maintenance smoke succeed, persist `DAAS_MAINTENANCE_MODE=false` in the deployment configuration. Recreate the API so the running process reads the new value; verify it before removing isolation. Then remove only this temporary table, start web, run the full local smoke, and finally reopen ingress:
+
+```bash
+export DAAS_MAINTENANCE_MODE=false
+docker compose up -d --no-build --pull never --force-recreate --wait --wait-timeout 90 api
+docker compose exec -T api python -c \
+  'import json,urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health"))["maintenance"] is False'
+sudo nft delete table inet daas_restore_guard
+docker compose up -d --no-build --pull never web
+./smoke.sh --wait 90 --expect-version "$EXPECTED_VERSION"
+docker compose --profile edge up -d --no-build --pull never caddy
+./smoke.sh --public "$PUBLIC_ORIGIN" --wait 90 --expect-version "$EXPECTED_VERSION"
+```
+
+With a shared proxy, replace the Caddy command with reopening the previously closed routes. Stop before reopening ingress if the local smoke fails. Record approval and the release time; users sign in again, and new keys/connections are issued only after their access has been confirmed.
 
 ## 6. Monitoring
 
@@ -438,18 +513,13 @@ Budżet: dziennie kilka minut, tygodniowo ok. 20, miesięcznie 1-1,5 godziny.
 
 Dowód: lista odhaczona, a z ostatniego miesiąca istnieje notatka z testu odtworzenia i wpis o wykonanej aktualizacji lub decyzji, by jej nie robić.
 
-## 8. Aktualizacja i rollback
+## 8. Updates and rollback
 
-Postępuj według [`README.md`](README.md), „Aktualizacja” i „Rollback” (warianty A i B). Z `v2.0.1` w przykładach podstaw `<tag>`, a z `2.0.1` wersję `<wersja>`. Dodatki do pilota:
+Follow [`README.md`](README.md), update and rollback variants A/B. Read the intervening changelog for migrations, take the cold and off-host backup from section 4.3, record the archive path, and retain the previous local images. Notify customers of the maintenance window. Verify the running version with `smoke.sh --expect-version <version>` and repeat the mail-delivery check only after the approved release.
 
-1. Przeczytaj w `../CHANGELOG.md` wpisy między obecną wersją a `<tag>`; szukaj słowa „migracja” (decyduje o wariancie rollbacku A albo B).
-2. Zamiast samego `./backup.sh` uruchom `~/daas-nightly.sh` (sekcja 4.3): kopia zimna **i** kopia poza serwerem. Ta migawka jest Twoim punktem powrotu (wariant B). Zapisz nazwę archiwum.
-3. Wykonaj kroki 2-6 z README w oknie serwisowym, uprzedzając klienta; `api` stoi na czas restartu, a zadania w toku kończą się jako `failed` (`abandoned`).
-4. `git describe --tags` ma wypisać `<tag>`; `smoke.sh --public https://<domena> --wait 90 --expect-version <wersja>` ma zwrócić `SMOKE OK`; powtórz test poczty (2.4).
-5. Trzymaj obraz poprzedniej wersji: nie używaj `docker image prune -a` (README). Archiwum sprzed aktualizacji zostaje do czasu, aż nowa wersja przepracuje kilka dni.
-6. Rollback: wariant A (obraz lokalny, bez migracji) albo B (`restore.sh` z archiwum z punktu 2). Po wariancie B dane zapisane po kopii przepadają, kopia `pre-restore-*` pozwala je odzyskać ręcznie. Poinformuj klienta, jeśli cokolwiek przepadło.
+An image-only rollback is allowed only when the previous image supports the current database schema. Any rollback that restores data must use **all of section 5**, in order: close ingress; prove the host/forwarded IPv4 and IPv6 egress block; `restore.sh --no-start`; start API with persistent maintenance mode; stop API and apply quarantine; complete the owner/data/queue checks; maintenance smoke; recreate API with maintenance off; remove the temporary block; full local smoke; reopen ingress and public smoke. Do not use an older image that lacks maintenance/quarantine support for this procedure.
 
-Dowód: po aktualizacji `smoke.sh --expect-version <wersja>` przechodzi (porównuje wersję z `/health` na `127.0.0.1:8000`, więc potwierdza wersję działającego `api`), a po próbie rollbacku w oknie testowym wraca poprzednia; w obu przypadkach `SMOKE OK`.
+Until D21b is delivered, reconciliation with the pre-restore archive remains unavailable: `--revoke-all` and owners' confirmation/correction of memberships and roles are required even when that archive exists. Deleted data and stale queued work also need review before release. Data written after the restored backup is absent from that backup; preserve the unique pre-restore copy for controlled recovery and inform affected customers. Evidence is the isolated recovery record from section 5, the restored running version and the local/public smoke results, not merely a successful archive extraction.
 
 ## 9. Incydent
 

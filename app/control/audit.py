@@ -43,6 +43,10 @@ AUDIT_ACTIONS_V1: frozenset[str] = frozenset({
     "schedule.updated", "schedule.reminder", "schedule.auto_run_skipped", "schedule.notified",
     "schedule.webhook_notified",
     "oauth.client_registered", "oauth.consent", "oauth.token_issued", "oauth.token_revoked",
+    "restore.sessions_deleted", "restore.magic_links_consumed", "restore.oauth_codes_expired",
+    "restore.api_keys_revoked", "restore.oauth_grants_revoked", "restore.oauth_tokens_revoked",
+    "restore.oauth_clients_revoked", "restore.invitations_deleted", "restore.webhooks_disabled",
+    "restore.reminders_disabled", "restore.schedule_webhooks_disabled",
 })
 
 _MAX_STR = 200

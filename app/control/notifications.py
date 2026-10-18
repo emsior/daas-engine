@@ -54,6 +54,8 @@ class RunNotifier:
         self._tasks: set[asyncio.Task] = set()
 
     async def on_run_finished(self, event: RunFinished) -> None:
+        if self.settings.daas_maintenance_mode:
+            return
         async with self.sessionmaker() as db:
             schedule = await db.get(OrgSchedule, event.org_id)
         if schedule is None:
@@ -82,6 +84,8 @@ class RunNotifier:
             await asyncio.wait(list(self._tasks), timeout=timeout)
 
     async def _notify(self, event: RunFinished) -> None:
+        if self.settings.daas_maintenance_mode:
+            return
         try:
             async with self.sessionmaker() as db:
                 org = await db.get(Org, event.org_id)
@@ -110,6 +114,8 @@ class RunNotifier:
 
     async def _notify_chat(self, event: RunFinished, url: str, kind: str) -> None:
         """Jedna proba wysylki na czat; wynik (bez adresu) w audycie `schedule.webhook_notified`."""
+        if self.settings.daas_maintenance_mode:
+            return
         try:
             async with self.sessionmaker() as db:
                 org = await db.get(Org, event.org_id)

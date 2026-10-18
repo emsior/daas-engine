@@ -28,6 +28,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Added
 
+- Recovery maintenance mode (`DAAS_MAINTENANCE_MODE`, default `false`), exposed by `/api/v1/health`: queued work is not resumed, new runs, webhook tests, magic-link requests and invitation creation return `503 maintenance`, and scheduler, retention, webhook and notification activity is suspended.
+- `python -m app.cli restore-quarantine [--dry-run] [--revoke-all]`: one transaction neutralizes restored sessions and one-time credentials, with count-only output and `restore.*` audit events. Conservative reset additionally revokes stored API/OAuth credentials, removes unaccepted invitations and disables webhook/reminder destinations. Recovery documentation requires network isolation and owner review of roles, deleted data and queued work until D21b reconciliation is available.
 - OAuth isolation matrix for all MCP resources and prompts: foreign identifiers, own-resource controls,
   insufficient scopes, RFC 7009 and cockpit grant revocation, and immediate loss of access after membership removal.
 - Retention audit actions `upload.purge_failed` and `report.purge_failed`, with counts per organization
@@ -119,6 +121,7 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Fixed
 
+- Restore fails closed on pre-restore backup or service-stop failures, checks that API/web are stopped before replacing data, and validates restored SQLite integrity and foreign keys before any start. `--no-start` keeps services stopped; `--no-pre-backup` explicitly requires conservative quarantine. Backup names are unique and never overwrite an existing archive.
 - Deployment smoke checks require explicit feature expectations or matching direct API responses before
   treating a proxy 404 for MCP or OAuth metadata as a disabled feature (P1-7).
 - API v1 OpenAPI errors use the shared `Problem` schema and `application/problem+json`, including

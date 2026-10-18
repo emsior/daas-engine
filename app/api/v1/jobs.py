@@ -67,6 +67,8 @@ async def queue_job(db: AsyncSession, state, org_id: str, principal: Principal, 
     i auto-uruchomienia po uploadzie. Rzuca `ProblemError` (422/404/409) zanim cokolwiek zapisze; po sukcesie
     robi commit i `submit`. Limity planu (429 `plan_limit`) i limit zadan na minute egzekwuje wolajacy
     (trasa: `plan_guard` i `enforce`; MCP: `check_plan_limit` i `submit_job`)."""
+    if state.settings.daas_maintenance_mode:
+        raise ProblemError(503, "maintenance", "pipeline runs are paused for maintenance")
     check_period(body)
     kinds = PIPELINE_UPLOAD_KINDS[body.pipeline]
     if state.settings.cloud and not body.force_mock:
@@ -113,6 +115,8 @@ async def queue_job(db: AsyncSession, state, org_id: str, principal: Principal, 
 async def submit_job(request: Request, db: AsyncSession, ctx: OrgContext, body: JobCreate) -> Job:
     """Kolejkuje run dla wywolujacego z `OrgContext` (v1 i /mcp): limit `v1_run` per podmiot, potem `queue_job`."""
     state = request.app.state
+    if state.settings.daas_maintenance_mode:
+        raise ProblemError(503, "maintenance", "pipeline runs are paused for maintenance")
     enforce(request, "v1_run", state.settings.daas_rate_limit_run_per_min)
     return await queue_job(db, state, ctx.org_id, ctx.principal, body, request=request)
 
@@ -124,6 +128,7 @@ async def submit_job(request: Request, db: AsyncSession, ctx: OrgContext, body: 
                 "`period_from`/`period_to` (inclusive, either may be omitted) limit an `ecommerce_demo` run to the "
                 "orders dated in that range; other pipelines answer `422 period_not_supported`.",
     responses={404: {"description": "Upload not found"}, 409: {"description": "Queue full"},
+               503: {"description": "Pipeline runs are paused for maintenance"},
                422: {"description": "Pipeline and upload do not match, or the period is invalid or not supported"}},
 )
 async def create_job(body: JobCreate, request: Request, response: Response, ctx: OrgContext = Depends(_WRITE),

@@ -120,23 +120,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         notifier = RunNotifier(settings, app.state.db_sessionmaker, app.state.mailer)
         app.state.notifier = notifier
         executor.listeners.append(notifier.on_run_finished)
-        await executor.start()
+        if not settings.daas_maintenance_mode:
+            await executor.start()
         # przypomnienia o eksporcie: tylko cloud, jeden proces (workers=1), wylaczane DAAS_SCHEDULER_ENABLED=false.
         # Jak nizej przy retencji: lifespan trzyma WLASNA referencje (drugi lifespan tej samej aplikacji nadpisuje
         # app.state, a petla nalezy do jego event loopu).
         scheduler: SchedulerLoop | None = None
-        if settings.cloud and settings.daas_scheduler_enabled:
+        if settings.cloud and settings.daas_scheduler_enabled and not settings.daas_maintenance_mode:
             scheduler = SchedulerLoop(settings, app.state.db_sessionmaker, app.state.mailer)
             scheduler.start()
         app.state.scheduler = scheduler
         # retencja (kasowanie po terminie): tylko cloud, cykliczne zadanie w tle. Lifespan trzyma WLASNA referencje:
         # drugi lifespan tej samej aplikacji (drugi TestClient) nadpisuje app.state, a zadanie nalezy do jego petli.
         retention_task: asyncio.Task[None] | None = None
-        if settings.cloud and settings.daas_retention_interval_min > 0:
+        if settings.cloud and settings.daas_retention_interval_min > 0 and not settings.daas_maintenance_mode:
             retention_task = asyncio.create_task(
                 retention_loop(app.state.db_sessionmaker, registry, settings,
                                interval_sec=settings.daas_retention_interval_min * 60), name="retention")
         app.state.retention_task = retention_task
+        if settings.daas_maintenance_mode:
+            log.info("maintenance=true: jobs, scheduler, retention and outbound notifications are paused")
         log.info(
             "DaaS Engine up · mode=%s · env=%s · api_key=%s", settings.daas_mode, settings.app_env,
             "set" if auth.configured else ("n/a" if settings.cloud else "MISSING"),

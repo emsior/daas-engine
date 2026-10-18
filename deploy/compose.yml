@@ -31,6 +31,7 @@ services:
     environment:
       # --- narzucone przez wdrozenie ---
       DAAS_MODE: cloud
+      DAAS_MAINTENANCE_MODE: ${DAAS_MAINTENANCE_MODE:-false}
       APP_ENV: prod
       # Dane poza obrazem: control plane (SQLite) i dane organizacji (DuckDB, uploady, raporty, audyt).
       DAAS_CONTROL_DB_URL: sqlite+aiosqlite:////data/control/control.db

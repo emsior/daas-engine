@@ -92,11 +92,14 @@ async def _memberships_out(db: AsyncSession, user_id: str) -> list[MembershipOut
     summary="Request a sign-in link",
     description="Sends a single-use sign-in link (valid 15 minutes) to the e-mail address. The answer is the same "
                 "for known and unknown addresses. Limited per e-mail and per IP.",
+    responses={503: {"description": "Sign-in e-mails are paused for maintenance (code: maintenance)"}},
 )
 async def request_magic_link(body: MagicLinkRequest, request: Request, response: Response,
                              db: AsyncSession = Depends(get_db)) -> MagicLinkAccepted:
     state = request.app.state
     settings: Settings = state.settings
+    if settings.daas_maintenance_mode:
+        raise ProblemError(503, "maintenance", "sign-in e-mails are paused for maintenance")
     if not settings.has_secret_key:
         raise ProblemError(503, "sessions_unavailable", "sign-in by e-mail is not configured on this server")
     limiter = state.limiter

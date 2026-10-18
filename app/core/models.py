@@ -137,6 +137,7 @@ class HealthResponse(BaseModel):
     app: str
     version: str
     mode: Literal["selfhost", "cloud"] = "selfhost"
+    maintenance: bool = False
     timestamp: datetime
 
 
