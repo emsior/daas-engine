@@ -123,6 +123,7 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 
 ### Fixed
 
+- The SSE job-stream test waits for observed status events before changing job state, so a slow consumer cannot skip the initial queued status.
 - Restore fails closed on pre-restore backup or service-stop failures, checks that API/web are stopped before replacing data, and validates restored SQLite integrity and foreign keys before any start. `--no-start` keeps services stopped; `--no-pre-backup` explicitly requires conservative quarantine. Backup names are unique and never overwrite an existing archive.
 - Deployment smoke checks require explicit feature expectations or matching direct API responses before
   treating a proxy 404 for MCP or OAuth metadata as a disabled feature (P1-7).

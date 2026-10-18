@@ -210,26 +210,52 @@ def stream_events(client: TestClient, org, job_id: str) -> tuple[str, dict[str, 
         return "".join(r.iter_text()), dict(r.headers)
 
 
-def test_sse_streams_status_progress_log_and_ends_with_done(cloud_client, cloud_settings, org):
+def test_sse_streams_status_progress_log_and_ends_with_done(cloud_client, cloud_settings, org, monkeypatch):
     job_id = seed_job(cloud_settings, org.org_id)
     out: dict = {}
+    first_status = threading.Event()
+    running_status = threading.Event()
+    transport_app = cloud_client._transport.app
+
+    async def observe_app(scope, receive, send):
+        async def observe_send(message):
+            await send(message)
+            # TestClient buffers the body until EOF, so observe its ASGI consumer.
+            if message["type"] == "http.response.body":
+                for name, data in parse_sse(message.get("body", b"").decode()):
+                    if name == "status":
+                        first_status.set()
+                        if data["status"] == "running":
+                            running_status.set()
+
+        await transport_app(scope, receive, observe_send)
+
+    monkeypatch.setattr(cloud_client._transport, "app", observe_app)
 
     def consume() -> None:
         out["body"], out["headers"] = stream_events(cloud_client, org, job_id)
 
-    thread = threading.Thread(target=consume)
-    thread.start()
-    time.sleep(0.4)
+    thread = threading.Thread(target=consume, daemon=True)
     bus = cloud_client.app.state.executor.bus
-    update_rows(cloud_settings, models.Job, {"status": "running", "progress": 40, "message": "mapping columns"},
-                models.Job.id == job_id)
-    cloud_client.portal.call(bus.publish, job_id)      # stan zmienia executor i budzi szyne; tu robimy to recznie
-    time.sleep(0.6)
-    update_rows(cloud_settings, models.Job, {"status": "succeeded", "progress": 100, "message": "done",
-                                             "finished_at": utcnow(), "run_id": new_ulid()},
-                models.Job.id == job_id)
-    cloud_client.portal.call(bus.publish, job_id)
-    thread.join(timeout=20)
+    terminal_sent = False
+    thread.start()
+    try:
+        assert first_status.wait(timeout=20), "the stream did not receive its initial status"
+        update_rows(cloud_settings, models.Job, {"status": "running", "progress": 40, "message": "mapping columns"},
+                    models.Job.id == job_id)
+        cloud_client.portal.call(bus.publish, job_id)      # stan zmienia executor i budzi szyne; tu robimy to recznie
+        assert running_status.wait(timeout=20), "the stream did not receive the running status"
+        update_rows(cloud_settings, models.Job, {"status": "succeeded", "progress": 100, "message": "done",
+                                                 "finished_at": utcnow(), "run_id": new_ulid()},
+                    models.Job.id == job_id)
+        cloud_client.portal.call(bus.publish, job_id)
+        terminal_sent = True
+    finally:
+        if not terminal_sent:
+            update_rows(cloud_settings, models.Job, {"status": "cancelled", "finished_at": utcnow()},
+                        models.Job.id == job_id)
+            cloud_client.portal.call(bus.publish, job_id)
+        thread.join(timeout=20)
     assert not thread.is_alive(), "the stream did not close after the terminal state"
     events = parse_sse(out["body"])
     names = [n for n, _ in events]
