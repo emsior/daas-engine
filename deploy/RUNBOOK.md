@@ -329,15 +329,15 @@ cat "backups/$(ls -1 backups | grep '\.meta$' | tail -n 1)"   # created_utc, daa
 
 Dowód: po pierwszym ręcznym `~/daas-nightly.sh` pojawia się archiwum z `.sha256` i `.meta` (`mode=cold`), `sha256sum -c` zwraca `OK`, `restic snapshots` pokazuje nową migawkę, a usługa heartbeat odnotowuje wywołanie. Następnego dnia po 03:15 UTC ten sam obraz bez udziału człowieka.
 
-## 5. Restore drill and isolated recovery (monthly)
+## 5. Próba odtworzenia i odtworzenie w izolacji (co miesiąc)
 
-Run the monthly drill on a **separate approved host** in the same region and under the same data-handling conditions as production. Prepare the matching application images, Compose, `nft`, `curl`, the archive and its `.sha256`, and the private deployment configuration **before isolation**. All commands below run from `deploy/`; no image pulls, builds or package installations belong inside the isolated phase. Keep the pre-restore archive and checksum: they contain the previous state, not an automatically reconciled database.
+Comiesięczną próbę wykonuj na **osobnym, zatwierdzonym hoście**, w tym samym regionie i na tych samych zasadach przetwarzania danych co produkcja. Zgodne obrazy aplikacji, Compose, `nft`, `curl`, archiwum z plikiem `.sha256` oraz prywatną konfigurację wdrożenia przygotuj **przed izolacją**. Wszystkie poniższe polecenia wykonuj z katalogu `deploy/`; podczas izolacji nie pobieraj obrazów, nie buduj ich i nie instaluj pakietów. Zachowaj kopię pre-restore oraz jej sumę: zawierają stan sprzed odtworzenia, z którym uzgodnisz odtworzoną bazę.
 
-### 5.1 Close ingress and prove the egress block
+### 5.1 Zamknięcie wejścia i potwierdzenie blokady wyjścia
 
-Close every public ingress path first. With the bundled proxy, run `docker compose --profile edge stop caddy`; with a shared proxy, put the DaaS routes into maintenance and verify that public access is closed. Use the provider console for the following host-wide firewall change: it also blocks SSH replies and other services' outgoing traffic. Do not rely on stopping Caddy to block outbound messages.
+Najpierw zamknij wszystkie publiczne drogi wejścia. Przy dołączonym proxy wykonaj `docker compose --profile edge stop caddy`; przy wspólnym proxy przełącz trasy DaaS w tryb serwisowy i sprawdź, że dostęp publiczny jest zamknięty. Poniższą zmianę zapory całego hosta wykonuj z konsoli dostawcy: blokuje ona także odpowiedzi SSH i ruch wychodzący innych usług. Zatrzymanie Caddy nie blokuje wiadomości wychodzących.
 
-Use operator-controlled HTTP probe endpoints with reachable **literal IPv4 and IPv6 addresses**, not DNS names. Set `PROBE_V4`, `PROBE_V6` and `PROBE_PORT` to those endpoints. Before adding rules, each applicable probe below must succeed; retain the results and time. The container probe uses the same network configuration as the API without starting the application:
+Użyj kontrolowanych przez operatora punktów testowych HTTP z osiągalnymi **dosłownymi adresami IPv4 i IPv6**, bez nazw DNS. Ustaw `PROBE_V4`, `PROBE_V6` oraz `PROBE_PORT` na te punkty. Przed dodaniem reguł każda mająca zastosowanie próba poniżej musi się udać; zapisz wyniki i czas. Próba kontenerowa korzysta z takiej samej konfiguracji sieci jak API, ale nie uruchamia aplikacji:
 
 ```bash
 probe_container() {
@@ -351,13 +351,13 @@ probe_container "$PROBE_V4"
 probe_container "$PROBE_V6"
 ```
 
-If a family is disabled, record interface, per-interface disable settings and route evidence from the host **and every relevant container network namespace** before marking its probes not applicable. A timeout or missing route alone is not proof of isolation. If a family is enabled and its positive control cannot be established, stop. These commands cover the standard Linux bridge deployment; any additional network driver or namespace needs the same verified isolation before recovery.
+Jeśli rodzina adresów jest wyłączona, zanim oznaczysz jej próby jako niemające zastosowania, zapisz interfejsy, ustawienia wyłączenia na każdym interfejsie i trasy hosta **oraz każdej właściwej kontenerowej przestrzeni nazw sieci**. Sam timeout albo brak trasy nie dowodzi izolacji. Jeżeli rodzina jest włączona, a kontrola dodatnia nie działa, przerwij. Te polecenia obejmują standardowe wdrożenie z mostem sieciowym Linuksa; każdy dodatkowy sterownik lub przestrzeń nazw wymaga tak samo potwierdzonej izolacji przed odtworzeniem.
 
-Add a dedicated `inet` table, with no interface restriction and no established-connection bypass. Its `output` hook blocks host traffic and its `forward` hook blocks Docker traffic, for both address families. Host loopback remains available. Inspect an existing table with this name instead of replacing it; never flush the host ruleset.
+Dodaj osobną tabelę `inet`, bez ograniczenia do jednego interfejsu i bez wyjątku dla już zestawionych połączeń. Jej punkt zaczepienia `output` blokuje ruch hosta, a `forward` ruch Dockera, dla obu rodzin adresów. Pętla zwrotna hosta pozostaje dostępna. Jeśli tabela o tej nazwie już istnieje, sprawdź ją zamiast zastępować; nigdy nie opróżniaj całego zestawu reguł hosta.
 
 ```bash
 if sudo nft list table inet daas_restore_guard >/dev/null 2>&1; then
-  echo 'Existing restore guard: inspect it before proceeding.' >&2
+  echo 'Blokada odtworzenia juz istnieje: sprawdz ja przed kontynuacja.' >&2
   exit 1
 fi
 sudo nft -f - <<'NFT'
@@ -378,11 +378,11 @@ NFT
 sudo nft -a list table inet daas_restore_guard
 ```
 
-Repeat **each applicable positive-control command unchanged**: each must now fail. Compare the rule counters before and after: host probes must increment the matching `output` counter and container probes the matching `forward` counter. Save both snapshots. A failed request without a matching counter increase does not prove the block. Stop on any unexpected success or missing evidence. Keep the rules for the entire recovery; do not reboot or change networking without reinstalling and rechecking the block. The rules above are not a persistent boot configuration.
+Powtórz **bez zmian każde mające zastosowanie polecenie kontroli dodatniej**: teraz każde musi zakończyć się błędem. Porównaj liczniki reguł przed próbą i po niej: próby hosta muszą zwiększać właściwy licznik `output`, a próby kontenerowe właściwy licznik `forward`. Zachowaj oba odczyty. Nieudane żądanie bez wzrostu odpowiedniego licznika nie potwierdza blokady. Przerwij przy niespodziewanym sukcesie lub brakującym dowodzie. Utrzymuj reguły przez całe odtworzenie; restart hosta albo zmiana sieci wymagają ponownego założenia i sprawdzenia blokady. Powyższe reguły nie są trwałą konfiguracją startową.
 
-### 5.2 Restore without starting services, then quarantine
+### 5.2 Odtworzenie bez uruchamiania usług i kwarantanna
 
-Persist `DAAS_MAINTENANCE_MODE=true` in the private deployment configuration and export it in the operator shell. An inline assignment alone does not protect a later Compose recreation from another shell. Confirm the required images are already local; set `RESTORE_ARCHIVE` to the selected archive path, `EXPECTED_VERSION` to its compatible image version and `PUBLIC_ORIGIN` to the deployment's HTTPS origin. Then:
+Zapisz `DAAS_MAINTENANCE_MODE=true` w prywatnej konfiguracji wdrożenia i wyeksportuj tę zmienną w powłoce operatora. Przypisanie tylko przy jednym poleceniu nie ochroni późniejszego odtworzenia kontenera przez Compose w innej powłoce. Sprawdź, że potrzebne obrazy są już lokalnie. Ustaw `RESTORE_ARCHIVE` na wybrane archiwum, `EXPECTED_VERSION` na zgodną wersję obrazu, a `PUBLIC_ORIGIN` na publiczny adres HTTPS wdrożenia. Następnie:
 
 ```bash
 export DAAS_MAINTENANCE_MODE=true
@@ -391,19 +391,79 @@ DAAS_MAINTENANCE_MODE=true docker compose up -d --no-build --pull never --force-
 docker compose exec -T api python -c \
   'import json,urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health"))["maintenance"] is True'
 docker compose stop api
-docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --dry-run --revoke-all
-docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --revoke-all
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --dry-run
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine
 ```
 
-Any failed command stops this procedure; keep ingress and egress closed. `restore.sh` refuses a failed pre-restore backup, failed stop, still-running API/web or failed SQLite integrity/foreign-key checks. Record its unique pre-restore archive path. Use `--no-pre-backup` only when the current data cannot be backed up; it explicitly removes the reconciliation source and requires the conservative reset. The backup may stop and restart the previous API, which is why the firewall is installed first. `--no-start` leaves the restored API and web stopped.
+Błąd dowolnego polecenia zatrzymuje bieżący etap; wejście i wyjście pozostają zamknięte. `restore.sh` odmawia kontynuacji po nieudanej kopii pre-restore, nieudanym zatrzymaniu, przy działającym API/web lub błędzie spójności SQLite albo kluczy obcych. Zapisz wypisaną unikalną ścieżkę kopii pre-restore. `--no-pre-backup` stosuj wyłącznie wtedy, gdy bieżących danych nie da się skopiować, np. po utracie serwera: nie masz wtedy źródła uzgodnienia i musisz przejść ścieżkę z §5.4. Kopia może zatrzymać i uruchomić poprzednie API, dlatego zapora musi działać wcześniej. `--no-start` pozostawia odtworzone API i web zatrzymane.
 
-Run the CLI with API stopped so no sign-in or authorization request races the quarantine transaction. Dry-run changes neither rows nor audit events. Apply removes all sessions, consumes unused magic links and expires pending/approved OAuth codes. `--revoke-all` also revokes stored organization API keys, OAuth grants/tokens and dynamic clients, removes all unaccepted invitations, disables registered webhooks and schedule reminders, and clears schedule chat-webhook destinations. Output contains counts only; applied changes are audited as `restore.*`. This does not rotate deployment secrets or the self-hosted environment API key.
+Uruchamiaj polecenia CLI przy zatrzymanym API, żeby logowanie lub wydawanie uprawnień nie ścigało się z transakcją. Podgląd `--dry-run` nie zmienia wierszy ani audytu. Kwarantanna usuwa wszystkie sesje, oznacza nieużyte magic linki jako wykorzystane i wygasza kody OAuth `pending`/`approved`; zwraca same liczby, a zmiany zapisuje jako zdarzenia `restore.*`. Nie zmienia sekretów wdrożenia ani klucza API trybu selfhost ze zmiennej środowiskowej. Teraz wybierz jedną z dwóch ścieżek poniżej.
 
-**D21b reconciliation is not available in this release. Use `--revoke-all` even when a pre-restore archive exists.** Before release, organization owners must confirm and correct restored accounts, memberships and roles using independent current records. Review deleted organizations/accounts, invitations, uploads/reports and outstanding deletion requests; remove any resurrected data through an approved recovery procedure. Review and cancel stale `queued` jobs before leaving maintenance. Also review automatic runs, run e-mail notifications and every notification destination; `notify_on_finish` and `auto_run_on_upload` are not reset by quarantine. If these checks or corrections cannot be completed, stay in maintenance with both network gates closed. Quarantine alone is not proof that restored authorization or data is current.
+### 5.3 Czytelna kopia pre-restore: restrykcyjne uzgodnienie
 
-### 5.3 Local smoke test and release gates
+`restore-reconcile --pre` porównuje odtworzoną bazę z `control/control.db` z kopii pre-restore. Najpierw sprawdza plik `.sha256`, odczytuje potrzebne kolumny bazy tylko do odczytu w katalogu tymczasowym i sprząta po sobie. Dodatkowe kolumny nowszego schematu są pomijane; brak potrzebnej kolumny oznacza błąd. Domyślne wywołanie tylko raportuje, a `--apply` stosuje ograniczenia w jednej transakcji. Pliki runtime usuwa dopiero po zatwierdzeniu transakcji.
 
-Start only the API in maintenance and test from its own loopback; the host firewall intentionally blocks host-to-container and container-to-container traffic. Do not submit a sample job or send mail:
+Ustaw `PRE_RESTORE` na dokładną ścieżkę kopii wypisaną przez `restore.sh`. Kontener API działa jako UID `10001`, a archiwa mają prawa `0600` operatora, więc sam montaż katalogu może nie dać dostępu. Przygotuj prywatną kopię archiwum i sumy dostępną dla tego UID, zachowując nazwy plików; nie udostępniaj ich wszystkim użytkownikom. Poniższy katalog jest na hoście, a `/backups` wyłącznie w kontenerze:
+
+```bash
+PRE_BACKUP_NAME="$(basename "$PRE_RESTORE")"
+PRE_BACKUP_DIR="$(sudo mktemp -d /var/tmp/daas-pre-restore.XXXXXX)"
+sudo install -o 10001 -m 0400 "$PRE_RESTORE" "$PRE_BACKUP_DIR/$PRE_BACKUP_NAME"
+sudo install -o 10001 -m 0400 "$PRE_RESTORE.sha256" "$PRE_BACKUP_DIR/$PRE_BACKUP_NAME.sha256"
+sudo chown 10001 "$PRE_BACKUP_DIR"
+sudo chmod 0500 "$PRE_BACKUP_DIR"
+docker compose run --rm --pull never --no-deps \
+  --volume "$PRE_BACKUP_DIR:/backups:ro" api python -m app.cli restore-reconcile \
+  --pre "/backups/$PRE_BACKUP_NAME"
+```
+
+**Właściciel przegląda raport przed zastosowaniem.** Wynik zawiera liczby kategorii i identyfikatory ULID, bez e-maili, URL-i i sekretów. Uzgodnienie usuwa obiekty nieobecne w kopii pre-restore, obniża role, cofa unieważnione poświadczenia, usuwa nieaktualne zaproszenia, ogranicza webhooki i harmonogramy oraz usuwa przywrócone uploady, rekordy runów i raporty, które wcześniej usunięto. Zatrzymuje nieaktualne zadania `queued`; przywraca ograniczenia powiadomień i automatycznych uruchomień. Nie importuje brakujących obiektów ani wyższych uprawnień. Różnice planu, retencji i nazw pozostają do oceny w raporcie.
+
+Brak bezpiecznego właściciela organizacji oznacza konflikt: `--apply` kończy się błędem i **nie zapisuje żadnej części uzgodnienia**. Nie obchodź konfliktu ścieżką bez kopii. Jeśli samo archiwum jest nieczytelne, uszkodzone lub nie ma wymaganej struktury, przerwij ten etap i przejdź świadomie do §5.4; nie pomijaj kontroli sumy. Po zatwierdzeniu poprawnego raportu przez właściciela:
+
+```bash
+docker compose run --rm --pull never --no-deps \
+  --volume "$PRE_BACKUP_DIR:/backups:ro" api python -m app.cli restore-reconcile \
+  --pre "/backups/$PRE_BACKUP_NAME" --apply
+```
+
+Każda zastosowana akcja ma zdarzenie `restore.reconcile.*`. Niezerowy kod wyjścia po błędzie usuwania plików może oznaczać, że transakcja bazy już się zatwierdziła: utrzymaj izolację, sprawdź pozostałe pliki i dokończ zatwierdzone usuwanie przed otwarciem. Samo ponowienie polecenia nie gwarantuje sprzątnięcia plików, których metadane zostały już usunięte. Zachowaj raport oraz kopię pre-restore zgodnie z zasadami przechowywania kopii; prywatny katalog pomocniczy zawiera te same dane i też podlega tym zasadom.
+
+### 5.4 Brak lub uszkodzona kopia pre-restore: reset i korekta członkostw
+
+Po utracie serwera, nieczytelnej kopii lub nieudanej weryfikacji nie zgaduj stanu sprzed odtworzenia. Przy nadal zatrzymanym API zastosuj pełny reset:
+
+```bash
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --dry-run --revoke-all
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --revoke-all
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-members
+```
+
+`--revoke-all` dodatkowo unieważnia zapisane klucze API organizacji, granty i tokeny OAuth oraz klientów dynamicznych, usuwa nieprzyjęte zaproszenia, wyłącza webhooki i przypomnienia oraz czyści adresy webhooków powiadomień o runach. Anuluje wszystkie zadania `queued` bez wykonania (`error_code=restore_quarantine`, z czasem zakończenia), wyłącza `notify_on_finish` i `auto_run_on_upload`. Podgląd liczy także te kategorie bez zmian; zdarzenia `restore.jobs_cancelled`, `restore.run_notifications_disabled` i `restore.auto_runs_disabled` zawierają same liczby. Tryb bez `--revoke-all` pozostaje ograniczony do sesji i poświadczeń jednorazowych.
+
+Wynik `restore-members` bez akcji jest tylko do odczytu: identyfikator organizacji i użytkownika, rola, data członkostwa i data utworzenia konta. **Przejrzyj go z właścicielem organizacji klienta**, korzystając z niezależnej ewidencji. Jeśli identyfikacja wymaga e-maili, dodaj `--show-emails` wyłącznie na terminalu operatora; nie przekierowuj tego wyniku do dziennika ani raportu operacji. E-maile nie trafiają do audytu ani logu aplikacji.
+
+Ustaw `ORG_ID` i `USER_ID` na zweryfikowane identyfikatory ULID. Każda korekta działa od razu, w jednej transakcji. Wybierz odpowiednią akcję dla konkretnej osoby:
+
+```bash
+# Usuniecie czlonkostwa, takze jednego z kilku wlascicieli:
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-members \
+  --org "$ORG_ID" --user "$USER_ID" --remove
+```
+
+```bash
+# Alternatywnie: obnizenie roli do member (albo admin):
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-members \
+  --org "$ORG_ID" --user "$USER_ID" --demote-to member
+```
+
+Usunięcie lub obniżenie ostatniego właściciela oraz podwyższenie roli kończą się błędem bez zmian. Korekty zapisują `restore.member_removed` lub `restore.member_demoted` z identyfikatorami, bez e-maili. Polecenie nie dodaje członków i nie nadaje wyższych ról: zatwierdzone uprawnienia właściciel nadaje ponownie w aplikacji po otwarciu. Powtórz listowanie i potwierdź wynik z właścicielem.
+
+Brak kopii pre-restore oznacza brak automatycznego dowodu, które konta, organizacje, uploady i raporty wcześniej usunięto. Właściciel odtwarza żądania usunięcia danych z niezależnej ewidencji; przed otwarciem trzeba zweryfikować dane i wykonać wymagane korekty zatwierdzoną procedurą. `restore-members` koryguje członkostwa, nie usuwa kont ani danych klienta. Jeżeli tych kontroli i korekt nie da się ukończyć, pozostań w trybie serwisowym z zamkniętym wejściem i wyjściem.
+
+### 5.5 Lokalny test dymny i warunki otwarcia
+
+Uruchom tylko API w trybie serwisowym i testuj przez jego własną pętlę zwrotną; zapora hosta celowo blokuje ruch host–kontener i kontener–kontener. Nie zgłaszaj próbnego zadania i nie wysyłaj poczty:
 
 ```bash
 DAAS_MAINTENANCE_MODE=true docker compose up -d --no-build --pull never --wait --wait-timeout 90 api
@@ -424,14 +484,14 @@ try:
 except HTTPError as error:
     assert error.code == 401
 else:
-    raise AssertionError("Unauthenticated access was accepted")
-print("Maintenance API smoke OK")
+    raise AssertionError("Zaakceptowano dostep bez uwierzytelnienia")
+print("Test API w trybie serwisowym OK")
 PY
 ```
 
-For a **drill**, stop here: retain isolation until the approved test host and its data are destroyed. Record elapsed restore time, image version, checksum, pre-restore path, firewall controls/counters, quarantine counts/audit and the smoke result. This is not a production release.
+W **próbie odtworzenia** zakończ tutaj: utrzymuj izolację do zatwierdzonego usunięcia hosta testowego i jego danych. Zapisz czas odtworzenia, wersję obrazu, sumę kontrolną, ścieżkę pre-restore lub przyczynę jej braku, kontrole i liczniki zapory, wyniki i audyt kwarantanny oraz uzgodnienia albo korekt członkostw, a także wynik testu dymnego. To nie jest otwarcie produkcji.
 
-For **production recovery**, only after the owner/data/queue checks above and the maintenance smoke succeed, persist `DAAS_MAINTENANCE_MODE=false` in the deployment configuration. Recreate the API so the running process reads the new value; verify it before removing isolation. Then remove only this temporary table, start web, run the full local smoke, and finally reopen ingress:
+Przy **odtworzeniu produkcji**, dopiero po zakończeniu kontroli właścicieli, danych i kolejki oraz udanym teście w trybie serwisowym, zapisz `DAAS_MAINTENANCE_MODE=false` w konfiguracji wdrożenia. Odtwórz kontener API, aby proces odczytał nową wartość, i sprawdź ją przed zdjęciem izolacji. Następnie usuń tylko tymczasową tabelę zapory, uruchom web, wykonaj pełny lokalny test dymny i na końcu otwórz wejście:
 
 ```bash
 export DAAS_MAINTENANCE_MODE=false
@@ -445,7 +505,9 @@ docker compose --profile edge up -d --no-build --pull never caddy
 ./smoke.sh --public "$PUBLIC_ORIGIN" --wait 90 --expect-version "$EXPECTED_VERSION"
 ```
 
-With a shared proxy, replace the Caddy command with reopening the previously closed routes. Stop before reopening ingress if the local smoke fails. Record approval and the release time; users sign in again, and new keys/connections are issued only after their access has been confirmed.
+Przy wspólnym proxy zastąp polecenie Caddy ponownym otwarciem wcześniej zamkniętych tras. Jeśli lokalny test dymny się nie uda, nie otwieraj wejścia. Zapisz zatwierdzenie i czas otwarcia; użytkownicy logują się ponownie, a nowe klucze i połączenia wydawaj dopiero po potwierdzeniu uprawnień. Obiekty i uprawnienia utworzone po odtwarzanej kopii nie są importowane przez uzgodnienie; wymagają osobnego, zatwierdzonego odtworzenia.
+
+Dowód: zapis izolacji, wyniki kwarantanny oraz wybranej ścieżki korekt, potwierdzenie właściciela i udany test dymny; przy otwarciu produkcji także potwierdzony stan `maintenance: false` i udane testy lokalne oraz publiczne.
 
 ## 6. Monitoring
 
@@ -513,13 +575,15 @@ Budżet: dziennie kilka minut, tygodniowo ok. 20, miesięcznie 1-1,5 godziny.
 
 Dowód: lista odhaczona, a z ostatniego miesiąca istnieje notatka z testu odtworzenia i wpis o wykonanej aktualizacji lub decyzji, by jej nie robić.
 
-## 8. Updates and rollback
+## 8. Aktualizacje i przywracanie poprzedniej wersji
 
-Follow [`README.md`](README.md), update and rollback variants A/B. Read the intervening changelog for migrations, take the cold and off-host backup from section 4.3, record the archive path, and retain the previous local images. Notify customers of the maintenance window. Verify the running version with `smoke.sh --expect-version <version>` and repeat the mail-delivery check only after the approved release.
+Postępuj według [`README.md`](README.md): aktualizacja oraz warianty A/B przywrócenia poprzedniej wersji. Przeczytaj wpisy o migracjach między wersjami, wykonaj zimną kopię i kopię poza serwerem z §4.3, zapisz ścieżkę archiwum i zachowaj poprzednie obrazy lokalnie. Poinformuj klientów o oknie serwisowym. Sprawdź działającą wersję przez `smoke.sh --expect-version <wersja>`, a dostarczanie poczty ponownie sprawdź dopiero po zatwierdzonym otwarciu.
 
-An image-only rollback is allowed only when the previous image supports the current database schema. Any rollback that restores data must use **all of section 5**, in order: close ingress; prove the host/forwarded IPv4 and IPv6 egress block; `restore.sh --no-start`; start API with persistent maintenance mode; stop API and apply quarantine; complete the owner/data/queue checks; maintenance smoke; recreate API with maintenance off; remove the temporary block; full local smoke; reopen ingress and public smoke. Do not use an older image that lacks maintenance/quarantine support for this procedure.
+Powrót wyłącznie do poprzedniego obrazu jest dozwolony tylko wtedy, gdy obsługuje on bieżący schemat bazy. Przywrócenie obejmujące dane wymaga **całej §5**, w kolejności: zamknięcie wejścia; potwierdzona blokada wyjścia hosta i ruchu przekazywanego dla IPv4 i IPv6; `restore.sh --no-start`; start API z trwale ustawionym trybem serwisowym; zatrzymanie API i kwarantanna; przy czytelnej kopii pre-restore podgląd `restore-reconcile --pre`, przegląd właściciela i `--apply`, a bez kopii albo przy jej uszkodzeniu `restore-quarantine --revoke-all` i przegląd oraz korekty przez `restore-members`; test dymny w trybie serwisowym; odtworzenie kontenera API z wyłączonym trybem serwisowym; zdjęcie tymczasowej blokady; pełny lokalny test dymny; otwarcie wejścia i test publiczny. Nie używaj do tej procedury starszego obrazu bez obsługi trybu serwisowego, kwarantanny i poleceń korekty.
 
-Until D21b is delivered, reconciliation with the pre-restore archive remains unavailable: `--revoke-all` and owners' confirmation/correction of memberships and roles are required even when that archive exists. Deleted data and stale queued work also need review before release. Data written after the restored backup is absent from that backup; preserve the unique pre-restore copy for controlled recovery and inform affected customers. Evidence is the isolated recovery record from section 5, the restored running version and the local/public smoke results, not merely a successful archive extraction.
+Uzgodnienie nie importuje obiektów ani uprawnień dodanych po odtwarzanej kopii. Bez czytelnej kopii pre-restore właściciel odtwarza także ewidencję żądań usunięcia danych i potwierdza korekty przed otwarciem. Zachowaj unikalną kopię pre-restore do kontrolowanego odzyskiwania zmian i powiadom klientów o utracie danych. Konflikt właścicieli, nieukończone usuwanie plików albo niepotwierdzony stan danych oznaczają dalszą izolację.
+
+Dowód: zapis odtworzenia w izolacji z §5, wersja działającej aplikacji oraz wyniki lokalnego i publicznego testu dymnego; samo udane rozpakowanie archiwum nie wystarcza.
 
 ## 9. Incydent
 

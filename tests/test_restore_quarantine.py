@@ -17,7 +17,7 @@ from app.control.security import sha256_hex
 from app.control.types import utcnow
 from app.core.config import Settings
 from tests.mcp_helpers import post, rpc
-from tests.v1_helpers import get_rows, key_headers, seed_org, user_headers, with_db
+from tests.v1_helpers import get_rows, key_headers, seed_job_row, seed_org, user_headers, with_db
 
 REDIRECT = "https://connector.example.invalid/callback"
 TOKEN = "TEST-restore-magic-link-012345678901234567890"
@@ -82,6 +82,8 @@ def restored(tmp_path):
                                auto_run_on_upload=True, notify_on_finish=True,
                                notify_webhook_url="https://chat.example.invalid/TEST-secret"),
             models.OrgSchedule(org_id=other.org_id),
+            models.Job(id="TEST-queued-job", org_id=org.org_id, pipeline="ecommerce_demo", status="queued"),
+            models.Job(id="TEST-finished-job", org_id=org.org_id, pipeline="ecommerce_demo", status="succeeded"),
         ])
         existing = await db.get(models.ApiKey, other.key_id)
         existing.revoked_at = past
@@ -136,6 +138,7 @@ def test_revoke_all_resets_credentials_destinations_and_pending_invitations(rest
         "api_keys_revoked": 1, "oauth_grants_revoked": 1, "oauth_tokens_revoked": 3,
         "oauth_clients_revoked": 1, "invitations_deleted": 2, "webhooks_disabled": 1,
         "reminders_disabled": 1, "schedule_webhooks_disabled": 1,
+        "jobs_cancelled": 1, "run_notifications_disabled": 1, "auto_runs_disabled": 1,
     }
     for model in (models.ApiKey, models.OAuthGrant, models.OAuthToken, models.OAuthClient):
         assert all(row.revoked_at is not None for row in get_rows(restored, model))
@@ -144,8 +147,12 @@ def test_revoke_all_resets_credentials_destinations_and_pending_invitations(rest
     schedules = get_rows(restored, models.OrgSchedule)
     assert all(not row.reminder_enabled and row.next_reminder_at is None for row in schedules)
     assert all(row.notify_webhook_url is None for row in schedules)
-    configured = next(row for row in schedules if row.notify_on_finish)
-    assert configured.auto_run_on_upload is True
+    assert all(not row.notify_on_finish and not row.auto_run_on_upload for row in schedules)
+    queued = next(row for row in get_rows(restored, models.Job) if row.id == "TEST-queued-job")
+    assert queued.status == "cancelled" and queued.error_code == "restore_quarantine"
+    assert queued.finished_at is not None and queued.started_at is None
+    finished = next(row for row in get_rows(restored, models.Job) if row.id == "TEST-finished-job")
+    assert finished.status == "succeeded" and finished.error_code is None
     after = _snapshot(restored)
     for table in ("orgs", "users", "memberships"):
         assert after[table] == before[table]
@@ -170,7 +177,7 @@ def test_audit_is_numeric_system_events_without_secrets_and_repeated_apply_is_em
     assert {event.action: event.meta for event in events} == {
         f"restore.{name}": {"count": count} for name, count in counts.items()
     }
-    assert len(events) == 11
+    assert len(events) == 14
     assert all(event.actor_type == "system" and event.actor_id is None and event.org_id is None for event in events)
     serialized = json.dumps([{"action": e.action, "target": e.target, "meta": e.meta} for e in events])
     for forbidden in ("@", TOKEN, sha256_hex(TOKEN), "TEST-session", "TEST-secret"):
@@ -181,7 +188,8 @@ def test_audit_is_numeric_system_events_without_secrets_and_repeated_apply_is_em
     assert _snapshot(restored) == snapshot
 
 
-@pytest.mark.parametrize("action", ["restore.magic_links_consumed", "restore.schedule_webhooks_disabled"])
+@pytest.mark.parametrize("action", ["restore.magic_links_consumed", "restore.schedule_webhooks_disabled",
+                                     "restore.auto_runs_disabled"])
 def test_failed_audit_rolls_back_every_mutation_and_prints_no_sensitive_error(restored, monkeypatch, capsys, action):
     async def reject_audit(db):
         await db.execute(text(
@@ -276,3 +284,33 @@ def test_revoke_all_rejects_api_key_oauth_access_refresh_and_client(cloud_client
     refreshed = cloud_client.post("/token", data={"grant_type": "refresh_token",
                                  "client_id": exchange["client_id"], "refresh_token": pair["refresh_token"]})
     assert refreshed.status_code == 401 and refreshed.json()["error"] == "invalid_client"
+
+
+def test_revoke_all_cancelled_queue_is_not_submitted_when_normal_api_starts(
+        cloud_factory, cloud_settings, monkeypatch):
+    from app.control.executor import JobExecutor
+
+    org = seed_org(cloud_settings, name="TEST-Restore", owner_email="owner@example.invalid")
+    job_id = seed_job_row(cloud_settings, org.org_id, pipeline="ecommerce_demo")
+    assert _command(cloud_settings, monkeypatch, "--revoke-all") == 0
+    job, = get_rows(cloud_settings, models.Job, models.Job.id == job_id)
+    assert job.status == "cancelled" and job.error_code == "restore_quarantine"
+    submitted = []
+    monkeypatch.setattr(JobExecutor, "submit", lambda self, *args: submitted.append(args))
+    client, settings = cloud_factory(DAAS_MAINTENANCE_MODE="false")
+    assert not settings.daas_maintenance_mode
+    client.portal.call(client.app.state.executor.start)
+    assert submitted == []
+    job, = get_rows(cloud_settings, models.Job, models.Job.id == job_id)
+    assert job.status == "cancelled" and job.started_at is None and job.finished_at is not None
+    assert get_rows(cloud_settings, models.RunRecord) == []
+
+
+def test_revoke_all_dry_run_counts_queue_and_notifications_without_changes(restored, monkeypatch, capsys):
+    before = _snapshot(restored)
+    assert _command(restored, monkeypatch, "--revoke-all", "--dry-run") == 0
+    counts = _counts(capsys)
+    assert counts.get("jobs_cancelled") == 1
+    assert counts.get("run_notifications_disabled") == 1
+    assert counts.get("auto_runs_disabled") == 1
+    assert _snapshot(restored) == before

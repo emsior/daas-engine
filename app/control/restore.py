@@ -8,6 +8,7 @@ from app.control.db import create_engine, make_sessionmaker
 from app.control.models import (
     ApiKey,
     Invitation,
+    Job,
     MagicLink,
     OAuthClient,
     OAuthCode,
@@ -48,6 +49,12 @@ async def restore_quarantine(settings: Settings, *, dry_run: bool = False,
              {"reminder_enabled": False, "next_reminder_at": None}),
             ("schedule_webhooks_disabled", OrgSchedule, OrgSchedule.notify_webhook_url.is_not(None),
              {"notify_webhook_url": None}),
+            ("jobs_cancelled", Job, Job.status == "queued",
+             {"status": "cancelled", "error_code": "restore_quarantine", "finished_at": now}),
+            ("run_notifications_disabled", OrgSchedule, OrgSchedule.notify_on_finish.is_(True),
+             {"notify_on_finish": False}),
+            ("auto_runs_disabled", OrgSchedule, OrgSchedule.auto_run_on_upload.is_(True),
+             {"auto_run_on_upload": False}),
         ])
     engine = create_engine(settings)
     try:

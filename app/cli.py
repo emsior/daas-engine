@@ -6,6 +6,8 @@
     set-plan          zmiana planu organizacji (free|pro|selfhost) — jedyna sciezka zmiany planu w 2.0
     purge             retencja: kasowanie uploadow, raportow i danych najemcow po terminie (--dry-run, --org)
     restore-quarantine invalidate restored credentials (--dry-run, --revoke-all; stop the API first)
+    restore-reconcile restrict restored state using a checked pre-restore archive (dry-run unless --apply)
+    restore-members    review or restrict restored memberships offline (--show-emails is opt-in)
 """
 from __future__ import annotations
 
@@ -161,6 +163,58 @@ def cmd_restore_quarantine(settings: Settings, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_restore_reconcile(settings: Settings, args: argparse.Namespace) -> int:
+    import sqlite3
+    import tarfile
+    from pathlib import Path
+
+    import duckdb
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.control.restore_reconcile import ReconcileError, restore_reconcile
+
+    try:
+        report = asyncio.run(restore_reconcile(settings, Path(args.pre), apply=args.apply))
+    except ReconcileError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (SQLAlchemyError, sqlite3.Error, duckdb.Error, OSError, ValueError, tarfile.TarError, EOFError):
+        print("error: restore reconciliation failed; keep the API stopped and inspect the archive/database",
+              file=sys.stderr)
+        return 1
+    for line in report.lines():
+        print(line)
+    if args.apply and report.blocked:
+        print("error: owner conflicts; no changes applied; keep the API stopped", file=sys.stderr)
+        return 1
+    if report.cleanup_failed:
+        print("error: database changes committed but runtime cleanup is incomplete; keep the API stopped",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
+def cmd_restore_members(settings: Settings, args: argparse.Namespace) -> int:
+    import json
+
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from app.control.restore_members import RestoreMembersError, restore_members
+
+    try:
+        rows = asyncio.run(restore_members(settings, org_id=args.org, user_id=args.user, remove=args.remove,
+                                           demote_to=args.demote_to, show_emails=args.show_emails))
+    except RestoreMembersError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (SQLAlchemyError, OSError, ValueError):
+        print("error: restore membership correction failed; keep the API stopped and inspect the database",
+              file=sys.stderr)
+        return 1
+    print(json.dumps(rows, ensure_ascii=True, sort_keys=True))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="python -m app.cli", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -175,8 +229,20 @@ def build_parser() -> argparse.ArgumentParser:
     rq = sub.add_parser("restore-quarantine", help="invalidate restored credentials while the API is stopped")
     rq.add_argument("--dry-run", action="store_true", help="print counts without changing data or audit events")
     rq.add_argument("--revoke-all", action="store_true",
-                    help="also revoke stored long-lived credentials, pending invitations and outbound webhooks/reminders")
+                    help="also revoke long-lived credentials, cancel queued jobs and disable outbound/automatic work")
     rq.set_defaults(func=cmd_restore_quarantine)
+    rr = sub.add_parser("restore-reconcile", help="restrict restored state using a pre-restore archive; stop the API first")
+    rr.add_argument("--pre", required=True, help="pre-restore .tar.gz archive with its .sha256 sidecar")
+    rr.add_argument("--apply", action="store_true", help="apply changes; the default only reports planned actions")
+    rr.set_defaults(func=cmd_restore_reconcile)
+    rm = sub.add_parser("restore-members", help="review and restrict restored memberships while the API is stopped")
+    rm.add_argument("--org", help="organization id")
+    rm.add_argument("--user", help="user id")
+    rm.add_argument("--show-emails", action="store_true", help="include e-mail addresses in the read-only terminal listing")
+    action = rm.add_mutually_exclusive_group()
+    action.add_argument("--remove", action="store_true", help="remove a membership, preserving the last owner")
+    action.add_argument("--demote-to", choices=["admin", "member"], help="lower the current role")
+    rm.set_defaults(func=cmd_restore_members)
     co = sub.add_parser("create-org", help="create an organization and print a one-time API key")
     co.add_argument("--name", required=True)
     co.add_argument("--owner-email", required=True)

@@ -47,6 +47,14 @@ AUDIT_ACTIONS_V1: frozenset[str] = frozenset({
     "restore.api_keys_revoked", "restore.oauth_grants_revoked", "restore.oauth_tokens_revoked",
     "restore.oauth_clients_revoked", "restore.invitations_deleted", "restore.webhooks_disabled",
     "restore.reminders_disabled", "restore.schedule_webhooks_disabled",
+    "restore.jobs_cancelled", "restore.run_notifications_disabled", "restore.auto_runs_disabled",
+    "restore.member_removed", "restore.member_demoted",
+    "restore.reconcile.org_deleted", "restore.reconcile.user_deleted", "restore.reconcile.email_updated",
+    "restore.reconcile.member_removed", "restore.reconcile.member_demoted", "restore.reconcile.invitation_deleted",
+    "restore.reconcile.key_revoked", "restore.reconcile.grant_revoked", "restore.reconcile.token_revoked",
+    "restore.reconcile.client_revoked", "restore.reconcile.webhook_deleted", "restore.reconcile.webhook_updated",
+    "restore.reconcile.schedule_deleted", "restore.reconcile.schedule_updated", "restore.reconcile.upload_deleted",
+    "restore.reconcile.run_deleted", "restore.reconcile.report_purged", "restore.reconcile.job_cancelled",
 })
 
 _MAX_STR = 200

@@ -86,43 +86,46 @@ Zasady:
 - Nie używaj `docker image prune -a`: usuwa poprzednie tagi, do których chcesz wrócić. Bezpieczne jest `docker image prune` (tylko obrazy bez tagu).
 - Migracje control plane (Alembic) idą tylko do przodu i wykonują się przy starcie `api` (`DAAS_AUTO_MIGRATE=true`). Dlatego kopia z kroku 1 jest częścią wdrożenia, nie dodatkiem.
 
-## Rollback
+## Przywracanie poprzedniej wersji
 
-Choose the path from the migration entries in `CHANGELOG.md`. Prepare the required images locally before the maintenance window.
+Wybierz ścieżkę na podstawie wpisów o migracjach w `CHANGELOG.md`. Przygotuj potrzebne obrazy lokalnie przed oknem serwisowym.
 
-**A. Image only, with a compatible current database schema**
+**A. Tylko obraz, przy zgodnym bieżącym schemacie bazy**
 
 ```bash
 cd /opt/daas-engine/deploy
-sed -i 's/^DAAS_VERSION=.*/DAAS_VERSION=2.0.0/' .env     # previous local image tag
+sed -i 's/^DAAS_VERSION=.*/DAAS_VERSION=2.0.0/' .env     # poprzedni lokalny tag obrazu
 docker compose --profile edge up -d --no-build --pull never
 ./smoke.sh --wait 90 --expect-version 2.0.0
 ```
 
-Use this only when the previous image understands the current schema. An early failure after an update is not proof that no migration ran.
+Stosuj ten wariant tylko wtedy, gdy poprzedni obraz obsługuje bieżący schemat. Wczesny błąd po aktualizacji nie dowodzi, że migracja nie została wykonana.
 
-**B. Restore the database and runtime data**
+**B. Odtworzenie bazy i danych runtime**
 
-Follow [RUNBOOK section 5](RUNBOOK.md#5-restore-drill-and-isolated-recovery-monthly) before running a restore. The required sequence is:
+Przed odtworzeniem wykonaj kroki z [§5 RUNBOOK](RUNBOOK.md#5-próba-odtworzenia-i-odtworzenie-w-izolacji-co-miesiąc). Obowiązuje kolejność:
 
-1. Close public ingress, then block host and forwarded Docker egress for IPv4 and IPv6 on every interface. Establish successful controls before the block, repeat them with failures afterward, and verify matching rule-counter increases. A timeout alone is not evidence. Have all images, tools and archives locally first.
-2. Persist `DAAS_MAINTENANCE_MODE=true` in the private deployment configuration; keep it exported across Compose commands. Select a schema-compatible image with maintenance and quarantine support.
-3. Restore without starting services, then start only the API in maintenance:
+1. Zamknij publiczne wejście, potem zablokuj wyjście hosta i ruch przekazywany Dockera dla IPv4 i IPv6 na wszystkich interfejsach. Przed blokadą wykonaj udane kontrole, po niej powtórz je z wynikiem negatywnym i potwierdź wzrost właściwych liczników reguł. Sam timeout nie jest dowodem. Wszystkie obrazy, narzędzia i archiwa przygotuj wcześniej lokalnie.
+2. Zapisz `DAAS_MAINTENANCE_MODE=true` w prywatnej konfiguracji wdrożenia i utrzymuj zmienną wyeksportowaną między poleceniami Compose. Wybierz obraz zgodny ze schematem, z obsługą trybu serwisowego, kwarantanny i poleceń korekty.
+3. Odtwórz bez uruchamiania usług, uruchom tylko API w trybie serwisowym, potwierdź ten stan i zatrzymaj API przed kwarantanną:
 
 ```bash
 export DAAS_MAINTENANCE_MODE=true
 ./restore.sh backups/daas-20261010T120000Z.tar.gz --no-start
 DAAS_MAINTENANCE_MODE=true docker compose up -d --no-build --pull never --force-recreate --wait --wait-timeout 90 api
+docker compose exec -T api python -c \
+  'import json,urllib.request; assert json.load(urllib.request.urlopen("http://127.0.0.1:8000/api/v1/health"))["maintenance"] is True'
 docker compose stop api
-docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --dry-run --revoke-all
-docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --revoke-all
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --dry-run
+docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine
 ```
 
-4. API stays stopped during the CLI transaction. Keep the unique pre-restore archive path printed by the script. A failed pre-restore backup, failed stop, running API/web or failed SQLite consistency check stops restoration. `--no-pre-backup` is an explicit exception for lost current data and requires the conservative reset.
-5. **D21b reconciliation is unavailable.** Use `--revoke-all` even with a pre-restore copy. Owners must confirm and correct accounts, memberships and roles; review resurrected deleted data, notification settings and stale queued jobs before release. Quarantine does not make those records current.
-6. Restart only API in maintenance and run the API-only smoke in the runbook. Persist maintenance `false`, force-recreate API and verify the health field is false; then remove the egress block, start web and pass the full local smoke. Reopen ingress last and run the public smoke. Keep isolation if any prerequisite fails.
+4. API pozostaje zatrzymane podczas wszystkich transakcji CLI. Zachowaj unikalną ścieżkę kopii pre-restore wypisaną przez skrypt. Błąd kopii pre-restore, zatrzymania, nadal działające API/web albo nieudana kontrola spójności SQLite przerywają odtworzenie. `--no-pre-backup` jest jawnym wyjątkiem na wypadek utraty bieżących danych i wymaga pełnego resetu.
+5. **Czytelna kopia pre-restore:** udostępnij archiwum i `.sha256` kontenerowi tylko do odczytu, z prawami dla UID `10001`, według §5.3 RUNBOOK. Przy zatrzymanym API wykonaj `docker compose run --rm --pull never --no-deps --volume "$PRE_BACKUP_DIR:/backups:ro" api python -m app.cli restore-reconcile --pre "/backups/$PRE_BACKUP_NAME"`. Domyślnie dostaniesz tylko raport. Po przeglądzie przez właściciela powtórz z `--apply`. Konflikt właścicieli blokuje całą transakcję bez zmian; błąd usuwania plików po zatwierdzeniu bazy wymaga wyjaśnienia i dokończenia sprzątania przed otwarciem.
+6. **Brak lub nieczytelna/uszkodzona kopia:** wykonaj `restore-quarantine --dry-run --revoke-all`, następnie `restore-quarantine --revoke-all` i `restore-members` przez ten sam `docker compose run --rm --pull never --no-deps api python -m app.cli`. Pełny reset anuluje wszystkie `queued` i wyłącza automatyczne runy oraz powiadomienia o ich zakończeniu. Z właścicielem klienta przejrzyj członkostwa; `restore-members --org <org_id> --user <user_id> --remove` usuwa dostęp, a `--demote-to member` (lub `--demote-to admin`) obniża rolę. Ostatni właściciel jest chroniony, a dodawanie i podwyższanie ról pozostaje w aplikacji po otwarciu. E-maile wypisuje tylko `--show-emails`, wyłącznie na terminal operatora. Szczegóły i wymagany przegląd usuniętych danych: §5.4 RUNBOOK.
+7. Uruchom tylko API w trybie serwisowym i wykonaj test dymny API z RUNBOOK. Zapisz tryb serwisowy `false`, odtwórz kontener API i potwierdź `maintenance: false`; potem zdejmij blokadę wyjścia, uruchom web i wykonaj pełny lokalny test dymny. Wejście otwórz na końcu, po czym wykonaj test publiczny. Przy niespełnionym warunku utrzymuj izolację.
 
-Restored sessions and one-time credentials cannot be reused after quarantine; conservative reset also revokes stored organization API keys and OAuth access, removes unaccepted invitations, disables webhooks/reminders and clears schedule chat-webhook addresses. It does not reset deployment secrets, automatically repair roles, cancel queued jobs or remove resurrected data. Preserve the pre-restore archive for controlled recovery of post-backup changes and notify affected customers of any loss. A monthly drill remains isolated and never reaches the production release steps.
+Po kwarantannie nie można ponownie użyć odtworzonych sesji i poświadczeń jednorazowych. Pełny reset unieważnia także zapisane klucze API organizacji i dostęp OAuth, usuwa nieprzyjęte zaproszenia, wyłącza webhooki i przypomnienia oraz czyści adresy webhooków powiadomień. Nie zmienia sekretów wdrożenia. Uzgodnienie nakłada wyłącznie ograniczenia z kopii pre-restore; brakujących obiektów i wyższych uprawnień nie importuje. Bez kopii właściciel musi odtworzyć żądania usunięcia danych z niezależnej ewidencji i potwierdzić korekty przed otwarciem. Zachowaj kopię pre-restore do kontrolowanego odzyskiwania zmian po kopii i poinformuj klientów o utracie danych. Comiesięczna próba pozostaje w izolacji i kończy się przed krokami otwarcia produkcji.
 
 ## Kopie zapasowe
 
