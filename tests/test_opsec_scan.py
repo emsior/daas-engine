@@ -976,3 +976,149 @@ def test_merge_provenance_compares_raw_bytes_before_normalizing(repo, allowed, p
     if not allowed:
         expected.update({f"{origin}:{identifier}:email", f"{side}:{identifier}:email"})
     assert set(result.stdout.splitlines()) == expected
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+@pytest.mark.parametrize("prefix", [b"", b"\0", b"\xff", b"\t"], ids=["plain", "nul", "nonutf8", "tab"])
+def test_merge_extra_copy_reports_merge(repo, allowed, prefix):
+    base = repo.git("rev-parse", "HEAD")
+    clean_tree = repo.git("rev-parse", f"{base}^{{tree}}")
+    line = prefix + RULE_CASES[0][1].encode() + b"\n"
+    origin = repo.graph_commit(repo.tree_with_file("sample.txt", line), base)
+    first = repo.graph_commit(clean_tree, base)
+    tree = repo.tree_with_file("sample.txt", line + b"TEST-new-context\n" + line)
+    merge = repo.graph_commit(tree, first, origin)
+    head = repo.graph_commit(clean_tree, merge)
+    result, identifier = _scan_merge_fixture(repo, base, head, allowed, origin, "sample.txt")
+    assert result.returncode == 1, result.stderr
+    expected = {f"{merge}:{identifier}:email"}
+    if not allowed:
+        expected.add(f"{origin}:{identifier}:email")
+    assert set(result.stdout.splitlines()) == expected
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_merge_duplicates_shared_copy_reports_merge(repo, allowed):
+    base = repo.git("rev-parse", "HEAD")
+    line = RULE_CASES[0][1].encode() + b"\n"
+    origin = repo.graph_commit(repo.tree_with_file("sample.txt", line), base)
+    first = repo.graph_commit(repo.tree_with_file("sample.txt", line + b"TEST-first\n"), origin)
+    second = repo.graph_commit(repo.tree_with_file("sample.txt", line + b"TEST-second\n"), origin)
+    tree = repo.tree_with_file("sample.txt", line + b"TEST-first\nTEST-second\n" + line)
+    merge = repo.graph_commit(tree, first, second)
+    result, identifier = _scan_merge_fixture(repo, base, merge, allowed, origin, "sample.txt")
+    assert result.returncode == 1, result.stderr
+    expected = {f"{merge}:{identifier}:email"}
+    if not allowed:
+        expected.add(f"{origin}:{identifier}:email")
+    assert set(result.stdout.splitlines()) == expected
+
+
+@pytest.mark.parametrize("kind", ["line", "name"])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_merge_restores_shared_origin_reports_merge(repo, kind, allowed):
+    base = repo.git("rev-parse", "HEAD")
+    clean_tree = repo.git("rev-parse", f"{base}^{{tree}}")
+    path, hit_tree = _merge_fixture(repo, kind)
+    origin = repo.graph_commit(hit_tree, base)
+    first = repo.graph_commit(clean_tree, origin, message="TEST-first-removal")
+    second = repo.graph_commit(hit_tree, origin, message="TEST-second-keeps-copy")
+    merge = repo.graph_commit(hit_tree, first, second)
+    result, identifier = _scan_merge_fixture(repo, base, merge, allowed, origin, path)
+    assert result.returncode == 1, result.stderr
+    expected = {f"{merge}:{identifier}:email"}
+    if not allowed:
+        expected.add(f"{origin}:{identifier}:email")
+    assert set(result.stdout.splitlines()) == expected
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_merge_preserves_two_independent_copies(repo, allowed):
+    initial = repo.git("rev-parse", "HEAD")
+    base_tree = repo.tree_with_file("sample.txt", b"TEST-first\nTEST-middle\nTEST-last\n")
+    base = repo.graph_commit(base_tree, initial)
+    line = RULE_CASES[0][1].encode() + b"\n"
+    first = repo.graph_commit(
+        repo.tree_with_file("sample.txt", line + b"TEST-middle\nTEST-last\n"), base,
+    )
+    second = repo.graph_commit(
+        repo.tree_with_file("sample.txt", b"TEST-first\nTEST-middle\n" + line), base,
+    )
+    tree = repo.git("merge-tree", "--write-tree", first, second).splitlines()[0]
+    merge = repo.graph_commit(tree, first, second)
+    args = ["--range", f"{base}..{merge}"]
+    origins = {f"{first}:sample.txt:email", f"{second}:sample.txt:email"}
+    if allowed:
+        (repo.path / "allow.txt").write_text("\n".join(sorted(origins)) + "\n", encoding="utf-8")
+        args.extend(["--allowlist", "allow.txt"])
+    result = repo.scan(*args)
+    assert result.returncode == (0 if allowed else 1), result.stderr
+    assert set(result.stdout.splitlines()) == (set() if allowed else origins)
+
+
+@pytest.mark.parametrize("kind", ["line", "name"])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_criss_cross_merge_uses_all_bases(repo, kind, allowed):
+    base = repo.git("rev-parse", "HEAD")
+    value = RULE_CASES[0][1]
+    paths = ["one.txt", "two.txt"] if kind == "line" else [f"TEST-{value}-{i}.txt" for i in (1, 2)]
+    content = (value + "\n").encode() if kind == "line" else b"TEST-clean\n"
+    blob = repo.git_bytes("hash-object", "-w", "--stdin", input=content).strip()
+    records = [b"100644 blob " + blob + b"\t" + path.encode() + b"\0" for path in paths]
+    trees = [repo.git_bytes("mktree", "-z", input=record).decode().strip() for record in records]
+    both = repo.git_bytes("mktree", "-z", input=b"".join(records)).decode().strip()
+    empty = repo.git_bytes("mktree", "-z", input=b"").decode().strip()
+    origins = [repo.graph_commit(tree, base) for tree in trees]
+    first = repo.graph_commit(empty, *origins)
+    second = repo.graph_commit(both, *reversed(origins))
+    assert set(repo.git("merge-base", "--all", first, second).splitlines()) == set(origins)
+    merge = repo.graph_commit(both, first, second)
+    identifiers = paths if kind == "line" else [name_id(repo, path) for path in paths]
+    original_hits = {f"{sha}:{path}:email" for sha, path in zip(origins, identifiers, strict=True)}
+    args = ["--range", f"{base}..{merge}"]
+    if allowed:
+        (repo.path / "allow.txt").write_text("\n".join(sorted(original_hits)) + "\n", encoding="utf-8")
+        args.extend(["--allowlist", "allow.txt"])
+    result = repo.scan(*args)
+    assert result.returncode == 1, result.stderr
+    expected = {f"{merge}:{path}:email" for path in identifiers}
+    if not allowed:
+        expected.update(original_hits)
+    assert set(result.stdout.splitlines()) == expected
+
+
+@pytest.mark.parametrize("kind", ["line", "name"])
+@pytest.mark.parametrize("allowed", [False, True])
+def test_merge_secondary_is_itself_the_base(repo, kind, allowed):
+    base = repo.git("rev-parse", "HEAD")
+    clean_tree = repo.git("rev-parse", f"{base}^{{tree}}")
+    path, hit_tree = _merge_fixture(repo, kind)
+    origin = repo.graph_commit(hit_tree, base)
+    first = repo.graph_commit(clean_tree, origin)
+    merge = repo.graph_commit(hit_tree, first, origin)
+    result, identifier = _scan_merge_fixture(repo, base, merge, allowed, origin, path)
+    assert result.returncode == 1, result.stderr
+    expected = {f"{merge}:{identifier}:email"}
+    if not allowed:
+        expected.add(f"{origin}:{identifier}:email")
+    assert set(result.stdout.splitlines()) == expected
+
+
+@pytest.mark.parametrize("allowed", [False, True])
+def test_merge_name_present_as_directory_in_base(repo, allowed):
+    initial = repo.git("rev-parse", "HEAD")
+    path, hit_tree = _merge_fixture(repo, "name")
+    child_tree = repo.tree_with_file("child.txt")
+    entry = f"040000 tree {child_tree}\t{path}\0".encode()
+    base_tree = repo.git_bytes("mktree", "-z", input=entry).decode().strip()
+    base = repo.graph_commit(base_tree, initial)
+    empty = repo.git_bytes("mktree", "-z", input=b"").decode().strip()
+    first = repo.graph_commit(empty, base)
+    origin = repo.graph_commit(hit_tree, base)
+    merge = repo.graph_commit(hit_tree, first, origin)
+    result, identifier = _scan_merge_fixture(repo, base, merge, allowed, origin, path)
+    assert result.returncode == 1, result.stderr
+    expected = {f"{merge}:{identifier}:email"}
+    if not allowed:
+        expected.add(f"{origin}:{identifier}:email")
+    assert set(result.stdout.splitlines()) == expected

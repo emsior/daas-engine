@@ -218,10 +218,9 @@ else
     done < "$tmp/paths"
   done < "$tmp/commits"
 
-  # Account for a merge addition only through the same secondary parent:
-  # the exact raw line/path must survive there, and its non-merge origin must
-  # belong to base..that-parent. Neither another branch nor deleted history
-  # can authorize a new merge resolution. Keep content out of Bash variables.
+  # A secondary parent contributes only occurrences beyond every merge base,
+  # with a non-merge origin in base..that-parent. Count raw bytes before NUL
+  # normalization, taking maxima across bases and parents, never their sum.
   : > "$tmp/accounted-lines"
   : > "$tmp/accounted-names"
   while read -r sha parent other_parents; do
@@ -231,24 +230,39 @@ else
     [[ -s $tmp/merge-paths ]] || continue
     for secondary in $other_parents; do
       git rev-list --no-merges "$base_sha..$secondary" -- > "$tmp/ancestors" 2> "$tmp/errors" || fail "cannot read parent ancestry"
+      if git merge-base --all "$parent" "$secondary" > "$tmp/merge-bases" 2> "$tmp/errors"; then
+        :
+      else
+        status=$?
+        [[ $status == 1 ]] || fail "cannot read merge bases"
+      fi
       : > "$tmp/parent-lines"
       : > "$tmp/parent-names"
-      while IFS= read -r path; do
-        git ls-tree -r -z --full-tree "$secondary" -- ":(literal)$path" > "$tmp/parent-entry" 2> "$tmp/errors" || fail "cannot read parent tree"
-        while IFS=$'\t' read -r -d '' metadata parent_path; do
-          [[ $parent_path == "$path" ]] || continue
-          printf '%s\t1\t%s\n' "$sha" "$path" >> "$tmp/parent-names"
-          read -r object_mode object_type object_sha <<< "$metadata"
-          [[ $object_type == blob ]] || continue
-          git cat-file blob "$object_sha" > "$tmp/parent-blob" 2> "$tmp/errors" || fail "cannot read parent content"
-          printf '%s\t1\t%s\n' "$sha" "$path" > "$tmp/parent-prefix"
-          awk 'FILENAME == ARGV[1] { prefix = $0; next }
-            { printf "%s\t%s\n", prefix, $0 }' \
-            "$tmp/parent-prefix" "$tmp/parent-blob" >> "$tmp/parent-lines"
-        done < "$tmp/parent-entry"
-      done < "$tmp/merge-paths"
+      : > "$tmp/base-lines"
+      : > "$tmp/base-names"
+      printf '%s\n' "$secondary" > "$tmp/tree-revisions"
+      cat "$tmp/merge-bases" >> "$tmp/tree-revisions"
+      lines_file="$tmp/parent-lines"; names_file="$tmp/parent-names"
+      while read -r revision; do
+        while IFS= read -r path; do
+          git ls-tree -r -t -z --full-tree "$revision" -- ":(literal)$path" > "$tmp/tree-entry" 2> "$tmp/errors" || fail "cannot read provenance tree"
+          while IFS=$'\t' read -r -d '' metadata tree_path; do
+            [[ $tree_path == "$path" ]] || continue
+            printf '%s\t1\t%s\n' "$revision" "$path" >> "$names_file"
+            read -r object_mode object_type object_sha <<< "$metadata"
+            [[ $object_type == blob ]] || continue
+            git cat-file blob "$object_sha" > "$tmp/tree-blob" 2> "$tmp/errors" || fail "cannot read provenance content"
+            printf '%s\t1\t%s\n' "$revision" "$path" > "$tmp/tree-prefix"
+            awk 'FILENAME == ARGV[1] { prefix = $0; next }
+              { printf "%s\t%s\n", prefix, $0 }' \
+              "$tmp/tree-prefix" "$tmp/tree-blob" >> "$lines_file"
+          done < "$tmp/tree-entry"
+        done < "$tmp/merge-paths"
+        # A secondary parent can itself be a merge base: keep both roles.
+        lines_file="$tmp/base-lines"; names_file="$tmp/base-names"
+      done < "$tmp/tree-revisions"
 
-      awk -F '\t' '
+      awk -F '\t' -v sha="$sha" '
         FILENAME == ARGV[1] { ancestor[$1] = 1; next }
         {
           content = $0
@@ -259,16 +273,31 @@ else
           if ($2 == 0 && ($1 in ancestor)) origin[key] = 1
           next
         }
-        key in origin { print }
-      ' "$tmp/ancestors" "$tmp/added" "$tmp/parent-lines" >> "$tmp/accounted-lines"
-      awk -F '\t' '
+        FILENAME == ARGV[3] {
+          count = ++base_count[$1 SUBSEP key]
+          if (count > base_max[key]) base_max[key] = count
+          next
+        }
+        key in origin {
+          parent_count[key]++
+          paths[key] = $3; contents[key] = content
+        }
+        END {
+          for (key in parent_count) {
+            limit = parent_count[key] - base_max[key]
+            if (limit > 0) printf "%s\t%d\t%s\t%s\n", sha, limit, paths[key], contents[key]
+          }
+        }
+      ' "$tmp/ancestors" "$tmp/added" "$tmp/base-lines" "$tmp/parent-lines" >> "$tmp/accounted-lines"
+      awk -F '\t' -v sha="$sha" '
         FILENAME == ARGV[1] { ancestor[$1] = 1; next }
         FILENAME == ARGV[2] {
           if ($2 == 0 && ($1 in ancestor)) origin[$3] = 1
           next
         }
-        $3 in origin { print }
-      ' "$tmp/ancestors" "$tmp/names" "$tmp/parent-names" >> "$tmp/accounted-names"
+        FILENAME == ARGV[3] { in_base[$3] = 1; next }
+        ($3 in origin) && !($3 in in_base) { printf "%s\t1\t%s\n", sha, $3 }
+      ' "$tmp/ancestors" "$tmp/names" "$tmp/base-names" "$tmp/parent-names" >> "$tmp/accounted-names"
     done
   done < "$tmp/commits"
 
@@ -279,8 +308,11 @@ else
       for (i = 0; i < 3; i++) sub(/^[^\t]*\t/, "", content)
       key = $1 SUBSEP $3 SUBSEP content
     }
-    FILENAME == ARGV[1] { accounted[key] = 1; next }
-    $2 == 0 || !(key in accounted) { print }
+    FILENAME == ARGV[1] {
+      if ($2 > accounted[key]) accounted[key] = $2
+      next
+    }
+    $2 == 0 || ++used[key] > accounted[key] { print }
   ' "$tmp/accounted-lines" "$tmp/added" > "$tmp/unaccounted"
   scan_records "$tmp/unaccounted"
 
