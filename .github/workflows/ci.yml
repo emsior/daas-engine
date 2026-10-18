@@ -19,7 +19,7 @@ jobs:
     timeout-minutes: 20
     strategy:
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -29,22 +29,56 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
-        run: pip install -e ".[dev]" "ruff==0.16.8"
-      - name: OPSEC check
-        run: |
-          ! git grep -iE "mcq089[@]|bukmache[r]|bettin[g]" -- ':!*.png' ':!*.mp4'
+        run: pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
       - name: Lint (ruff)
         run: ruff check --output-format=github .
       - name: Tests (mock mode — no secrets)
         run: pytest -v -p no:cacheprovider
       - name: Smoke API
         run: |
+          export DAAS_API_KEY="$(openssl rand -hex 24)"
           uvicorn app.main:app --port 8000 &
           sleep 4
           curl -sf localhost:8000/health
-          curl -sf -X POST localhost:8000/run -H "Content-Type: application/json" -d '{"pipeline":"ecommerce_demo"}' | grep -q '"MOCK_DATA"'
-          curl -sf -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
-          curl -sf localhost:8000/reports/ecommerce_demo/latest | grep -q "<table>"
+          # bez klucza: odmowa (401), z kluczem: dziala
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/run -H 'Content-Type: application/json' -d '{"pipeline":"ecommerce_demo"}')" = "401"
+          curl -sf -X POST localhost:8000/run -H "X-API-Key: $DAAS_API_KEY" -H "Content-Type: application/json" -d '{"pipeline":"ecommerce_demo"}' | grep -q '"MOCK_DATA"'
+          curl -sf -H "X-API-Key: $DAAS_API_KEY" -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
+          curl -sf -H "X-API-Key: $DAAS_API_KEY" localhost:8000/reports/ecommerce_demo/latest | grep -q "<table>"
+
+  # Testy na prawdziwym Postgresie: blokady wierszy (FOR UPDATE), SAVEPOINT i migracje Alembic, ktorych SQLite nie sprawdza.
+  # Serwer to PostgreSQL preinstalowany na obrazie ubuntu-24.04 (bez obrazu kontenera); wersja drukowana w logu.
+  postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: PostgreSQL (preinstalled on the runner image)
+        run: |
+          if ! systemctl list-unit-files postgresql.service --no-legend | grep -q postgresql; then
+            sudo apt-get update
+            sudo apt-get install -y postgresql
+          fi
+          sudo systemctl start postgresql.service
+          for i in $(seq 1 30); do pg_isready -h 127.0.0.1 -p 5432 && break || sleep 1; done
+          pg_isready -h 127.0.0.1 -p 5432
+          sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE daas LOGIN CREATEDB PASSWORD 'daas-ci-test-only'"
+          sudo -u postgres psql -tAc 'select version()'
+          # DROP DATABASE ... WITH (FORCE) used by the tests needs PostgreSQL >= 13
+          test "$(sudo -u postgres psql -tAc 'show server_version_num')" -ge 130000
+      - name: Install
+        run: pip install --require-hashes -r requirements-dev.lock -r requirements-postgres.lock && pip install --no-deps -e .
+      - name: Tests (PostgreSQL)
+        env:
+          DAAS_TEST_POSTGRES_URL: postgresql+asyncpg://daas:daas-ci-test-only@127.0.0.1:5432/postgres
+          DAAS_TEST_POSTGRES_REQUIRED: "1"
+        run: pytest tests/test_postgres.py -v -p no:cacheprovider
 
   security:
     runs-on: ubuntu-latest
@@ -62,13 +96,257 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install scanners
-        run: pip install "semgrep==1.177.0" "zizmor==1.30.1" # wersje przypiete, podbija Dependabot/recznie
+        run: pip install "semgrep==1.177.0" "zizmor==1.30.1" "pip-audit==2.10.1" # wersje przypiete, podbija Dependabot/recznie
       - name: SAST (semgrep) — blokuje ERROR, WARNING raportuje
         run: |
           semgrep scan --config p/python --config p/owasp-top-ten --metrics off --severity ERROR --error .
           semgrep scan --config p/python --config p/owasp-top-ten --metrics off --severity WARNING . || true
       - name: Audyt workflowow (zizmor)
         run: zizmor --offline --min-severity medium .github/workflows
+      - name: Znane podatnosci zaleznosci (pip-audit)
+        # requirements.lock ma hashe: --require-hashes wymusza ich sprawdzenie, --disable-pip czyta wersje z pliku
+        # bez instalowania. Pakiety nieznane indeksowi ("unknown") sa raportowane i nie blokuja przebiegu.
+        run: pip-audit -r requirements.lock -r requirements-postgres.lock --require-hashes --disable-pip --progress-spinner off
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Node 22 LTS z archiwum nodejs.org; suma SHA-256 z SHASUMS256.txt (ta sama wersja co lokalny dev).
+      - name: Node.js 22
+        working-directory: .
+        env:
+          NODE_VERSION: v22.22.0
+          NODE_SHA256: 9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/node.tar.xz" "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"
+          echo "${NODE_SHA256}  ${RUNNER_TEMP}/node.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP/node" --strip-components=1
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+      - name: Install (npm ci)
+        run: npm ci --no-audit --no-fund
+      # tylko zaleznosci produkcyjne i tylko high/critical; podatnosci narzedzi deweloperskich nie zatrzymuja przebiegu
+      - name: Audit (npm audit, production dependencies)
+        run: npm audit --omit=dev --audit-level=high
+      # typy API generowane z ../docs/openapi.json: rozjazd schematu z backendem zatrzymuje przebieg
+      - name: API schema drift (gen:api)
+        run: npm run gen:api && git diff --exit-code -- src/lib/api/schema.d.ts
+      - name: Lint (eslint)
+        run: npm run lint
+      - name: Typecheck (tsc)
+        run: npm run typecheck
+      - name: Unit tests (vitest)
+        run: npm test
+      - name: Build (next build)
+        env:
+          NEXT_PUBLIC_API_ORIGIN: ""
+        run: npm run build
+
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Node.js 22
+        env:
+          NODE_VERSION: v22.22.0
+          NODE_SHA256: 9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/node.tar.xz" "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"
+          echo "${NODE_SHA256}  ${RUNNER_TEMP}/node.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP/node" --strip-components=1
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+      - name: Install backend (runtime lock)
+        run: pip install --require-hashes -r requirements.lock && pip install --no-deps -e .
+      - name: Install web and Playwright (Chromium + system libraries)
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      # web/e2e/stack.sh: build kokpitu (NEXT_PUBLIC_API_ORIGIN pusty), API w DAAS_MODE=cloud z adapterem e-mail
+      # `console`, serwer standalone i proxy jednego originu (odtwarza Caddy: /api/* -> API, reszta -> kokpit).
+      - name: Start stack (API cloud + console mail, web, one-origin proxy)
+        env:
+          PYTHON: python
+        run: |
+          echo "E2E_RUNTIME=$RUNNER_TEMP/daas-e2e" >> "$GITHUB_ENV"
+          E2E_RUNTIME="$RUNNER_TEMP/daas-e2e" bash web/e2e/stack.sh start
+      - name: E2E (Playwright)
+        working-directory: web
+        env:
+          CI: "true"
+          E2E_BASE_URL: http://127.0.0.1:3100
+        run: E2E_OUTBOX_DIR="$E2E_RUNTIME/outbox" npm run e2e
+      - name: Server logs (on failure)
+        if: failure()
+        run: |
+          for f in api web proxy; do echo "--- $f.log"; tail -n 200 "$E2E_RUNTIME/$f.log" || true; done
+      # Akcja przypieta do SHA v4.6.2. Podbija Dependabot (ekosystem github-actions).
+      - name: Playwright report (artifact on failure)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # E2E w Firefoxie i WebKicie (job `e2e` zostaje na Chromium). Osobne nogi matrixu, zeby czerwony silnik nie
+  # chowal drugiego. WebKit odrzuca ciasteczka Secure/__Host- po http (API zawsze je wystawia), dlatego jego noga
+  # biegnie po https: stack.sh z E2E_TLS=1 generuje jednorazowy certyfikat self-signed, a Playwright dostaje
+  # ignoreHTTPSErrors tylko dla adresu https. Firefox przyjmuje te ciasteczka po http na 127.0.0.1.
+  e2e-browsers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: firefox
+            project: desktop-firefox
+            tls: "0"
+          - browser: webkit
+            project: mobile-webkit
+            tls: "1"
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Node.js 22
+        env:
+          NODE_VERSION: v22.22.0
+          NODE_SHA256: 9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/node.tar.xz" "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"
+          echo "${NODE_SHA256}  ${RUNNER_TEMP}/node.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP/node" --strip-components=1
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+      - name: Install backend (runtime lock)
+        run: pip install --require-hashes -r requirements.lock && pip install --no-deps -e .
+      - name: Install web and Playwright (browser + system libraries)
+        working-directory: web
+        env:
+          BROWSER: ${{ matrix.browser }}
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps "$BROWSER"
+      - name: Start stack (API cloud + console mail, web, one-origin proxy)
+        env:
+          PYTHON: python
+          E2E_TLS: ${{ matrix.tls }}
+        run: |
+          echo "E2E_RUNTIME=$RUNNER_TEMP/daas-e2e" >> "$GITHUB_ENV"
+          E2E_RUNTIME="$RUNNER_TEMP/daas-e2e" bash web/e2e/stack.sh start
+      - name: E2E (Playwright)
+        working-directory: web
+        env:
+          CI: "true"
+          PROJECT: ${{ matrix.project }}
+          TLS: ${{ matrix.tls }}
+        run: |
+          if [ "$TLS" = "1" ]; then E2E_BASE_URL=https://127.0.0.1:3100; else E2E_BASE_URL=http://127.0.0.1:3100; fi
+          export E2E_BASE_URL
+          E2E_OUTBOX_DIR="$E2E_RUNTIME/outbox" npx playwright test --project="$PROJECT"
+      - name: Server logs (on failure)
+        if: failure()
+        run: |
+          for f in api web proxy; do echo "--- $f.log"; tail -n 200 "$E2E_RUNTIME/$f.log" || true; done
+      # Akcja przypieta do SHA v4.6.2. Podbija Dependabot (ekosystem github-actions).
+      - name: Playwright report (artifact on failure)
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: |
+            web/playwright-report
+            web/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  # Brama G3: Lighthouse (mobile) dla tras publicznych /login i /dpa na stosie z web/e2e/stack.sh.
+  # Progi w web/lighthouserc.json: wydajnosc >= 0.9, dostepnosc >= 0.95, dobre praktyki >= 0.9.
+  lighthouse:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: e2e
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Node.js 22
+        env:
+          NODE_VERSION: v22.22.0
+          NODE_SHA256: 9aa8e9d2298ab68c600bd6fb86a6c13bce11a4eca1ba9b39d79fa021755d7c37
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/node.tar.xz" "https://nodejs.org/dist/${NODE_VERSION}/node-${NODE_VERSION}-linux-x64.tar.xz"
+          echo "${NODE_SHA256}  ${RUNNER_TEMP}/node.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xJf "$RUNNER_TEMP/node.tar.xz" -C "$RUNNER_TEMP/node" --strip-components=1
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+      - name: Install backend (runtime lock)
+        run: pip install --require-hashes -r requirements.lock && pip install --no-deps -e .
+      - name: Install web and Chromium (Playwright; @lhci/cli is a devDependency from the lockfile)
+        working-directory: web
+        run: |
+          npm ci --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Start stack (API cloud + console mail, web, one-origin proxy)
+        env:
+          PYTHON: python
+        run: |
+          echo "E2E_RUNTIME=$RUNNER_TEMP/daas-lh" >> "$GITHUB_ENV"
+          E2E_RUNTIME="$RUNNER_TEMP/daas-lh" bash web/e2e/stack.sh start
+      - name: Lighthouse (lhci autorun)
+        working-directory: web
+        run: |
+          CHROME_PATH="$(node -e "console.log(require('@playwright/test').chromium.executablePath())")"
+          export CHROME_PATH
+          npx lhci autorun
+      - name: Server logs (on failure)
+        if: failure()
+        run: |
+          for f in api web proxy; do echo "--- $f.log"; tail -n 200 "$E2E_RUNTIME/$f.log" || true; done
+      - name: Lighthouse report (artifact)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: lighthouse-report
+          path: web/.lighthouseci
+          if-no-files-found: ignore
+          retention-days: 7
 
   docker:
     runs-on: ubuntu-latest
@@ -82,8 +360,43 @@ jobs:
         run: docker build -t daas-engine:ci .
       - name: Run container & smoke
         run: |
-          docker run -d --rm --name daas -p 8000:8000 daas-engine:ci
+          KEY="$(openssl rand -hex 24)"
+          docker run -d --rm --name daas -e DAAS_API_KEY="$KEY" -p 127.0.0.1:8000:8000 daas-engine:ci
           for i in $(seq 1 20); do curl -sf localhost:8000/health && break || sleep 1; done
-          curl -sf -X POST localhost:8000/run -H "Content-Type: application/json" -d '{"pipeline":"cs2_demo"}' | grep -q '"SUCCESS"'
-          curl -sf -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST localhost:8000/run -H 'Content-Type: application/json' -d '{"pipeline":"cs2_demo"}')" = "401"
+          curl -sf -X POST localhost:8000/run -H "X-API-Key: $KEY" -H "Content-Type: application/json" -d '{"pipeline":"cs2_demo"}' | grep -q '"SUCCESS"'
+          curl -sf -H "X-API-Key: $KEY" -F "file=@data/fixtures/client_export_pl.csv" localhost:8000/upload | grep -q '"ready":true'
           docker stop daas
+      - name: Smoke trybu cloud (migracje control plane w kontenerze, utwardzenie jak w deploy/compose.yml)
+        run: |
+          # read-only + tmpfs /tmp + cap_drop ALL: zapisywalne tylko wolumeny /data/*, tak jak w compose
+          docker run -d --rm --name daas-cloud --read-only --tmpfs /tmp --cap-drop ALL \
+            --security-opt no-new-privileges:true \
+            -e DAAS_MODE=cloud -e DAAS_SECRET_KEY="$(openssl rand -hex 32)" -e DAAS_ALLOW_CONSOLE_MAIL=true \
+            -e DAAS_CONTROL_DB_URL=sqlite+aiosqlite:////data/control/control.db \
+            -e DUCKDB_PATH=/data/runtime/daas.duckdb -e REPORTS_DIR=/data/runtime/reports \
+            -v daas-ci-control:/data/control -v daas-ci-runtime:/data/runtime \
+            -p 127.0.0.1:8001:8000 daas-engine:ci
+          for i in $(seq 1 30); do curl -sf localhost:8001/ready && break || sleep 1; done
+          curl -sf localhost:8001/ready
+          curl -sf localhost:8001/api/v1/health | grep -q '"mode":"cloud"'
+          docker stop daas-cloud
+      - name: Build image web
+        run: docker build -t daas-engine-web:ci web
+      - name: Run web container & smoke
+        run: |
+          docker run -d --rm --name daas-web --read-only --tmpfs /tmp --tmpfs /app/.next/cache --cap-drop ALL \
+            --security-opt no-new-privileges:true -p 127.0.0.1:3000:3000 daas-engine-web:ci
+          for i in $(seq 1 30); do curl -sf localhost:3000/login -o /dev/null && break || sleep 1; done
+          curl -sf localhost:3000/login -o /dev/null
+          docker stop daas-web
+      - name: Validate deploy/compose.yml
+        run: DAAS_SECRET_KEY="$(openssl rand -hex 32)" docker compose -f deploy/compose.yml --profile edge --profile tools config -q
+      - name: Validate deploy/compose.yml with the LLM overlay
+        run: |
+          DAAS_SECRET_KEY="$(openssl rand -hex 32)" ANTHROPIC_API_KEY=ci-placeholder \
+            docker compose -f deploy/compose.yml -f deploy/compose.llm.yml config -q
+      - name: Validate deploy/Caddyfile
+        run: |
+          docker run --rm -e DAAS_DOMAIN=ci.example.com -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2 caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile

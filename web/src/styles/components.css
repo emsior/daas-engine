@@ -1,0 +1,850 @@
+/* =====================================================================
+   components.css — komponenty bez JavaScriptu (klasy + atrybuty ARIA/data-*)
+   Wymaga tokens.css i base.css. Wszystkie kolory z tokenów komponentowych
+   (poziom 3) lub semantycznych (poziom 2); zero wartości surowych.
+
+   Konwencja: element = nazwa__element, wariant = nazwa-wariant
+   (np. .btn-danger, .badge-ok, .kpi__label), stan = atrybut
+   (disabled, aria-disabled, aria-busy, aria-invalid, data-state).
+
+   Kontrasty (light | dark), tekst >= 4,5:1, UI >= 3:1 — wzór WCAG w tokens.css.
+   Pary komponentów:
+     .btn primary        biały na #1F4E8C 8,3 | #0F141B na #8DB6F0 8,9
+        hover            biały na #173D70 10,8 | #0F141B na #A9C8F5 10,8
+        active           biały na #12305A 13,2 | #0F141B na #7AA6E8 7,4
+     .btn secondary      #1F4E8C na bg 8,3 | #8DB6F0 na bg 8,9
+        hover            #1F4E8C na #E8F0FA 7,2 | #8DB6F0 na #14243A 7,5
+     .btn danger         biały na #B42318 6,6 | #0F141B na #FF8A80 8,1
+        hover            biały na #912018 8,7 | #0F141B na #FFA8A0 10,0
+     .btn disabled       #4A5566 na #D5DBE3 5,4 | #A9B4C2 na #202A37 6,9
+     .input              obrys 4,6 (bg) | 4,3 (bg); tekst 15,7 | 15,4
+     .field-error        #B42318 na bg 6,6 / surface 6,1 | #FF8A80 na bg 8,1 / raised 6,4
+     .card               tekst 15,7 na raised | 12,1 (raised dark)
+     .kpi label          #4A5566 na raised 7,5 | #A9B4C2 na #202A37 6,9
+     .badge-*            patrz tokens.css (5,4–7,2 light | 7,3–9,7 dark)
+     .table              tekst na stripe #F5F7FA 14,6 | na #18202B 13,7;
+                         pomocniczy na stripe 7,0 | 7,8; wiersz hover #E8F0FA: tekst 13,6, link 7,2
+     .dropzone           obrys 4,3 (surface) | 3,8 (surface)
+     .progress           wypełnienie na torze 6,0 | 7,0; obrys toru 4,6 | 4,3
+     .toast              15,7 | 15,4; akcja 7,5 | 6,9
+     .alert-*            tekst główny na tle 13,6–14,2 | 13,0–13,8
+   ===================================================================== */
+
+/* =====================================================================
+   PRZYCISKI
+   Klasy: .btn (= primary), .btn-secondary, .btn-ghost, .btn-danger, .btn-cta
+   Stany: :hover, :active, :disabled / [aria-disabled="true"], [aria-busy="true"]
+   Cele dotyku: min 24 px (AA 2.5.8); standard 40 px; .btn-cta 44 px na mobile.
+   ===================================================================== */
+.btn {
+  --_bg: var(--button-primary-bg);
+  --_fg: var(--button-primary-fg);
+  --_border: var(--button-primary-bg);
+  --_bg-hover: var(--button-primary-hover);
+  --_border-hover: var(--button-primary-hover);
+  --_bg-active: var(--button-primary-active);
+  --_border-active: var(--button-primary-active);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  min-block-size: var(--size-control);
+  min-inline-size: var(--size-target-min);
+  padding: var(--space-2) var(--space-4);
+  border: var(--border-width-strong) solid var(--_border);
+  border-radius: var(--radius-md);
+  background: var(--_bg);
+  color: var(--_fg);
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
+  font-weight: var(--font-weight-semibold);
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.btn:hover {
+  background: var(--_bg-hover);
+  border-color: var(--_border-hover);
+  color: var(--_fg);
+  text-decoration: none;
+}
+
+.btn:active {
+  background: var(--_bg-active);
+  border-color: var(--_border-active);
+  color: var(--_fg);
+}
+
+.btn-secondary {
+  --_bg: transparent;
+  --_fg: var(--button-secondary-fg);
+  --_border: var(--button-secondary-border);
+  --_bg-hover: var(--button-secondary-hover-bg);
+  --_border-hover: var(--button-secondary-border);
+  --_bg-active: var(--button-secondary-hover-bg);
+  --_border-active: var(--button-secondary-border);
+}
+
+.btn-ghost {
+  --_bg: transparent;
+  --_fg: var(--button-secondary-fg);
+  --_border: transparent;
+  --_bg-hover: var(--button-secondary-hover-bg);
+  --_border-hover: transparent;
+  --_bg-active: var(--button-secondary-hover-bg);
+  --_border-active: transparent;
+}
+
+.btn-danger {
+  --_bg: var(--button-danger-bg);
+  --_fg: var(--button-danger-fg);
+  --_border: var(--button-danger-bg);
+  --_bg-hover: var(--button-danger-hover);
+  --_border-hover: var(--button-danger-hover);
+  --_bg-active: var(--button-danger-hover);
+  --_border-active: var(--button-danger-hover);
+}
+
+/* główne wezwanie do działania: 44 px na mobile, pełna szerokość do 640 px */
+.btn-cta {
+  min-block-size: var(--size-target-cta);
+  padding-inline: var(--space-6);
+  inline-size: 100%;
+}
+
+@media (min-width: 40em) {
+  .btn-cta {
+    min-block-size: var(--size-control);
+    inline-size: auto;
+  }
+}
+
+/* stan wyłączony: czytelny (kontrast >= 4,5:1 mimo wyjątku WCAG), bez hovera */
+.btn:disabled,
+.btn[aria-disabled="true"] {
+  --_bg: var(--button-disabled-bg);
+  --_fg: var(--button-disabled-fg);
+  --_border: var(--button-disabled-bg);
+  --_bg-hover: var(--button-disabled-bg);
+  --_border-hover: var(--button-disabled-bg);
+  --_bg-active: var(--button-disabled-bg);
+  --_border-active: var(--button-disabled-bg);
+  cursor: not-allowed;
+}
+
+/* ładowanie: kolory bez zmian (pełny kontrast), nieskończony spinner nie jest używany;
+   komunikat tekstowy „Trwa przetwarzanie…” dostarcza aria-live w treści strony */
+.btn[aria-busy="true"] {
+  cursor: progress;
+  pointer-events: none;
+}
+
+.btn[aria-busy="true"]::after {
+  content: "\2026"; /* wielokropek */
+  content: "\2026" / "";
+}
+
+/* =====================================================================
+   FORMULARZ: .field, .label, .hint, .input, .field-error
+   ===================================================================== */
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.label {
+  display: block;
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text);
+}
+
+.hint {
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  color: var(--color-text-muted);
+}
+
+.input {
+  display: block;
+  inline-size: 100%;
+  min-block-size: var(--size-target-cta); /* 44 px na mobile */
+  padding: var(--space-2) var(--space-3);
+  background: var(--input-bg);
+  color: var(--input-fg);
+  border: var(--border-width) solid var(--input-border);
+  border-radius: var(--radius-md);
+  font-size: var(--text-base); /* 16 px — iOS nie powiększa strony przy fokusie */
+  line-height: var(--text-base--line-height);
+  transition: border-color var(--duration-fast) var(--ease-out);
+}
+
+@media (min-width: 40em) {
+  .input {
+    min-block-size: var(--size-control);
+  }
+}
+
+textarea.input {
+  min-block-size: calc(var(--space-16) * 2);
+  resize: vertical;
+}
+
+.input::placeholder {
+  color: var(--input-placeholder);
+  opacity: 1;
+}
+
+.input:hover {
+  border-color: var(--color-text);
+}
+
+.input:focus-visible {
+  border-color: var(--input-focus);
+}
+
+/* błąd: obrys + dodatkowy wewnętrzny pierścień (kształt, nie tylko kolor), bez skoku układu */
+.input[aria-invalid="true"] {
+  border-color: var(--input-error);
+  box-shadow: inset 0 0 0 var(--border-width) var(--input-error);
+}
+
+.input:disabled,
+.input[aria-disabled="true"] {
+  background: var(--input-disabled-bg);
+  color: var(--color-disabled-fg);
+  cursor: not-allowed;
+}
+
+/* Komunikat błędu pola: ikona + tekst + kolor. Powiąż z polem przez aria-describedby. */
+.field-error {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  color: var(--color-danger);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  font-weight: var(--font-weight-medium);
+}
+
+/* wspólna ikona kołowa: alert, błąd pola, nagłówek podsumowania błędów */
+.field-error::before,
+.error-summary__title::before,
+.alert::before {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  inline-size: var(--size-icon);
+  block-size: var(--size-icon);
+  border-radius: var(--radius-full);
+  background: var(--_accent, var(--color-danger));
+  color: var(--_tint, var(--color-on-danger));
+  font-size: var(--text-sm);
+  line-height: 1;
+  font-weight: var(--font-weight-bold);
+}
+
+.field-error::before {
+  content: "\2715"; /* ✕ */
+  content: "\2715" / "";
+}
+
+/* =====================================================================
+   PODSUMOWANIE BŁĘDÓW (na górze <main>, fokus programowy, role="alert" opcjonalnie)
+   Struktura: .error-summary > .error-summary__title + ul.error-summary__list > li > a
+   Nagłówek #B42318 na bg 6,6 | #FF8A80 na bg 8,1; linki jak nagłówek, podkreślone.
+   ===================================================================== */
+.error-summary {
+  padding: var(--space-4);
+  background: var(--color-bg);
+  border: var(--border-width-accent) solid var(--color-danger);
+  border-radius: var(--radius-md);
+  color: var(--color-text);
+}
+
+.error-summary:focus,
+.error-summary:focus-visible {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+.error-summary__title {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 0 var(--space-3);
+  color: var(--color-danger);
+  font-size: var(--text-xl);
+  line-height: var(--text-xl--line-height);
+  font-weight: var(--font-weight-bold);
+}
+
+.error-summary__title::before {
+  content: "\2715"; /* ✕ */
+  content: "\2715" / "";
+}
+
+.error-summary__list {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.error-summary__list a {
+  color: var(--color-danger);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* =====================================================================
+   KARTA I KPI
+   ===================================================================== */
+.card {
+  padding: var(--space-4);
+  background: var(--card-bg);
+  color: var(--color-text);
+  border: var(--border-width) solid var(--card-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--card-shadow);
+}
+
+@media (min-width: 40em) {
+  .card {
+    padding: var(--space-6);
+  }
+}
+
+.card__title {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xl);
+  line-height: var(--text-xl--line-height);
+  font-weight: var(--font-weight-semibold);
+}
+
+/* karta klikalna: mikro-interakcja tylko na obrysie i cieniu (bez przesunięć układu) */
+.card-interactive {
+  transition:
+    border-color var(--duration-base) var(--ease-out),
+    box-shadow var(--duration-base) var(--ease-out);
+}
+
+.card-interactive:hover {
+  border-color: var(--card-border-hover);
+  box-shadow: var(--shadow-md);
+}
+
+.card-interactive:has(:focus-visible) {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+/* KPI: etykieta TEKSTOWA nad liczbą; liczba tabelaryczna.
+   Znaczniki: <dl class="kpi"><dt class="kpi__label">…</dt><dd class="kpi__value">…</dd></dl> */
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  margin: 0;
+}
+
+.kpi__label {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  font-weight: var(--font-weight-medium);
+}
+
+.kpi__value {
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-3xl);
+  line-height: var(--text-3xl--line-height);
+  font-weight: var(--font-weight-bold);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--tabular);
+  overflow-wrap: anywhere;
+}
+
+.kpi__hint {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+}
+
+/* =====================================================================
+   ODZNAKA STATUSU — ikona (znak tekstowy) + tekst (z HTML) + kolor
+   Klasy: .badge-ok | .badge-warn | .badge-error | .badge-pending | .badge-unknown
+   Ikony różnią się kształtem: ✓ ok, ▲ ostrzeżenie, ✕ błąd, … w toku, ? nieznany.
+   Ikona ukryta dla czytników (alt-text ""); nazwę statusu niesie tekst w HTML.
+   ===================================================================== */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--badge-unknown-bg);
+  color: var(--badge-unknown-fg);
+  border: var(--border-width) solid var(--badge-unknown-fg);
+  border-radius: var(--radius-full);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out);
+}
+
+.badge::before {
+  display: inline-block;
+  inline-size: 1em;
+  text-align: center;
+  font-weight: var(--font-weight-bold);
+}
+
+.badge-ok { background: var(--badge-ok-bg); color: var(--badge-ok-fg); border-color: var(--badge-ok-fg); }
+.badge-warn { background: var(--badge-warn-bg); color: var(--badge-warn-fg); border-color: var(--badge-warn-fg); }
+.badge-error { background: var(--badge-error-bg); color: var(--badge-error-fg); border-color: var(--badge-error-fg); }
+.badge-pending { background: var(--badge-pending-bg); color: var(--badge-pending-fg); border-color: var(--badge-pending-fg); }
+.badge-unknown { background: var(--badge-unknown-bg); color: var(--badge-unknown-fg); border-color: var(--badge-unknown-fg); }
+
+.badge-ok::before { content: "\2713"; content: "\2713" / ""; }       /* ✓ */
+.badge-warn::before { content: "\25B2"; content: "\25B2" / ""; }     /* ▲ */
+.badge-error::before { content: "\2715"; content: "\2715" / ""; }    /* ✕ */
+.badge-pending::before { content: "\2026"; content: "\2026" / ""; } /* … */
+.badge-unknown::before,
+.badge:not([class*="badge-"])::before { content: "?"; content: "?" / ""; }
+
+/* =====================================================================
+   TABELA
+   Desktop (>= 640 px): zwykła tabela, pasy co drugi wiersz, nagłówek z grubą linią.
+   Mobile (< 640 px): każdy wiersz jako karta; etykietę kolumny bierze z data-label
+   na <td>. Dodaj role="table|row|cell|columnheader" w HTML, bo display:block
+   odbiera semantykę tabeli części czytników.
+   Szeroka tabela w .table-wrap (tabindex="0", role="region", aria-label).
+   ===================================================================== */
+.table-wrap {
+  overflow-x: auto;
+}
+
+/* UWAGA (Tailwind): klasa .table koliduje z narzędziem Tailwinda `table`
+   (display: table), które wygrywa warstwą `utilities` i psuje układ kart na mobile.
+   W projekcie z Tailwindem używaj aliasu .data-table; .table zostaje dla HTML bez Tailwinda
+   (np. statyczne raporty). Oba selektory mają identyczne reguły przez :is(). */
+:is(.table, .data-table) {
+  inline-size: 100%;
+  border-collapse: collapse;
+  color: var(--color-text);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+}
+
+:is(.table, .data-table) caption {
+  padding-block: var(--space-2);
+  text-align: start;
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
+  font-weight: var(--font-weight-semibold);
+}
+
+:is(.table, .data-table) th,
+:is(.table, .data-table) td {
+  padding: var(--space-3);
+  text-align: start;
+  vertical-align: top;
+}
+
+:is(.table, .data-table) thead th {
+  border-block-end: var(--border-width-strong) solid var(--table-header-border);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+:is(.table, .data-table) tbody th {
+  font-weight: var(--font-weight-semibold);
+}
+
+:is(.table, .data-table) tbody tr {
+  border-block-end: var(--border-width) solid var(--table-row-border);
+}
+
+:is(.table, .data-table) tbody tr:nth-child(even) {
+  background: var(--table-stripe);
+}
+
+:is(.table, .data-table) tbody tr:hover {
+  background: var(--table-row-hover);
+}
+
+/* kolumny liczbowe: wyrównanie do prawej, cyfry tabelaryczne */
+:is(.table, .data-table) .num {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--tabular);
+  white-space: nowrap;
+}
+
+@media (width < 40em) {
+  /* nagłówek ukryty wizualnie, dostępny dla czytników */
+  :is(.table, .data-table) thead {
+    position: absolute;
+    inline-size: var(--border-width);
+    block-size: var(--border-width);
+    margin: calc(var(--border-width) * -1);
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+
+  :is(.table, .data-table),
+  :is(.table, .data-table) tbody,
+  :is(.table, .data-table) tfoot,
+  :is(.table, .data-table) tr,
+  :is(.table, .data-table) th,
+  :is(.table, .data-table) td {
+    display: block;
+  }
+
+  :is(.table, .data-table) tbody tr,
+  :is(.table, .data-table) tbody tr:nth-child(even),
+  :is(.table, .data-table) tbody tr:hover {
+    margin-block-end: var(--space-3);
+    padding: var(--space-3);
+    background: var(--card-bg);
+    border: var(--border-width) solid var(--card-border);
+    border-radius: var(--radius-md);
+  }
+
+  :is(.table, .data-table) th,
+  :is(.table, .data-table) td {
+    padding: var(--space-1) 0;
+  }
+
+  :is(.table, .data-table) td[data-label] {
+    display: grid;
+    grid-template-columns: var(--size-label-col) 1fr;
+    column-gap: var(--space-3);
+    align-items: baseline;
+  }
+
+  :is(.table, .data-table) td[data-label]::before {
+    content: attr(data-label);
+    color: var(--color-text-muted);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  :is(.table, .data-table) .num {
+    text-align: start;
+  }
+}
+
+/* =====================================================================
+   STREFA UPUSZCZANIA PLIKU — stany przez data-state="idle|active|error"
+   Kształt obrysu zmienia się razem z kolorem: idle przerywany, active/error ciągły.
+   Natywny <input type="file"> w środku (klasa .sr-only) + widoczny przycisk
+   „Wybierz plik” (alternatywa dla przeciągania, WCAG 2.5.7).
+   ===================================================================== */
+.dropzone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  min-block-size: calc(var(--space-16) * 2);
+  padding: var(--space-8) var(--space-4);
+  background: var(--dropzone-bg);
+  color: var(--color-text);
+  border: var(--border-width-strong) dashed var(--dropzone-border);
+  border-radius: var(--radius-lg);
+  text-align: center;
+  transition:
+    border-color var(--duration-fast) var(--ease-out),
+    background-color var(--duration-fast) var(--ease-out);
+}
+
+.dropzone:hover {
+  border-color: var(--dropzone-active-border);
+}
+
+.dropzone:has(input:focus-visible) {
+  outline: var(--focus-width) solid var(--color-focus);
+  outline-offset: var(--focus-offset);
+}
+
+.dropzone[data-state="active"] {
+  border-style: solid;
+  border-color: var(--dropzone-active-border);
+  background: var(--dropzone-active-bg);
+}
+
+.dropzone[data-state="error"] {
+  border-style: solid;
+  border-color: var(--dropzone-error-border);
+  background: var(--dropzone-error-bg);
+}
+
+.dropzone__title {
+  font-size: var(--text-lg);
+  line-height: var(--text-lg--line-height);
+  font-weight: var(--font-weight-semibold);
+}
+
+.dropzone__hint {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+}
+
+/* =====================================================================
+   POSTĘP (determinate) — wyłącznie natywny <progress class="progress" value max>.
+   Szerokość NIE jest ustawiana przez style="" (CSP). Zawsze podawaj value
+   (wariant bez value jest animowany przez przeglądarkę). Brak animacji własnej.
+   Tekst „Sprawdzam plik: wiersz 340 z 1 200” w osobnym elemencie z aria-live.
+   ===================================================================== */
+.progress {
+  -webkit-appearance: none;
+  appearance: none;
+  display: block;
+  inline-size: 100%;
+  block-size: var(--space-3);
+  overflow: hidden;
+  border: var(--border-width) solid var(--progress-border);
+  border-radius: var(--radius-full);
+  background: var(--progress-track);
+  color: var(--progress-fill);
+}
+
+.progress::-webkit-progress-bar {
+  background: var(--progress-track);
+}
+
+.progress::-webkit-progress-value {
+  background: var(--progress-fill);
+}
+
+.progress::-moz-progress-bar {
+  background: var(--progress-fill);
+}
+
+/* =====================================================================
+   ALERT — .alert-info | .alert-success | .alert-warning | .alert-danger
+   Ikona (kołowa, inny znak na wariant) + ramka z grubym lewym brzegiem + tekst.
+   Struktura: DOKŁADNIE jeden element potomny (np. <div>) z .alert-title i treścią.
+   Alerty blokujące (danger) w treści strony, nie jako toast.
+   ===================================================================== */
+.alert {
+  --_accent: var(--color-info);
+  --_tint: var(--color-info-bg);
+
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  background: var(--_tint);
+  color: var(--color-text);
+  border: var(--border-width) solid var(--_accent);
+  border-inline-start-width: var(--border-width-accent);
+  border-radius: var(--radius-md);
+}
+
+.alert-title {
+  display: block;
+  font-weight: var(--font-weight-bold);
+}
+
+.alert-info::before { content: "i"; content: "i" / ""; }
+.alert-success { --_accent: var(--color-success); --_tint: var(--color-success-bg); }
+.alert-success::before { content: "\2713"; content: "\2713" / ""; }   /* ✓ */
+.alert-warning { --_accent: var(--color-warning); --_tint: var(--color-warning-bg); }
+.alert-warning::before { content: "\25B2"; content: "\25B2" / ""; }   /* ▲ */
+.alert-danger { --_accent: var(--color-danger); --_tint: var(--color-danger-bg); }
+.alert-danger::before { content: "\2715"; content: "\2715" / ""; }    /* ✕ */
+
+/* =====================================================================
+   SZKIELET ŁADOWANIA — animacja tylko gdy użytkownik nie prosi o mniej ruchu
+   Kontener ładowany: aria-busy="true". Szkielet jest dekoracyjny (aria-hidden).
+   ===================================================================== */
+.skeleton {
+  display: block;
+  block-size: var(--space-4);
+  background: var(--skeleton-bg);
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-text {
+  max-inline-size: var(--measure);
+}
+
+.skeleton-kpi {
+  block-size: var(--space-10);
+  max-inline-size: var(--container-narrow);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .skeleton {
+    animation: skeleton-pulse var(--duration-skeleton) ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+
+    50% {
+      opacity: var(--opacity-pulse-low);
+    }
+  }
+}
+
+/* =====================================================================
+   RAMKA Z RAPORTEM — <iframe class="iframe-report" sandbox="" title="…" src="…">
+   Pełna szerokość; własne jasne płótno, bo dokument raportu rysuje własne style.
+   ===================================================================== */
+.iframe-report {
+  display: block;
+  inline-size: 100%;
+  min-block-size: var(--size-iframe-min);
+  background: var(--iframe-bg);
+  color-scheme: light;
+  border: var(--border-width) solid var(--iframe-border);
+  border-radius: var(--radius-md);
+}
+
+/* =====================================================================
+   TOAST — potwierdzenia niekrytyczne („Skopiowano”). NIE dla błędów blokujących.
+   Kontener z role="status" (aria-live="polite") obecny w DOM stale; treść podmieniana.
+   Znika dopiero po >= 5 s lub zamknięciu (logika po stronie Frontend Dev).
+   ===================================================================== */
+.toast {
+  position: fixed;
+  inset-inline: var(--gutter);
+  inset-block-end: var(--space-4);
+  z-index: var(--z-toast);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  max-inline-size: var(--size-toast-max);
+  margin-inline: auto;
+  padding: var(--space-3) var(--space-4);
+  background: var(--toast-bg);
+  color: var(--toast-fg);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+}
+
+.toast a,
+.toast .toast__action {
+  color: var(--toast-action);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .toast {
+    animation: toast-in var(--duration-base) var(--ease-out);
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(var(--space-2));
+    }
+
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+}
+
+/* =====================================================================
+   KOD / HASH W BLOKU — .code (pre lub div), tekst na tle 13,7 | 15,4
+   ===================================================================== */
+.code {
+  display: block;
+  padding: var(--space-3);
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border: var(--border-width) solid var(--code-border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* =====================================================================
+   TRYB WYSOKIEGO KONTRASTU SYSTEMU (forced-colors)
+   Przeglądarka usuwa tła i kolory — obwódki muszą zostać, żeby kształt był czytelny.
+   ===================================================================== */
+@media (forced-colors: active) {
+  .btn {
+    border-color: ButtonText;
+  }
+
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    border-color: GrayText;
+    color: GrayText;
+  }
+
+  .input,
+  .card,
+  .dropzone,
+  .alert,
+  .error-summary,
+  .iframe-report,
+  .toast,
+  .code,
+  .badge {
+    border-color: CanvasText;
+  }
+
+  .input[aria-invalid="true"],
+  .dropzone[data-state="error"],
+  .error-summary {
+    border-width: var(--border-width-accent);
+  }
+
+  .dropzone[data-state="active"] {
+    border-color: Highlight;
+  }
+
+  .field-error::before,
+  .error-summary__title::before,
+  .alert::before {
+    forced-color-adjust: none;
+    background: CanvasText;
+    color: Canvas;
+  }
+
+  .progress {
+    border-color: CanvasText;
+  }
+
+  .progress::-webkit-progress-value {
+    background: Highlight;
+  }
+
+  .progress::-moz-progress-bar {
+    background: Highlight;
+  }
+
+  .skeleton {
+    border: var(--border-width) solid GrayText;
+  }
+}
+
+/* Ostrzeżenia do pliku: pełny tekst (bez ucinania), długie nazwy kolumn łamią się. */
+.warning-list {
+  overflow-wrap: anywhere;
+}

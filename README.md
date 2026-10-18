@@ -2,9 +2,9 @@
 
 Live: https://prochpc.pl
 
-Source-agnostic **Data-as-a-Service** engine. A client sends a CSV/XLSX export; the engine detects the column mapping, loads it into DuckDB, computes KPIs and anomalies, and returns a ready-to-send HTML report with week-over-week deltas and a plain-language summary.
+Source-agnostic **Data-as-a-Service** engine. A client sends a CSV or XLSX export; the engine detects the column mapping, loads it into DuckDB, computes KPIs and anomalies, and returns a ready-to-send HTML report with week-over-week deltas and a plain-language summary.
 
-**Stack:** Python 3.11+ (CI: 3.11, 3.12) · FastAPI · DuckDB · n8n · Docker
+**Version 2.0** adds a hosted mode with a web cockpit next to the self-hosted one. **Stack:** Python 3.11+ (CI: 3.11, 3.12, 3.13) · FastAPI · DuckDB · Next.js · Docker
 
 *[Polski README →](README.pl.md)*
 
@@ -12,17 +12,146 @@ Source-agnostic **Data-as-a-Service** engine. A client sends a CSV/XLSX export; 
 
 ---
 
-## Why it exists
+## What you get
 
-Small e-commerce businesses sit on export files they never analyse. Reporting tools either need a data engineer to set up or a per-seat subscription nobody wants for a 15-minute weekly question: *did we make money last week, and where did we lose it?*
+- **A weekly report from your own file.** Revenue, cost, profit, margin, average order value, loss-making orders, anomalies, week-over-week deltas and a "practical takeaways" section. Numbers come only from your file. Output: HTML (print to PDF), Markdown and JSON.
+- **A cockpit** (cloud mode). Sign in with a link sent by e-mail (no passwords), drop a file, watch the progress, open the report, keep an archive. A "check yourself" box computes the SHA-256 of a downloaded report in your browser; the file is not uploaded.
+- **An API** with a key per organization, scopes, live progress (Server-Sent Events) and signed webhooks. Examples: [`docs/API.md`](docs/API.md).
+- **A collector of artifacts and a status report.** A read-only PowerShell collector (`tools/uksc-collector.ps1`) gathers technical settings of a Windows workstation into a hashed JSON package; the report lists control, requirement (UKSC/NIS2), status and artifact hash.
+- **Your data stays yours.** Each organization has its own data directory and its own DuckDB file; uploads expire after a retention period you set; nothing is sent to an AI provider unless you opt in.
 
-DaaS Engine answers that from a raw file, with no schema agreed in advance.
+### Two modes, one code base
 
-**Design constraints that shaped it:**
+| | `selfhost` | `cloud` |
+|---|---|---|
+| For | you run everything on your own server or PC | PPC hosts it, or you host the multi-organization service |
+| Organizations | one (`default`) | many, with members and roles |
+| Sign-in | one instance key (`X-API-Key`) | e-mail link for people, API keys for machines |
+| Run | `POST /run` (synchronous) or API v1 jobs | API v1 jobs (asynchronous, SSE progress) |
+| Cockpit | optional | included (`web/`) |
+| Start | `docker compose up` at the repository root, or `pip` | `deploy/compose.yml` on a VPS |
+
+Design constraints that shaped it:
 
 - **A missing API key is not an error.** Every external source degrades to a fixture instead of failing. The pipeline always produces a report; the reason for any degradation is returned in `source_detail`.
-- **Source-agnostic ingestion.** Column names are detected, not configured — `Wartość brutto`, `gross_value` and `Revenue` all map to `revenue`.
-- **The report is the product.** Output is a self-contained HTML file a client can open, not a dashboard they have to log into.
+- **Source-agnostic ingestion.** Column names are detected, not configured: `Wartość brutto`, `gross_value` and `Revenue` all map to `revenue`.
+- **The report is the product.** Output is a self-contained HTML file a client can open, not a dashboard they have to learn.
+
+---
+
+## Quickstart — Docker Compose (cloud, one VPS)
+
+```bash
+cd deploy
+./gen-env.sh --domain reports.example.com     # creates .env with random secrets (never overwrites)
+docker compose build
+docker compose --profile edge up -d           # api + web + Caddy (TLS)
+docker compose exec api python -m app.cli create-org --name "My Company" --owner-email owner@example.com
+./smoke.sh --public https://reports.example.com --wait 90
+```
+
+Sign in at `https://reports.example.com/login` with the e-mail link (set `DAAS_EMAIL_BACKEND=smtp` in `.env`; with the default `console` the link appears in `docker compose logs api`). Install, update, rollback, backups and sharing the VPS with another application: [`deploy/README.md`](deploy/README.md).
+
+Local trial without a domain or TLS: put these lines in `deploy/.env`, then `docker compose up -d --build` and open http://127.0.0.1:3000:
+
+```
+NEXT_PUBLIC_API_ORIGIN=http://127.0.0.1:8000
+DAAS_COCKPIT_ORIGIN=http://127.0.0.1:3000
+DAAS_COOKIE_SECURE=false
+```
+
+## Quickstart — Docker Compose (selfhost, with n8n)
+
+```bash
+cp .env.example .env          # set DAAS_API_KEY (min. 16 characters; openssl rand -hex 24) before the first start
+docker compose up --build
+```
+
+| Service | URL |
+|---|---|
+| API | `http://127.0.0.1:8000` (interactive docs at `/docs` only with `APP_ENV=dev`) |
+| n8n | `http://127.0.0.1:5678` |
+
+The DuckDB database and generated reports land in `./runtime/` (host volume). Import a workflow in n8n via **Workflows → Import from file**:
+
+- `n8n/daas_workflow.json` — scheduled run (Monday 07:00) of both pipelines, formatting and an alert branch. The alert fires on a failed run, missing data, or a **week-over-week revenue drop of 15% or more, or a margin drop of 3 percentage points or more**.
+- `n8n/daas_client_report.json` — client file → report over a webhook (upload → run → link to the HTML report).
+- `n8n/pilot_workflow.json` — scheduled run with a `/health` gate, a Notion log entry and a Slack alert on failure; set the environment variables `NOTION_DAAS_DB_ID`, `SLACK_ALERT_CHANNEL` and `DAAS_APP_URL` for it.
+
+## Quickstart — pip (no Docker)
+
+```bash
+python -m venv .venv && . .venv/bin/activate          # Windows: py -3.11 -m venv .venv; .\.venv\Scripts\Activate.ps1
+pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
+export DAAS_API_KEY="$(openssl rand -hex 24)"
+export APP_HOST=127.0.0.1 APP_PORT=8000                # change the listen address/port here (see .env.example)
+python -m app.main                                     # http://$APP_HOST:$APP_PORT
+```
+
+`python -m app.main` binds to `APP_HOST:APP_PORT` (defaults `127.0.0.1:8000`); set those variables to change it. In `selfhost` a non-loopback `APP_HOST` requires `DAAS_API_KEY`. For a production self-host that does not run the test suite, install `requirements.lock` instead of `requirements-dev.lock` — it holds the runtime dependencies only, while `-dev` adds pytest, ruff and the other developer tools (needed for the Tests section below). The lockfiles install on Windows as well (the Linux-only `uvloop` is skipped by a platform marker). Windows without Docker or a shell setup: `URUCHOM_DAAS_PYTHON.ps1` (Python check, venv, tests, server, sample upload and report in the browser). If `Activate.ps1` is blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+
+Cloud mode from source: `DAAS_MODE=cloud DAAS_SECRET_KEY=$(openssl rand -hex 32) python -m app.main`, then the cockpit with `cd web && npm ci && npm run build` and `npm run dev` (details: [`web/README.md`](web/README.md)).
+
+---
+
+## The "client file → report" flow
+
+Cloud / API v1 (full reference: [`docs/API.md`](docs/API.md)):
+
+```bash
+export DAAS=http://127.0.0.1:8000 KEY="daas_..." ORG="01J..."      # key and organization id from the cockpit or create-org
+
+# 1. Upload — returns the detected column mapping
+curl -H "X-API-Key: $KEY" -F "file=@data/fixtures/client_export_pl.csv" "$DAAS/api/v1/orgs/$ORG/uploads"
+
+# 2. Start a job with the upload id — 202 Accepted
+curl -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+     -d '{"pipeline":"ecommerce_demo","upload_id":"<id from step 1>"}' "$DAAS/api/v1/orgs/$ORG/jobs"
+
+# 3. When the job has succeeded, fetch the report (fmt: html | md | json)
+curl -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/<run_id>/report?fmt=html" -o report.html
+```
+
+A machine key for this flow needs the scopes `uploads:write runs:write runs:read reports:read` — `runs:read` is required even to only upload and run, because without it the caller cannot poll the job or list the run to get the `run_id`, so the report cannot be fetched. Full scope table: [`docs/API.md`](docs/API.md#scopes-and-roles).
+
+### Every week without clicks
+
+In the cockpit, *Settings → Schedule and notifications* (or `PUT /api/v1/orgs/{org_id}/schedule`): a weekly e-mail reminder to export (for example Monday 8:00 Europe/Warsaw, skipped when the file already came in), an automatic run right after the upload and an e-mail with a link to the report when it is ready. A short message can also go to the team chat (Slack, Microsoft Teams or any JSON webhook) with the status, data period, report hash and the link. The messages carry no report content; the data stays in the cockpit. Details: [`docs/API.md`](docs/API.md#schedule-and-notifications).
+
+The *Data health* screen (or `GET /api/v1/orgs/{org_id}/data-health`) tells whether next Monday's report is safe: files, reports and failures week by week, the streak of weeks with a report and what to fix, each item linked to the right screen ([`docs/API.md`](docs/API.md#data-health)).
+
+Selfhost legacy routes (same engine, one organization `default`), each with `X-API-Key: $DAAS_API_KEY`:
+
+```bash
+# 1. Upload a CSV or XLSX (returns the detected mapping and a ready-to-send run_payload)
+curl -s -H "X-API-Key: $DAAS_API_KEY" -F "file=@data/fixtures/client_export_pl.csv" -F "client_name=Demo Shop" localhost:8000/upload
+# {"rows":15,"confidence":1.0,"ready":true,"mapping":{"revenue":"Wartość brutto",...},
+#  "run_payload":{"pipeline":"ecommerce_demo","upload_id":"<32 hex>","client_name":"Demo Shop"}}
+
+# 2. Run (synchronous; the answer carries run_status, data_status and the report paths)
+curl -s -X POST localhost:8000/run -H "X-API-Key: $DAAS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"pipeline":"ecommerce_demo","upload_id":"<upload_id>","client_name":"Demo Shop"}'
+
+# 3. Fetch the report — latest for a pipeline, or a specific run by id (fmt: html | md | json)
+curl -s -H "X-API-Key: $DAAS_API_KEY" "localhost:8000/reports/ecommerce_demo/latest?fmt=html" -o report.html
+curl -s -H "X-API-Key: $DAAS_API_KEY" "localhost:8000/reports/run/<run_id>?fmt=html" -o report.html
+```
+
+`run_status` is `SUCCESS` / `PARTIAL` (0 records) / `FAILED` (still HTTP 200, detail in `error`); `data_status` is `LIVE_DATA` / `MOCK_DATA` / `BLOCKED_MISSING_SECRET`. A pipeline without a file (fixture fallback) runs with just `{"pipeline":"cs2_demo"}`. The column mapper detects separators, encodings (utf-8/cp1250), Polish and English headers and amounts such as `1 299,00 zł`; XLSX goes through the same path after conversion (limits: [`docs/pilot/INPUT_REQUIREMENTS_PL.md`](docs/pilot/INPUT_REQUIREMENTS_PL.md)).
+
+![n8n workflow: webhook → POST /upload → validation → POST /run → response with a link to the report](docs/n8n_client_workflow.png)
+
+---
+
+## Agent access (MCP)
+
+AI assistants (Claude, ChatGPT, Codex, Gemini) can use DaaS Engine as a tool: the API has a built-in MCP server at `POST /mcp` (Streamable HTTP, stateless, JSON). Connect it with an organization API key in `Authorization: Bearer <key>` and ask for the flow in plain language; 13 tools cover upload (CSV text or an XLSX file), runs (optionally for a chosen period), reports, hash verification, artifact status and usage, always inside the key's organization; reports are also available as MCP resources, and ChatGPT or Claude can connect with OAuth 2.1 instead of a key.
+
+```bash
+claude mcp add --transport http daas https://reports.example.com/mcp --header "Authorization: Bearer $KEY"
+```
+
+Report text comes from customer files: for the agent it is data, not instructions. Setup for other clients, limits and security: [`docs/MCP.md`](docs/MCP.md).
 
 ---
 
@@ -30,92 +159,28 @@ DaaS Engine answers that from a raw file, with no schema agreed in advance.
 
 ```
 app/
-├── api/          FastAPI routes
-├── core/         config, Pydantic models
-├── sources/      ingestion: FACEIT, Apify, CSV/XLSX column mapper
+├── api/          FastAPI routes: legacy (selfhost) and /api/v1 (organizations, keys, uploads, jobs, runs, webhooks)
+├── control/      control plane: accounts, keys, jobs, audit, usage (SQLAlchemy + Alembic), tenants, job executor
+├── core/         config, auth, rate limits, upload guard, XLSX import, redaction, observability
+├── sources/      ingestion: FACEIT, Apify, CSV/XLSX column mapper, collector package
 ├── transforms/   metric computation per domain
 ├── storage/      DuckDB client
 ├── pipelines/    orchestration (runner)
 └── reporting/    HTML / Markdown / JSON generators + narrative
+web/              cockpit (Next.js 16, React 19, TypeScript, Tailwind 4)
+deploy/           compose, Caddyfile, env generator, backup, restore, smoke test
+docs/             API, architecture, deployment, security, DPA, pilot materials
 ```
 
 Three reference pipelines ship with the engine:
 
 | Pipeline | Domain | Source |
 |---|---|---|
-| `ecommerce_demo` | orders, revenue, margin | Apify, CSV upload, local CSV/XLSX file, or fixture |
-| `cs2_demo` | esports match performance | FACEIT API or fixture |
-| `uksc_evidence` | compliance evidence: Windows workstation controls mapped to UKSC/NIS2 | JSON package from `tools/uksc-collector.ps1`, or fixture |
+| `ecommerce_demo` | orders, revenue, margin | Apify, CSV/XLSX upload, local CSV/XLSX file, or fixture |
+| `cs2_demo` | esports statistics (match performance) | FACEIT API or fixture |
+| `uksc_evidence` | collector of artifacts + status report: Windows workstation controls mapped to UKSC/NIS2 | JSON package from `tools/uksc-collector.ps1`, or fixture |
 
----
-
-## Quickstart — Docker
-
-```bash
-cp .env.example .env
-docker compose up --build
-```
-
-| Service | URL |
-|---|---|
-| API + Swagger | `http://localhost:8000/docs` |
-| n8n | `http://localhost:5678` |
-
-The DuckDB database and generated reports land in `./runtime/` (host volume).
-
-Import a workflow in n8n via **Workflows → Import from file**:
-`n8n/daas_workflow.json` (scheduled run) or `n8n/daas_client_report.json` (client file → report).
-
-## Quickstart — Windows, no Docker
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e ".[dev]"
-pytest
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-If `Activate.ps1` is blocked: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
-
----
-
-## The "client file → report" flow
-
-```bash
-# 1. Upload — returns the detected column mapping and a ready run_payload
-curl -F "file=@client_export_pl.csv" http://localhost:8000/upload
-# {"rows":15,"confidence":1.0,"ready":true,
-#  "mapping":{"revenue":"Wartość brutto", ...},
-#  "run_payload":{"pipeline":"ecommerce_demo","source_path":"...","client_name":"Sklep Demo"}}
-
-# 2. Run the pipeline with the payload from step 1
-curl -X POST http://localhost:8000/run \
-     -H "Content-Type: application/json" \
-     -d '{"pipeline":"ecommerce_demo","source_path":"...","client_name":"Sklep Demo"}'
-
-# 3. Fetch the report (fmt: html | md | json)
-curl "http://localhost:8000/reports/ecommerce_demo/latest?fmt=html"
-```
-
-![n8n workflow: webhook → POST /upload → validation → POST /run → response with a link to the report](docs/n8n_client_workflow.png)
-
----
-
-## API
-
-| Method | Path | Purpose |
-|---|---|---|
-| `GET` | `/health` | Service status, version, secret availability map |
-| `GET` | `/pipelines` | Available pipelines and their data status |
-| `POST` | `/run` | Execute a pipeline (`pipeline`, `force_mock`, `notify`) |
-| `POST` | `/upload` | Accept a CSV file (XLSX is rejected), return detected column mapping |
-| `GET` | `/runs/latest` | Most recent run, optionally filtered |
-| `GET` | `/runs?limit=20` | Run history |
-| `GET` | `/runs/{run_id}` | A specific run |
-| `GET` | `/reports/{pipeline}/latest` | Latest report — `fmt=html\|md\|json` |
-| `GET` | `/reports/run/{run_id}` | Report for a specific run |
-| `GET` | `/stats` | DuckDB table row counts |
+More: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (control plane, data plane, modes, executor).
 
 ---
 
@@ -133,31 +198,44 @@ Anomaly detectors: `NEGATIVE_PROFIT`, `DEEP_DISCOUNT`, `MARGIN_OUTLIER`, `REVENU
 
 ## Configuration and fallback behaviour
 
-All environment variables are optional. Without any of them the engine runs on fixtures and still produces a full report.
+Every variable is optional except the secrets of the mode you run (`DAAS_API_KEY` in selfhost, `DAAS_SECRET_KEY` in cloud). Without source keys the engine runs on fixtures and still produces a full report. The full list with defaults is in [`docs/DEPLOY.md`](docs/DEPLOY.md) and [`.env.example`](.env.example).
 
 | Variable | Used by | Fallback when absent or failing |
 |---|---|---|
 | `FACEIT_API_KEY`, `FACEIT_PLAYER_NICKNAME` | `cs2_demo` | fixture `cs2_matches.json` → `MOCK_DATA` |
 | `APIFY_TOKEN`, `APIFY_DATASET_ID` | `ecommerce_demo` | `ECOMMERCE_CSV_PATH`, then fixture `ecommerce_orders.csv` → `MOCK_DATA` |
 | `ECOMMERCE_CSV_PATH` | `ecommerce_demo` | fixture |
-| `ANTHROPIC_API_KEY` | report narrative | deterministic template (`narrative_source: TEMPLATE`) |
-| `DISCORD_WEBHOOK_URL` | `/run?notify=true` | notification skipped, run still succeeds |
-| `N8N_BASIC_AUTH_USER` / `_PASSWORD` | n8n | — |
-| `DAAS_PUBLIC_URL` | report links behind a reverse proxy | localhost |
+| `DAAS_LLM_NARRATIVE` + `ANTHROPIC_API_KEY` | report summary (opt-in) | deterministic template (`narrative_source: TEMPLATE`) |
+| `DISCORD_WEBHOOK_URL` | `/run?notify=true` (selfhost) | notification skipped, run still succeeds |
+| `DAAS_PUBLIC_URL` (n8n environment) | report links in `n8n/daas_client_report.json` behind a reverse proxy | `http://localhost:8000` |
 
-Network failures — timeouts, `401`, upstream schema changes — trigger the same fallback path. The pipeline does not crash; the cause is always reported in `source_detail`.
+Network failures (timeouts, `401`, upstream schema changes) trigger the same fallback path. The pipeline does not crash; the cause is always reported in `source_detail`.
+
+---
+
+## Documentation
+
+| Document | Contents |
+|---|---|
+| [`docs/API.md`](docs/API.md) | routes, scopes, errors, `curl` examples, SSE, webhook signature |
+| [`docs/MCP.md`](docs/MCP.md) | MCP server for AI agents: tools, client setup, limits, prompt-injection note |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | control plane, data plane, modes, job executor |
+| [`docs/DEPLOY.md`](docs/DEPLOY.md), [`deploy/README.md`](deploy/README.md) | install on a VPS, update, rollback, backups, all environment variables |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | threat model, controls, known limitations, how to report |
+| [`docs/DPA_v1_PL.md`](docs/DPA_v1_PL.md) | data processing agreement, version 1 (draft awaiting legal review) |
+| [`docs/pilot/`](docs/pilot) | pilot offer, input requirements, onboarding, demo script (Polish) |
+| [`CHANGELOG.md`](CHANGELOG.md), [`VALIDATION.md`](VALIDATION.md) | history, manual validation checklist |
 
 ---
 
 ## Tests
 
 ```bash
-pytest
+pytest                                  # backend, offline
+cd web && npm test && npm run e2e       # cockpit: unit tests; e2e needs the API in cloud mode (see web/README.md)
 ```
 
-`tests/test_pipelines.py` covers pipeline orchestration and metric computation; `tests/test_client_upload.py` covers column detection and the upload → run flow. CI runs on every push (`.github/workflows/ci.yml`).
-
-See [VALIDATION.md](VALIDATION.md) for the manual validation checklist and known limitations.
+CI runs on every push (`.github/workflows/ci.yml`): backend tests on Python 3.11, 3.12 and 3.13, control-plane tests on a real PostgreSQL (row locks, migrations), security scans (gitleaks, semgrep, zizmor, pip-audit), cockpit lint/typecheck/tests/build, Playwright end-to-end tests in Chromium, Firefox and WebKit, a Lighthouse gate and Docker image builds with a container smoke test.
 
 ---
 

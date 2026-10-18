@@ -11,11 +11,13 @@ minimum: identyfikator zamówienia (lub możliwość jego wygenerowania), data, 
 from __future__ import annotations
 
 import csv
+import math
 import re
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 
+import numpy as np
 import pandas as pd
 
 # kanoniczna kolumna -> lista aliasów (po normalizacji: lowercase, bez ogonków, bez spacji/_/-)
@@ -61,18 +63,48 @@ STATUS_MAP: dict[str, str] = {
 #: stringiem robi setki tysiecy wejsc do cache'u modulu `re` — to bylo widoczne
 #: w profilu jako ~0.9 s czystego narzutu.
 _NORM_RE = re.compile(r"[^a-z0-9]")
-_NUM_CLEAN_RE = re.compile(r"[^\d,.\-]")
 
-#: Zwykla liczba dziesietna bez smieci i bez przecinka. Dla takiego napisu
-#: `float()` daje dokladnie ten sam wynik co pelna sciezka czyszczenia, wiec
-#: mozna ominac regex — a to wlasnie regex byl najdrozszy w profilu.
-#: Wzorzec celowo NIE dopuszcza wykladnika ani `+`: dla "1e5" stara sciezka
-#: zwraca 15.0 (usuwa 'e'), a `float()` 100000.0. Rownowaznosc jest wazniejsza
-#: niz dodatkowy zysk.
-_PLAIN_NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
+#: Zwykla liczba dziesietna bez smieci i bez przecinka (grupy: czesc calkowita, ulamek). Dla takiego napisu
+#: `float()` daje dokladnie ten sam wynik co pelna sciezka, wiec mozna ominac reszte regexow — z jednym
+#: wyjatkiem: "1.299" (1-3 cyfry + kropka + dokladnie 3 cyfry) jest niejednoznaczne (kropka tysieczna czy
+#: dziesietna?) i idzie pelna sciezka, zeby dostalo flage.
+_PLAIN_NUM_RE = re.compile(r"-?(\d+)(?:\.(\d+))?")
 
 #: Wartosci tekstowe traktowane jak brak liczby.
 _NUM_NULLS = frozenset({"nan", "none", "null", "-"})
+
+_WS = "[ \t\u00a0\u202f\u2009]"
+#: Dozwolone "ozdobniki" wokol liczby: waluty, jednostki, procent. Cokolwiek innego (np. litery miedzy cyframi)
+#: = napis niejednoznaczny -> None, zamiast cichego sklejenia cyfr w inna liczbe.
+_AFFIX_ITEM = r"(?:z[łl]|pln|eur|usd|gbp|chf|czk|brutto|netto|szt|sztuk|pcs|[$€£¥%])\.?"
+_AFFIX = rf"(?:{_AFFIX_ITEM}{_WS}*)*"
+_AFFIX_ONLY_RE = re.compile(rf"{_WS}*{_AFFIX}", re.IGNORECASE)
+#: Liczba z opcjonalnym znakiem, ozdobnikami po obu stronach. Czesc `num` zaczyna sie cyfra (albo `.`/`,` i cyfra) i
+#: pochlania takze koncowe biale znaki, wiec miedzy nia a `_AFFIX` nie ma drugiego `{_WS}*` (nakladajace sie
+#: kwantyfikatory dawaly czas kwadratowy, ReDoS). `_digits_to_float` obcina brzegowe spacje i waliduje grupowanie.
+_CORE_RE = re.compile(
+    rf"(?P<sign>[-+])?{_WS}*{_AFFIX}(?P<num>[.,]?[0-9][0-9.,\u00a0\u202f\u2009 \t]*){_AFFIX}",
+    re.IGNORECASE,
+)
+#: Komorka dluzsza niz to (po strip) nie jest liczba: `(None, FLAG_INVALID)` przed jakimkolwiek regexem.
+MAX_NUMBER_CELL_CHARS = 64
+_SCI_RE = re.compile(r"[-+]?(?:[0-9]+(?:[.,][0-9]+)?|[.,][0-9]+)[eE][-+]?[0-9]+")
+_THOUSANDS_RE = {
+    sep: re.compile(rf"[0-9]{{1,3}}(?:{re.escape(sep)}[0-9]{{3}})+") for sep in (",", ".", " ")
+}
+
+#: Flagi zwracane przez `parse_number` obok wartosci.
+FLAG_INVALID = "invalid"          # nie da sie odczytac jednoznacznie -> wartosc None
+FLAG_AMBIGUOUS = "ambiguous"      # "1,299" / "1.299": odczytano jako dziesietne (konwencja PL), ale moze to byc tysiac
+FLAG_DOT_THOUSANDS = "dot_thousands"   # "1.234.567": kropki jako separator tysiecy
+
+
+def _split_accounting(s: str) -> tuple[str, str] | None:
+    """`(wnetrze) ogon` -> (wnetrze, ogon) bez regexu (jeden nawias otwierajacy na poczatku, jeden zamykajacy)."""
+    if not s.startswith("(") or s.count("(") != 1 or s.count(")") != 1:
+        return None
+    close = s.index(")")
+    return s[1:close].strip(), s[close + 1:].strip()
 
 
 def _norm(s: str) -> str:
@@ -80,33 +112,124 @@ def _norm(s: str) -> str:
     return _NORM_RE.sub("", s.lower())
 
 
+def _digits_to_float(num: str) -> tuple[float | None, str | None]:
+    """Cyfry z separatorami (`num` bez znaku i walut) -> (wartosc, flaga). Zasada: albo jednoznacznie, albo None."""
+    num = re.sub(f"{_WS}", " ", num).strip(" ")
+    has_dot, has_comma = "." in num, "," in num
+    flag: str | None = None
+    if has_dot and has_comma:
+        dec = "." if num.rfind(".") > num.rfind(",") else ","
+        thou = "," if dec == "." else "."
+        if num.count(dec) != 1:
+            return None, FLAG_INVALID
+        int_part, frac = num.split(dec)
+        if thou in frac or " " in frac:
+            return None, FLAG_INVALID
+    elif has_dot or has_comma:
+        sep = "." if has_dot else ","
+        if num.count(sep) == 1:
+            int_part, frac = num.split(sep)
+            # dokladnie 3 cyfry po separatorze i 1-3 niezerowe cyfry przed: tysiac czy ulamek?
+            if len(frac) == 3 and " " not in int_part and 1 <= len(int_part) <= 3 and int_part[0] != "0":
+                flag = FLAG_AMBIGUOUS
+        else:
+            # powtorzony ten sam separator nie moze byc dziesietnym -> grupy tysiecy
+            int_part, frac = num, ""
+            flag = FLAG_DOT_THOUSANDS if sep == "." else None
+    else:
+        int_part, frac = num, ""
+    if not frac.isascii() or not (frac == "" or frac.isdigit()):
+        return None, FLAG_INVALID
+    # czesc calkowita: same cyfry albo poprawnie pogrupowane tysiace (jeden rodzaj separatora)
+    if int_part and not int_part.isdigit():
+        kinds = {c for c in int_part if not c.isdigit()}
+        if len(kinds) != 1 or not _THOUSANDS_RE[next(iter(kinds))].fullmatch(int_part):
+            return None, FLAG_INVALID
+        int_part = re.sub(r"\D", "", int_part)
+    if not int_part and not frac:
+        return None, FLAG_INVALID
+    return float(f"{int_part or '0'}.{frac or '0'}"), flag
+
+
+def parse_number(v: Any) -> tuple[float | None, str | None]:
+    """Jedyne zrodlo prawdy parsowania liczb: (wartosc, flaga). Wartosc jest skonczona albo None.
+
+    Obsluguje: "1 299,00 zł", "1.299,00", "1,299.00", "(100)" (ksiegowy -> -100), "\u2212100", "1.2E+06", "1e5".
+    Co jest niejednoznaczne (smieci miedzy cyframi, podwojny znak, zle pogrupowane tysiace) -> `None` +
+    `FLAG_INVALID`; nigdy zmiana znaku ani rzedu wielkosci. Brak wartosci ("", "nan", "-") -> `(None, None)`.
+    """
+    if v is None:
+        return None, None
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        if isinstance(v, float) and pd.isna(v):
+            return None, None
+        f = float(v)
+        return (f, None) if math.isfinite(f) else (None, FLAG_INVALID)
+    s = str(v).strip()
+    if not s or s.lower() in _NUM_NULLS:
+        return None, None
+    if len(s) > MAX_NUMBER_CELL_CHARS:
+        return None, FLAG_INVALID  # twardy limit przed regexami: jedna komorka nie moze zajac watku
+    m = _PLAIN_NUM_RE.fullmatch(s)
+    if m and not (m.group(2) and len(m.group(2)) == 3 and len(m.group(1)) <= 3 and m.group(1)[0] != "0"):
+        return float(s), None
+    s = s.replace("\u2212", "-")
+    if _SCI_RE.fullmatch(s):
+        f = float(s.replace(",", "."))
+        return (f, None) if math.isfinite(f) else (None, FLAG_INVALID)
+    negative = False
+    if "(" in s or ")" in s:
+        acc = _split_accounting(s)
+        # nawias tylko jako opakowanie calej liczby (+ ewentualna waluta za nawiasem), bez wlasnego znaku w srodku
+        if acc is None or re.search(r"[-+]", acc[0]) or not _AFFIX_ONLY_RE.fullmatch(acc[1]):
+            return None, FLAG_INVALID
+        negative, s = True, f"{acc[0]} {acc[1]}"
+    core = _CORE_RE.fullmatch(s.strip())
+    if not core:
+        return None, FLAG_INVALID
+    value, flag = _digits_to_float(core.group("num"))
+    if value is None:
+        return None, FLAG_INVALID
+    if core.group("sign") == "-":
+        if negative:
+            return None, FLAG_INVALID
+        negative = True
+    return (-value if negative else value), flag
+
+
 def _to_number(v: Any) -> float | None:
-    """'1 299,00 zł' -> 1299.0 ; '12.5%' -> 12.5 ; '' -> None.
+    """'1 299,00 zł' -> 1299.0 ; '12.5%' -> 12.5 ; '(100)' -> -100.0 ; '' -> None.
 
     Wersja skalarna. Pipeline uzywa `to_number_series()`; ta funkcja zostaje jako
     **referencja poprawnosci** — test rownowaznosci porownuje z nia wynik wektorowy.
     """
-    if v is None or (isinstance(v, float) and pd.isna(v)):
-        return None
-    if isinstance(v, (int, float)):
-        return float(v)
-    s = str(v).strip()
-    if not s or s.lower() in _NUM_NULLS:
-        return None
-    if _PLAIN_NUM_RE.fullmatch(s):
-        return float(s)
-    s = _NUM_CLEAN_RE.sub("", s)
-    if not s:
-        return None
-    if "," in s and "." in s:
-        # "1.299,00" (PL) vs "1,299.00" (EN) — decydujemy po ostatnim separatorze
-        s = s.replace(".", "").replace(",", ".") if s.rfind(",") > s.rfind(".") else s.replace(",", "")
-    elif "," in s:
-        s = s.replace(",", ".")
-    try:
-        return float(s)
-    except ValueError:
-        return None
+    return parse_number(v)[0]
+
+
+def to_number_series_ex(col: pd.Series) -> tuple[pd.Series, dict[str, int], dict[str, str]]:
+    """Jak `to_number_series`, ale zwraca tez liczniki flag (`FLAG_*` -> liczba wierszy) i po jednym przykladzie.
+
+    Napis parsowany jest raz na unikalna wartosc (eksporty maja mnostwo powtorzen kwot), a wynik
+    rozprowadzany przez `Series.map(dict)` w C.
+    """
+    if pd.api.types.is_numeric_dtype(col):
+        num = pd.to_numeric(col, errors="coerce").astype("float64")
+        bad = ~np.isfinite(num) & num.notna()
+        if bad.any():
+            num = num.mask(bad)
+        return num, ({FLAG_INVALID: int(bad.sum())} if bad.any() else {}), {}
+    uniq = pd.unique(col.dropna())
+    parsed = {u: parse_number(u) for u in uniq}
+    values = col.map({u: r[0] for u, r in parsed.items()}).astype("float64")
+    flags: dict[str, int] = {}
+    examples: dict[str, str] = {}
+    flagged = {u: r[1] for u, r in parsed.items() if r[1]}
+    if flagged:
+        counts = col.map(flagged).value_counts()
+        flags = {str(k): int(n) for k, n in counts.items()}
+        for value, flag in flagged.items():
+            examples.setdefault(str(flag), str(value).strip()[:24])
+    return values, flags, examples
 
 
 def to_number_series(col: pd.Series) -> pd.Series:
@@ -116,13 +239,10 @@ def to_number_series(col: pd.Series) -> pd.Series:
     Na tym dtype pandas i tak wchodzi w petle Pythona per komorka
     (`_str_map_str_or_object`), wiec lancuch `.str.replace().str.contains()...`
     zamienia jedno przejscie na kilkanascie. Zmierzone: taki "wektorowy" wariant
-    byl ~1.7x wolniejszy od `.map()`. Szybkosc bierze sie z taniego `_to_number`,
-    nie z akcesorow.
+    byl ~1.7x wolniejszy od `.map()`. Szybkosc bierze sie z taniego `_to_number`
+    i parsowania raz na unikalna wartosc, nie z akcesorow.
     """
-    # Kolumna juz liczbowa — nic do parsowania.
-    if pd.api.types.is_numeric_dtype(col):
-        return pd.to_numeric(col, errors="coerce").astype("float64")
-    return col.map(_to_number).astype("float64")
+    return to_number_series_ex(col)[0]
 
 
 def normalize_status_series(col: pd.Series) -> pd.Series:
@@ -151,25 +271,60 @@ _DATE_FORMATS: tuple[str, ...] = (
 )
 
 
-def parse_dates(col: pd.Series) -> pd.Series:
-    """Parsuje kolumne daty jawnym formatem, z heurystyka wylacznie jako ostatnia deska.
+def parse_dates_ex(col: pd.Series) -> tuple[pd.Series, dict[str, int]]:
+    """Parsuje kolumne daty PER KOMORKA jawnym formatem; heurystyka tylko jako ostatnia deska.
 
-    Najpierw probuje formatow z `_DATE_FORMATS` — pierwszy, ktory pokryje caly
-    niepusty material, wygrywa. Dopiero gdy zaden nie pasuje, wraca do starej
-    sciezki `dayfirst=True`, zeby nie odrzucic pliku, ktory wczesniej przechodzil.
+    Kazdy niepusty wiersz dostaje pierwszy format z `_DATE_FORMATS`, ktory go pokrywa.
+    Dzieki temu kolumna z MIESZANYMI formatami (np. ISO + natywna data Excela + `DD.MM.YYYY`)
+    nie jest czytana jedna kolejnoscia dzien/miesiac dla calosci — to dawniej cicho
+    przestawialo dzien z miesiacem w wierszach o dniu <= 12 (finding B1). Jawny format jest
+    jednoznaczny, wiec dla wiersza nim sparsowanego zamiana d/m nie zachodzi.
+
+    Dopiero wiersze, ktorych zaden jawny format nie pokryl, przechodza stara sciezka
+    `dayfirst=True, format="mixed"` — zeby nie odrzucic pliku, ktory wczesniej przechodzil
+    (tam heurystyka pandas nadal moze przestawic d/m, dlatego liczymy to osobno).
+
+    Zwraca `(serie dat, info)`, gdzie `info` to liczniki:
+      - `"formats"`: ile roznych jawnych formatow faktycznie cos pokrylo (>1 == mieszane),
+      - `"fallback"`: ile wierszy odczytala dopiero heurystyka (tam grozi zamiana d/m).
+    `map_dataframe` zamienia te liczniki na ostrzezenie dla klienta.
     """
     s = col.astype("string").str.strip()
     non_empty = s.notna() & s.ne("")
     target = int(non_empty.sum())
 
-    if target:
-        for fmt in _DATE_FORMATS:
-            parsed = pd.to_datetime(s, errors="coerce", format=fmt)
-            if int(parsed.notna().sum()) == target:
-                return parsed
+    result = pd.Series(pd.NaT, index=s.index, dtype="datetime64[ns]")
+    info = {"formats": 0, "fallback": 0}
+    if not target:
+        return result, info
 
-    # Mieszane albo nietypowe formaty — heurystyka pandas, jak dotychczas.
-    return pd.to_datetime(s, errors="coerce", dayfirst=True, format="mixed")
+    # Material jeszcze nieprzypisany zadnemu formatowi. Pojedynczy format = jedna iteracja
+    # (pokrywa wszystko, `remaining` pustieje, petla konczy sie) — ten sam koszt co dotychczas.
+    remaining = non_empty.copy()
+    for fmt in _DATE_FORMATS:
+        if not remaining.any():
+            break
+        parsed = pd.to_datetime(s, errors="coerce", format=fmt)
+        hit = parsed.notna() & remaining
+        if hit.any():
+            result = result.mask(hit, parsed)
+            remaining &= ~hit
+            info["formats"] += 1
+
+    # Wiersze, ktorych zaden jawny format nie objal — stara sciezka heurystyczna (jak dotychczas).
+    if remaining.any():
+        fb = pd.to_datetime(s.where(remaining), errors="coerce", dayfirst=True, format="mixed")
+        hit = fb.notna()
+        if hit.any():
+            result = result.mask(hit, fb)
+            info["fallback"] = int(hit.sum())
+
+    return result, info
+
+
+def parse_dates(col: pd.Series) -> pd.Series:
+    """Cienka nakladka na `parse_dates_ex` zwracajaca sama serie (zgodnosc wsteczna)."""
+    return parse_dates_ex(col)[0]
 
 
 @dataclass
@@ -234,7 +389,22 @@ def map_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, MappingReport]:
     # --- liczby ---
     for col in ("revenue", "cost", "profit", "discount", "quantity"):
         if col in out.columns:
-            out[col] = to_number_series(out[col])
+            out[col], flags, examples = to_number_series_ex(out[col])
+            where = f"w kolumnie „{mapping[col]}” ({col})"
+            if flags.get(FLAG_INVALID):
+                report.warnings.append(
+                    f"{flags[FLAG_INVALID]} wartości {where} nie da się jednoznacznie "
+                    "odczytać jako liczby — potraktowano jako brak wartości.")
+            if flags.get(FLAG_AMBIGUOUS):
+                report.warnings.append(
+                    f"{flags[FLAG_AMBIGUOUS]} wartości {where} ma format niejednoznaczny "
+                    f"(np. „{examples[FLAG_AMBIGUOUS]}”: separator tysięcy czy ułamka?) — odczytano jako ułamek "
+                    "dziesiętny; jeśli to tysiące, wyeksportuj plik z kwotami bez separatora tysięcy.")
+            if flags.get(FLAG_DOT_THOUSANDS):
+                report.warnings.append(
+                    f"{flags[FLAG_DOT_THOUSANDS]} wartości {where} ma kropkę jako separator tysięcy "
+                    f"(np. „{examples[FLAG_DOT_THOUSANDS]}”) — format niejednoznaczny w eksportach angielskich; "
+                    "odczytano jako liczbę całkowitą z grupami tysięcy.")
 
     # --- dopełnienia ---
     if "order_id" not in out.columns:
@@ -284,7 +454,15 @@ def map_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, MappingReport]:
     out["status"] = normalize_status_series(out["status"])
 
     # --- daty ---
-    out["date"] = parse_dates(out["date"]).dt.date
+    parsed_dates, date_info = parse_dates_ex(out["date"])
+    out["date"] = parsed_dates.dt.date
+    # B1: mieszane formaty w jednej kolumnie (albo odczyt heurystyczny) = ryzyko cichej
+    # zamiany dnia z miesiacem. Ostrzegamy zawsze, gdy kolumna nie jest jednym formatem —
+    # nawet jesli odczyt per-komorka trafil poprawnie — zeby klient poprawil eksport.
+    if date_info["formats"] > 1 or date_info["fallback"]:
+        report.warnings.append(
+            "Kolumna daty zawiera mieszane formaty — sprawdź, czy dzień i miesiąc nie "
+            "zostały zamienione; użyj jednego formatu daty w całej kolumnie.")
     bad_dates = int(out["date"].isna().sum())
     if bad_dates:
         report.warnings.append(f"{bad_dates} wierszy z nieczytelną datą — pominięte.")
@@ -294,7 +472,11 @@ def map_dataframe(df: pd.DataFrame) -> tuple[pd.DataFrame, MappingReport]:
     if bad_rev:
         report.warnings.append(f"{bad_rev} wierszy bez przychodu — pominięte.")
         out = out[out["revenue"].notna()]
-    out = out[out["revenue"] >= 0]
+    # Ujemny przychod = korekta/zwrot (np. faktura korygujaca). Zostaje w rekordach — inaczej suma
+    # przychodu zawyzalaby wynik bez sladu — i jest zglaszany jawnie.
+    neg_rev = int((out["revenue"] < 0).sum())
+    if neg_rev:
+        report.warnings.append(f"{neg_rev} wierszy z ujemnym przychodem (korekty/zwroty) — uwzględnione")
 
     dup = int(out["order_id"].duplicated().sum())
     if dup:

@@ -1,0 +1,14 @@
+# Opcjonalna nakladka: wlacza streszczenie raportu generowane przez model (Anthropic).
+# Domyslnie WYLACZONE: compose.yml nie przekazuje do kontenera ANTHROPIC_API_KEY i ustawia DAAS_LLM_NARRATIVE=false.
+#
+# Wlaczenie (dane do zewnetrznego dostawcy wychodza dopiero wtedy; do dostawcy trafiaja wylacznie policzone metryki
+# i nazwy kategorii z CSV, szczegoly: docs/SECURITY.md):
+#   1. w deploy/.env ustaw ANTHROPIC_API_KEY=... (opcjonalnie NARRATIVE_MODEL=...) oraz COMPOSE_FILE=compose.yml:compose.llm.yml
+#   2. docker compose up -d
+# Wylaczenie: usun COMPOSE_FILE z .env i `docker compose up -d`.
+services:
+  api:
+    environment:
+      DAAS_LLM_NARRATIVE: "true"
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY must be set to use compose.llm.yml}
+      NARRATIVE_MODEL:

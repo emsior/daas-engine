@@ -7,8 +7,8 @@ Kontekst projektu (stack, stan, pułapki środowiska) jest w `CLAUDE.md`.
 
 1. **Słownictwo.** Projekt dotyczy analityki danych. Tematyka CS2 występuje wyłącznie
    jako *esports statistics*. Słownictwo z domeny hazardowej jest zakazane
-   w kodzie, komentarzach, commitach, README i dokumentacji (powód prawny:
-   art. 110a k.k.s.). Pełna lista zakazanych fraz jest w agencie `opsec-guard`,
+   w kodzie, komentarzach, commitach, README i dokumentacji (ze względów prawnych).
+   Pełna lista zakazanych fraz jest w agencie `opsec-guard`,
    trzymanym lokalnie poza repozytorium.
 2. **Zero danych osobowych właściciela.** Żadnego nazwiska, żadnego prywatnego adresu
    e-mail w plikach, commitach ani metadanych. Marka: **PPC / prochpc.pl**.
@@ -22,9 +22,12 @@ Kontekst projektu (stack, stan, pułapki środowiska) jest w `CLAUDE.md`.
    nazwisk, e-maili, NIP-ów, telefonów.
 6. Żadnych lokalnych ścieżek dyskowych (`C:\Users\...`, `D:\...`) w plikach repo.
 7. Kwoty w formacie polskim (`7 255,95`) — nie zamieniać na format US.
-8. **CODE FREEZE od v1.0.0 (28.09.2026).** Zmiany w `app/` i `tests/` tylko wtedy, gdy
-   płacący klient zgłasza konkretne wymaganie albo trzech różnych klientów zadaje
-   to samo pytanie. Dokumentacja nie podlega zamrożeniu.
+8. **CODE FREEZE od v1.0.0 (28.09.2026) — uchylony poleceniem właściciela 09.10.2026.** Prace nad wersją 2.0.0
+   idą na gałęzi `claude/saas-2026-10`; zmiany w `app/`, `tests/`, `web/`, `deploy/` i `alembic/` są dozwolone w zakresie
+   zadania. Pozostałe zasady z tej listy obowiązują bez zmian. Dokumentacja nigdy nie podlegała zamrożeniu.
+9. **`web/` bez zewnętrznych CDN.** Kokpit nie ładuje fontów, skryptów, stylów ani obrazów z cudzych domen: fonty
+   systemowe, zasoby z własnego originu, CSP z nonce bez `unsafe-inline`. Nowe zależności npm tylko jako
+   devDependencies albo po uzgodnieniu, zawsze z zaktualizowanym `package-lock.json`.
 
 ## Git
 
@@ -45,8 +48,8 @@ git config user.name  "PPC"
 1. Najpierw plan: 3 punkty i lista plików do zmiany. Czekaj na „ok".
 2. Jedna rzecz na raz. Zmiany poza zakresem zadania to błąd, nie bonus.
 3. Nie instaluj pakietów i nie dodawaj technologii bez pytania.
-4. Po zmianie w kodzie uruchom `pytest -p no:cacheprovider` i pokaż wynik.
-   Wynik poniżej stanu bazowego z `CLAUDE.md` oznacza regresję.
+4. Po zmianie w kodzie uruchom `pytest -p no:cacheprovider` i pokaż wynik; po zmianie w `web/` dodatkowo
+   `npm run typecheck && npm run lint && npm test` w katalogu `web/`. Wynik poniżej stanu bazowego z `CLAUDE.md` oznacza regresję.
 5. Nie pisz README od zera — zaczyna się od tego, co dostaje klient, i to jest celowe.
 
 ## Agenci i komendy
@@ -75,3 +78,30 @@ Blokada techniczna to hook PreToolUse deny (~/.gemini/config/hooks.json +
 hooks/deny-push.ps1), nie ten zapis. Jeśli hook jest wyłączony (enabled: false)
 albo nie wiesz, czy działa — nie wykonuj takich operacji wcale, tylko wypisz
 komendę do ręcznego uruchomienia.
+
+## Zasady PPC dla Codexa (15.10.2026, rejestr STACK v3)
+
+Codex CLI jest tu **wykonawcą domyślnym** (`codex exec` ze spec-pliku); zmiany Codexa recenzuje Claude, zmiany Claude'a recenzuje Codex (reviewer ≠ autor). Pełne reguły: globalny `~/.codex/AGENTS.md` v3 oraz `STACK.md` w warsztacie. Skrót obowiązujący w tym repo bez wyjątków:
+
+1. **Zero nazwiska właściciela** w plikach, commitach, logach i promptach. Marka Proch PC / PPC, jedyny kontakt `prochpc@gmail.com`; stary adres z konta konektorów nie istnieje w treściach.
+2. **Słownictwo hazardowe zakazane** (art. 110a k.k.s.) w kodzie, commitach, docs i nazwach plików. Publicznie: „aplikacja analityczna z modelem EV” / *esports statistics*. Wzorce sprawdza skill `ppc-wyciek`; lista zostaje poza repozytorium.
+3. **Git tylko po ścieżkach:** `git add <plik>`, nigdy `-A` ani `.`; nigdy `--no-verify`; nie zmieniaj `core.hooksPath`; nie przepisuj historii. Tożsamość: `user.name = PPC`, `user.email = 267137654+emsior@users.noreply.github.com`. Commit tylko gdy spec na to pozwala, na gałęzi roboczej, komunikat bez nazwiska i zakazanych fraz.
+4. **Zero pusha, publikacji i zmian `main`** — bez wyjątków; push robi właściciel osobnym krokiem.
+5. **Zero `.env`, `.secrets/`, kluczy, tokenów i danych klienta** — nie czytaj, nie cytuj, nie commituj. Dane testowe wyłącznie syntetyczne.
+6. **Sandbox:** `workspace-write`, sieć wyłączona (`.codex/config.toml`). Instalacje (`pip`/`npm`/`composer`), Docker, sieć i kasowanie tylko gdy spec jawnie na to pozwala. Poza katalogiem repo nie piszesz.
+7. **Testy przed oddaniem:** komendy z `CLAUDE.md` tego repo; wynik liczbą z datą; wynik poniżej bazowego = regresja. Nie możesz uruchomić → 🚫 + powód, nigdy „zielone” bez dowodu.
+8. **Wzorzec zadania:** ŹRÓDŁO (co czytasz) · OPERACJA (co wolno zmienić) · ZAKAZ (czego nie robisz) · DOWÓD (co pokazujesz: test, diff, plik). Brak pola → pytasz w bloku, nie zgadujesz. Zmiany poza zakresem to błąd, nie bonus; znalezione obok = obserwacja, nie poprawka.
+9. **Wynik = blok dla Claude**, dopisany na końcu `DO_CLAUDE.md` w kanale `.handoff` warsztatu (append-only, UTF-8, nic nie kasuj):
+   ```
+   === DO CLAUDE === <data> — <ID-BLOKU>
+   TASK: … / SCOPE: … / ROLE: wykonawca|reviewer / ROLE_VERSION: 3 / ASSIGNEE: codex. Autor zmian: …
+   RESULT: DONE|ACCEPTED|CHANGES|BLOCKED — …
+   FINDINGS: … (plik:linie, priorytet P1/P2/P3)
+   EVIDENCE: … (komendy → wyniki z datą i godziną)
+   CONFIDENCE: …
+   ACTION_REQUIRED: …
+   STATE_CHANGE: … (pliki, commity; zero pushy)
+   RELEASED_BY: codex. ACCEPTED_BY: —
+   === KONIEC ===
+   ```
+10. Ćwiczenia właściciela (znaczniki `TODO` z jego imieniem) zostawiasz właścicielowi. Pliki z polskimi znakami w UTF-8. W repozytorium z remote — zero lokalnych ścieżek dysku.

@@ -1,0 +1,5623 @@
+{
+  "components": {
+    "schemas": {
+      "ApiKeyCreate": {
+        "properties": {
+          "expires_in_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires In Days"
+          },
+          "name": {
+            "examples": [
+              "n8n produkcja"
+            ],
+            "maxLength": 120,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "examples": [
+              [
+                "uploads:write",
+                "runs:write",
+                "reports:read"
+              ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "scopes"
+        ],
+        "title": "ApiKeyCreate",
+        "type": "object"
+      },
+      "ApiKeyCreated": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "pelny klucz; pokazany TYLKO w tej odpowiedzi",
+            "title": "Key",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "description": "widoczny prefiks klucza (daas_<8 znakow>)",
+            "examples": [
+              "daas_1a2b3c4d"
+            ],
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "scopes",
+          "created_at",
+          "key"
+        ],
+        "title": "ApiKeyCreated",
+        "type": "object"
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "prefix": {
+            "description": "widoczny prefiks klucza (daas_<8 znakow>)",
+            "examples": [
+              "daas_1a2b3c4d"
+            ],
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "scopes",
+          "created_at"
+        ],
+        "title": "ApiKeyOut",
+        "type": "object"
+      },
+      "AuditOut": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "actor_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor Id"
+          },
+          "actor_type": {
+            "title": "Actor Type",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "meta": {
+            "additionalProperties": true,
+            "title": "Meta",
+            "type": "object"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          },
+          "ts": {
+            "format": "date-time",
+            "title": "Ts",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "ts",
+          "actor_type",
+          "action",
+          "meta"
+        ],
+        "title": "AuditOut",
+        "type": "object"
+      },
+      "AuditPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AuditOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AuditPage",
+        "type": "object"
+      },
+      "Body_create_upload_api_v1_orgs__org_id__uploads_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "sheet": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sheet"
+          }
+        },
+        "required": [
+          "file"
+        ],
+        "title": "Body_create_upload_api_v1_orgs__org_id__uploads_post",
+        "type": "object"
+      },
+      "DataHealthOut": {
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "issues": {
+            "description": "most severe first: `error`, `warning`, `info`",
+            "items": {
+              "$ref": "#/components/schemas/HealthIssue"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DataHealthSummary"
+          },
+          "timezone": {
+            "description": "IANA zone of the schedule; weeks start on Monday 00:00 there",
+            "title": "Timezone",
+            "type": "string"
+          },
+          "weeks": {
+            "description": "oldest first; the last one is the current, partial week",
+            "items": {
+              "$ref": "#/components/schemas/WeekHealth"
+            },
+            "title": "Weeks",
+            "type": "array"
+          }
+        },
+        "required": [
+          "generated_at",
+          "timezone",
+          "weeks",
+          "summary",
+          "issues"
+        ],
+        "title": "DataHealthOut",
+        "type": "object"
+      },
+      "DataHealthSummary": {
+        "properties": {
+          "auto_run_on_upload": {
+            "description": "a job starts right after each upload (schedule)",
+            "title": "Auto Run On Upload",
+            "type": "boolean"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`error_code` of that failed job",
+            "title": "Last Error Code"
+          },
+          "last_failure_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest job that finished `failed`",
+            "title": "Last Failure At"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest job that finished `succeeded`",
+            "title": "Last Success At"
+          },
+          "last_upload_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest upload still on record; `null` = none",
+            "title": "Last Upload At"
+          },
+          "next_reminder_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "next reminder (UTC); `null` = reminder off",
+            "title": "Next Reminder At"
+          },
+          "notify_on_finish": {
+            "description": "members get an e-mail when a run finishes (schedule)",
+            "title": "Notify On Finish",
+            "type": "boolean"
+          },
+          "plan": {
+            "description": "plan of the organization",
+            "title": "Plan",
+            "type": "string"
+          },
+          "reminder_enabled": {
+            "description": "weekly export reminder (schedule)",
+            "title": "Reminder Enabled",
+            "type": "boolean"
+          },
+          "retention_days": {
+            "description": "how long uploaded files are kept",
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "runs_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "monthly run limit of the plan; `null` = unlimited",
+            "title": "Runs Limit"
+          },
+          "runs_used": {
+            "description": "runs counted this calendar month (UTC)",
+            "minimum": 0.0,
+            "title": "Runs Used",
+            "type": "integer"
+          },
+          "streak_weeks": {
+            "description": "finished weeks in a row with at least one report, counted back from last week (the current week is not counted; at most 25)",
+            "minimum": 0.0,
+            "title": "Streak Weeks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "last_upload_at",
+          "last_success_at",
+          "last_failure_at",
+          "last_error_code",
+          "streak_weeks",
+          "reminder_enabled",
+          "next_reminder_at",
+          "auto_run_on_upload",
+          "notify_on_finish",
+          "plan",
+          "runs_used",
+          "runs_limit",
+          "retention_days"
+        ],
+        "title": "DataHealthSummary",
+        "type": "object"
+      },
+      "EvidenceCheck": {
+        "properties": {
+          "artifact": {
+            "additionalProperties": true,
+            "title": "Artifact",
+            "type": "object"
+          },
+          "control_id": {
+            "title": "Control Id",
+            "type": "string"
+          },
+          "requirement": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requirement"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "control_id",
+          "artifact"
+        ],
+        "title": "EvidenceCheck",
+        "type": "object"
+      },
+      "EvidenceOut": {
+        "properties": {
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/EvidenceCheck"
+            },
+            "title": "Checks",
+            "type": "array"
+          },
+          "collected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Collected At"
+          },
+          "host": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Host"
+          },
+          "integrity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Integrity"
+          },
+          "package_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Package Sha256"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "run_status": {
+            "description": "status runu kolektora; `PARTIAL` = niepelna paczka (czesc kontroli bez artefaktu)",
+            "enum": [
+              "SUCCESS",
+              "PARTIAL",
+              "FAILED"
+            ],
+            "title": "Run Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "run_status",
+          "checks"
+        ],
+        "title": "EvidenceOut",
+        "type": "object"
+      },
+      "HealthIssue": {
+        "properties": {
+          "code": {
+            "enum": [
+              "last_run_failed",
+              "plan_limit_reached",
+              "stale_upload",
+              "plan_limit_near",
+              "partial_reports",
+              "no_uploads_yet",
+              "reminder_off",
+              "auto_run_off"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "link": {
+            "description": "cockpit path that explains or fixes the issue, e.g. `/upload`",
+            "title": "Link",
+            "type": "string"
+          },
+          "severity": {
+            "enum": [
+              "error",
+              "warning",
+              "info"
+            ],
+            "title": "Severity",
+            "type": "string"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "when the condition started, if known",
+            "title": "Since"
+          }
+        },
+        "required": [
+          "code",
+          "severity",
+          "since",
+          "link"
+        ],
+        "title": "HealthIssue",
+        "type": "object"
+      },
+      "HealthResponse": {
+        "description": "Publiczny, zredagowany status: bez sciezek, bez konfiguracji, bez mapy sekretow.",
+        "properties": {
+          "app": {
+            "title": "App",
+            "type": "string"
+          },
+          "maintenance": {
+            "default": false,
+            "title": "Maintenance",
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "selfhost",
+            "enum": [
+              "selfhost",
+              "cloud"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "status": {
+            "const": "ok",
+            "default": "ok",
+            "title": "Status",
+            "type": "string"
+          },
+          "timestamp": {
+            "format": "date-time",
+            "title": "Timestamp",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "app",
+          "version",
+          "timestamp"
+        ],
+        "title": "HealthResponse",
+        "type": "object"
+      },
+      "InvitationAccepted": {
+        "properties": {
+          "status": {
+            "const": "accepted",
+            "default": "accepted",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "title": "InvitationAccepted",
+        "type": "object"
+      },
+      "InvitationCreate": {
+        "properties": {
+          "email": {
+            "examples": [
+              "ola@example.test"
+            ],
+            "maxLength": 254,
+            "title": "Email",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "enum": [
+              "owner",
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "InvitationCreate",
+        "type": "object"
+      },
+      "InvitationOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "role",
+          "created_at",
+          "expires_at"
+        ],
+        "title": "InvitationOut",
+        "type": "object"
+      },
+      "JobCreate": {
+        "properties": {
+          "client_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Name"
+          },
+          "force_mock": {
+            "default": false,
+            "title": "Force Mock",
+            "type": "boolean"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "first day of the requested report period (ISO `YYYY-MM-DD`, inclusive; not before 2000-01-01); only rows dated on or after it are counted. `ecommerce_demo` only; `null` = no lower bound",
+            "examples": [
+              "2026-08-01"
+            ],
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "last day of the requested report period (ISO `YYYY-MM-DD`, inclusive); not before `period_from` and at most 400 days after it counting both ends. `ecommerce_demo` only; `null` = no upper bound",
+            "examples": [
+              "2026-08-07"
+            ],
+            "title": "Period To"
+          },
+          "pipeline": {
+            "enum": [
+              "cs2_demo",
+              "ecommerce_demo",
+              "uksc_evidence"
+            ],
+            "examples": [
+              "ecommerce_demo"
+            ],
+            "title": "Pipeline",
+            "type": "string"
+          },
+          "upload_id": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{32}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upload Id"
+          }
+        },
+        "required": [
+          "pipeline"
+        ],
+        "title": "JobCreate",
+        "type": "object"
+      },
+      "JobOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "requested first day of the report period (`JobCreate.period_from`); `null` = no lower bound",
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "requested last day of the report period (`JobCreate.period_to`); `null` = no upper bound",
+            "title": "Period To"
+          },
+          "pipeline": {
+            "title": "Pipeline",
+            "type": "string"
+          },
+          "progress": {
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress",
+            "type": "integer"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "upload_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upload Id"
+          }
+        },
+        "required": [
+          "id",
+          "pipeline",
+          "status",
+          "progress",
+          "created_at"
+        ],
+        "title": "JobOut",
+        "type": "object"
+      },
+      "JobPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/JobOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "przekaz jako `cursor`, aby pobrac kolejna strone",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "JobPage",
+        "type": "object"
+      },
+      "MagicLinkAccepted": {
+        "properties": {
+          "expires_in_minutes": {
+            "examples": [
+              15
+            ],
+            "title": "Expires In Minutes",
+            "type": "integer"
+          },
+          "status": {
+            "const": "sent",
+            "default": "sent",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_in_minutes"
+        ],
+        "title": "MagicLinkAccepted",
+        "type": "object"
+      },
+      "MagicLinkConfirm": {
+        "properties": {
+          "confirm": {
+            "default": false,
+            "description": "jawne potwierdzenie logowania w tej przegladarce",
+            "title": "Confirm",
+            "type": "boolean"
+          },
+          "token": {
+            "examples": [
+              "Zm9v...token-z-maila"
+            ],
+            "maxLength": 200,
+            "minLength": 20,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "MagicLinkConfirm",
+        "type": "object"
+      },
+      "MagicLinkRequest": {
+        "properties": {
+          "email": {
+            "examples": [
+              "jan@example.test"
+            ],
+            "maxLength": 254,
+            "title": "Email",
+            "type": "string"
+          },
+          "locale": {
+            "default": "pl",
+            "enum": [
+              "pl",
+              "en"
+            ],
+            "title": "Locale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "MagicLinkRequest",
+        "type": "object"
+      },
+      "MeOut": {
+        "properties": {
+          "orgs": {
+            "items": {
+              "$ref": "#/components/schemas/MembershipOut"
+            },
+            "title": "Orgs",
+            "type": "array"
+          },
+          "principal": {
+            "$ref": "#/components/schemas/PrincipalOut"
+          },
+          "user": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/UserOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "principal",
+          "orgs"
+        ],
+        "title": "MeOut",
+        "type": "object"
+      },
+      "MemberOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id",
+          "email",
+          "role",
+          "created_at"
+        ],
+        "title": "MemberOut",
+        "type": "object"
+      },
+      "MemberRolePatch": {
+        "properties": {
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "role"
+        ],
+        "title": "MemberRolePatch",
+        "type": "object"
+      },
+      "MembershipOut": {
+        "properties": {
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "org_name": {
+            "title": "Org Name",
+            "type": "string"
+          },
+          "org_slug": {
+            "title": "Org Slug",
+            "type": "string"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "owner",
+                  "admin",
+                  "member"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "rola uzytkownika; brak dla klucza API",
+            "title": "Role"
+          }
+        },
+        "required": [
+          "org_id",
+          "org_name",
+          "org_slug"
+        ],
+        "title": "MembershipOut",
+        "type": "object"
+      },
+      "OAuthDecisionIn": {
+        "properties": {
+          "approve": {
+            "title": "Approve",
+            "type": "boolean"
+          },
+          "org_id": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "organization the connection acts in; required to approve",
+            "title": "Org Id"
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "maxLength": 40,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 20,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "scopes to grant; default: every grantable requested scope. Scopes that were not requested or that the role cannot grant are ignored",
+            "title": "Scopes"
+          }
+        },
+        "required": [
+          "approve"
+        ],
+        "title": "OAuthDecisionIn",
+        "type": "object"
+      },
+      "OAuthDecisionOut": {
+        "properties": {
+          "redirect_to": {
+            "description": "send the browser here: the application's redirect URI with `code` and `state`, or `error=access_denied`",
+            "title": "Redirect To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "redirect_to"
+        ],
+        "title": "OAuthDecisionOut",
+        "type": "object"
+      },
+      "OAuthGrantOut": {
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Name"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "role": {
+            "anyOf": [
+              {
+                "enum": [
+                  "owner",
+                  "admin",
+                  "member"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "that user's current role; `null` = no longer a member",
+            "title": "Role"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "token_id": {
+            "description": "id to disconnect with `DELETE .../oauth/grants/{token_id}`; it changes when the application refreshes its tokens",
+            "title": "Token Id",
+            "type": "string"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "user who approved the connection",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "token_id",
+          "client_id",
+          "scopes",
+          "created_at"
+        ],
+        "title": "OAuthGrantOut",
+        "type": "object"
+      },
+      "OAuthOrgOption": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "owner",
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "scopes_grantable": {
+            "description": "requested scopes this role can grant; others are shown disabled",
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes Grantable",
+            "type": "array"
+          }
+        },
+        "required": [
+          "org_id",
+          "name",
+          "role",
+          "scopes_grantable"
+        ],
+        "title": "OAuthOrgOption",
+        "type": "object"
+      },
+      "OAuthRequestOut": {
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "name the application registered (self-declared)",
+            "title": "Client Name"
+          },
+          "expires_at": {
+            "description": "the decision must be made before this moment (UTC)",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "organizations": {
+            "description": "organizations of the signed-in user, oldest first",
+            "items": {
+              "$ref": "#/components/schemas/OAuthOrgOption"
+            },
+            "title": "Organizations",
+            "type": "array"
+          },
+          "redirect_host": {
+            "description": "host the browser returns to after the decision",
+            "title": "Redirect Host",
+            "type": "string"
+          },
+          "request_id": {
+            "title": "Request Id",
+            "type": "string"
+          },
+          "scopes_requested": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes Requested",
+            "type": "array"
+          }
+        },
+        "required": [
+          "request_id",
+          "client_id",
+          "scopes_requested",
+          "redirect_host",
+          "expires_at",
+          "organizations"
+        ],
+        "title": "OAuthRequestOut",
+        "type": "object"
+      },
+      "OrgCreate": {
+        "properties": {
+          "dpa_accepted": {
+            "description": "musi byc true: akceptacja umowy powierzenia (DPA)",
+            "title": "Dpa Accepted",
+            "type": "boolean"
+          },
+          "dpa_version": {
+            "const": "v1",
+            "default": "v1",
+            "title": "Dpa Version",
+            "type": "string"
+          },
+          "locale": {
+            "default": "pl",
+            "enum": [
+              "pl",
+              "en"
+            ],
+            "title": "Locale",
+            "type": "string"
+          },
+          "name": {
+            "examples": [
+              "Sklep Przykładowy sp. z o.o."
+            ],
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "dpa_accepted"
+        ],
+        "title": "OrgCreate",
+        "type": "object"
+      },
+      "OrgOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dpa_accepted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dpa Accepted At"
+          },
+          "dpa_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dpa Version"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "llm_narrative": {
+            "title": "Llm Narrative",
+            "type": "boolean"
+          },
+          "locale": {
+            "enum": [
+              "pl",
+              "en"
+            ],
+            "title": "Locale",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "plan": {
+            "enum": [
+              "free",
+              "pro",
+              "selfhost"
+            ],
+            "title": "Plan",
+            "type": "string"
+          },
+          "retention_days": {
+            "title": "Retention Days",
+            "type": "integer"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "slug",
+          "name",
+          "plan",
+          "locale",
+          "retention_days",
+          "llm_narrative",
+          "created_at"
+        ],
+        "title": "OrgOut",
+        "type": "object"
+      },
+      "OrgPatch": {
+        "properties": {
+          "llm_narrative": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "opt-in: streszczenie raportu przez zewnetrzny LLM",
+            "title": "Llm Narrative"
+          },
+          "locale": {
+            "anyOf": [
+              {
+                "enum": [
+                  "pl",
+                  "en"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locale"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "plan": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "tylko do odczytu w tym API: plan ustawia operator (`python -m app.cli set-plan`). Podanie wartosci konczy sie `422 validation_error` — plan nie jest zmieniany po cichu.",
+            "title": "Plan"
+          },
+          "retention_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Days"
+          }
+        },
+        "title": "OrgPatch",
+        "type": "object"
+      },
+      "PlanLimitsOut": {
+        "properties": {
+          "runs_per_month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` = bez limitu",
+            "title": "Runs Per Month"
+          },
+          "upload_bytes_per_month": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` = bez limitu",
+            "title": "Upload Bytes Per Month"
+          }
+        },
+        "title": "PlanLimitsOut",
+        "type": "object"
+      },
+      "PrincipalOut": {
+        "properties": {
+          "org_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dla kluczy API: organizacja klucza",
+            "title": "Org Id"
+          },
+          "scopes": {
+            "description": "dla kluczy API; dla uzytkownika wynikaja z roli",
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "type": {
+            "enum": [
+              "user",
+              "api_key"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "title": "PrincipalOut",
+        "type": "object"
+      },
+      "Problem": {
+        "additionalProperties": true,
+        "description": "Shared RFC 9457 response contract, including optional error extensions.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "title": "Detail",
+            "type": "string"
+          },
+          "errors": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ValidationIssue"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Errors"
+          },
+          "instance": {
+            "title": "Instance",
+            "type": "string"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id"
+          },
+          "status": {
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "instance",
+          "request_id",
+          "code"
+        ],
+        "title": "Problem",
+        "type": "object"
+      },
+      "ReadyResponse": {
+        "properties": {
+          "status": {
+            "enum": [
+              "ready",
+              "not_ready"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "ReadyResponse",
+        "type": "object"
+      },
+      "RunDetail": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "data_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Status"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "execution_time_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Time Sec"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "links": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Links",
+            "type": "object"
+          },
+          "metrics": {
+            "additionalProperties": true,
+            "title": "Metrics",
+            "type": "object"
+          },
+          "narrative_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Narrative Source"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "pierwszy dzien danych runu (ISO); `null` dla cs2_demo",
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ostatni dzien danych runu (ISO); `null` dla cs2_demo",
+            "title": "Period To"
+          },
+          "pipeline": {
+            "title": "Pipeline",
+            "type": "string"
+          },
+          "records_processed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Records Processed"
+          },
+          "report_sha256": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Report Sha256",
+            "type": "object"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "source_detail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Detail"
+          },
+          "status": {
+            "enum": [
+              "SUCCESS",
+              "PARTIAL",
+              "FAILED"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "pipeline",
+          "status",
+          "created_at",
+          "report_sha256"
+        ],
+        "title": "RunDetail",
+        "type": "object"
+      },
+      "RunOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job Id"
+          },
+          "links": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Links",
+            "type": "object"
+          },
+          "period_from": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "pierwszy dzien danych runu (ISO); `null` dla cs2_demo",
+            "title": "Period From"
+          },
+          "period_to": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ostatni dzien danych runu (ISO); `null` dla cs2_demo",
+            "title": "Period To"
+          },
+          "pipeline": {
+            "title": "Pipeline",
+            "type": "string"
+          },
+          "report_sha256": {
+            "additionalProperties": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "title": "Report Sha256",
+            "type": "object"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "SUCCESS",
+              "PARTIAL",
+              "FAILED"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id",
+          "pipeline",
+          "status",
+          "created_at",
+          "report_sha256"
+        ],
+        "title": "RunOut",
+        "type": "object"
+      },
+      "RunPage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RunOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "RunPage",
+        "type": "object"
+      },
+      "ScheduleIn": {
+        "description": "Pelny stan harmonogramu (PUT zastepuje calosc; pominiete pole = wartosc domyslna). Wyjatek: para webhooka\nczatu - adres jest tylko do zapisu, wiec pominiety `notify_webhook_url` = bez zmian (`null` czysci adres),\na pominiety `notify_webhook_kind` tez zostaje jak zapisany (bez adresu nie ma czego przestawiac).",
+        "properties": {
+          "auto_run_on_upload": {
+            "default": false,
+            "description": "po uploadzie zakolejkuj zadanie dla `suggested_pipeline`",
+            "title": "Auto Run On Upload",
+            "type": "boolean"
+          },
+          "notify_on_finish": {
+            "default": false,
+            "description": "e-mail do czlonkow po zakonczeniu runu (sukces i blad)",
+            "title": "Notify On Finish",
+            "type": "boolean"
+          },
+          "notify_webhook_kind": {
+            "default": "slack",
+            "description": "format of the chat message after a run: `slack` (Incoming Webhook), `teams` (Workflows webhook trigger) or `generic` (plain JSON); omitted = unchanged",
+            "enum": [
+              "slack",
+              "teams",
+              "generic"
+            ],
+            "title": "Notify Webhook Kind",
+            "type": "string"
+          },
+          "notify_webhook_url": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "chat webhook address (write-only secret, never returned). Omitted = unchanged, `null` = remove the address, text = set it: `https` and a public address (outside dev), no credentials; an invalid address answers `422 validation_error` naming this field",
+            "examples": [
+              "https://hooks.slack.com/services/T000/B000/XXXXXXXXXXXXXXXX"
+            ],
+            "title": "Notify Webhook Url"
+          },
+          "reminder_enabled": {
+            "default": false,
+            "description": "cotygodniowe przypomnienie e-mail o eksporcie",
+            "title": "Reminder Enabled",
+            "type": "boolean"
+          },
+          "reminder_hour": {
+            "default": 8,
+            "description": "godzina (czas lokalny w `timezone`)",
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Reminder Hour",
+            "type": "integer"
+          },
+          "reminder_skip_if_recent_upload": {
+            "default": true,
+            "description": "nie przypominaj, jesli w ostatnich 6 dniach byl upload",
+            "title": "Reminder Skip If Recent Upload",
+            "type": "boolean"
+          },
+          "reminder_weekday": {
+            "default": 0,
+            "description": "dzien tygodnia: 0 = poniedzialek, 6 = niedziela",
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Reminder Weekday",
+            "type": "integer"
+          },
+          "timezone": {
+            "default": "Europe/Warsaw",
+            "description": "strefa czasowa IANA, np. `Europe/Warsaw`",
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "title": "ScheduleIn",
+        "type": "object"
+      },
+      "ScheduleOut": {
+        "properties": {
+          "auto_run_on_upload": {
+            "title": "Auto Run On Upload",
+            "type": "boolean"
+          },
+          "last_reminder_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ostatnia proba przypomnienia (UTC)",
+            "title": "Last Reminder At"
+          },
+          "next_reminder_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "najblizsze przypomnienie (UTC); `null` = przypomnienie wylaczone",
+            "title": "Next Reminder At"
+          },
+          "notify_on_finish": {
+            "title": "Notify On Finish",
+            "type": "boolean"
+          },
+          "notify_webhook_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "masked saved address: host and the last 4 characters of a long path (no query); `null` = none",
+            "examples": [
+              "hooks.slack.com/…XyZ9"
+            ],
+            "title": "Notify Webhook Hint"
+          },
+          "notify_webhook_kind": {
+            "description": "format of the chat message after a run",
+            "enum": [
+              "slack",
+              "teams",
+              "generic"
+            ],
+            "title": "Notify Webhook Kind",
+            "type": "string"
+          },
+          "notify_webhook_set": {
+            "description": "a chat webhook address is saved (the address itself is never returned)",
+            "title": "Notify Webhook Set",
+            "type": "boolean"
+          },
+          "reminder_enabled": {
+            "title": "Reminder Enabled",
+            "type": "boolean"
+          },
+          "reminder_hour": {
+            "maximum": 23.0,
+            "minimum": 0.0,
+            "title": "Reminder Hour",
+            "type": "integer"
+          },
+          "reminder_skip_if_recent_upload": {
+            "title": "Reminder Skip If Recent Upload",
+            "type": "boolean"
+          },
+          "reminder_weekday": {
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Reminder Weekday",
+            "type": "integer"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`null` = ustawienia domyslne, nigdy nie zapisane",
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "reminder_enabled",
+          "reminder_weekday",
+          "reminder_hour",
+          "timezone",
+          "reminder_skip_if_recent_upload",
+          "auto_run_on_upload",
+          "notify_on_finish",
+          "notify_webhook_kind",
+          "notify_webhook_set"
+        ],
+        "title": "ScheduleOut",
+        "type": "object"
+      },
+      "SessionOut": {
+        "properties": {
+          "csrf_token": {
+            "description": "to samo co cookie daas_csrf; odeslij w naglowku X-CSRF-Token",
+            "title": "Csrf Token",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "orgs": {
+            "items": {
+              "$ref": "#/components/schemas/MembershipOut"
+            },
+            "title": "Orgs",
+            "type": "array"
+          },
+          "user": {
+            "$ref": "#/components/schemas/UserOut"
+          }
+        },
+        "required": [
+          "user",
+          "orgs",
+          "csrf_token",
+          "expires_at"
+        ],
+        "title": "SessionOut",
+        "type": "object"
+      },
+      "UploadOut": {
+        "properties": {
+          "auto_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "zadanie zakolejkowane automatycznie po uploadzie (harmonogram: `auto_run_on_upload`); `null` = brak auto-uruchomienia albo pominiete",
+            "title": "Auto Job Id"
+          },
+          "bytes": {
+            "title": "Bytes",
+            "type": "integer"
+          },
+          "columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Columns"
+          },
+          "confidence": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "filename": {
+            "title": "Filename",
+            "type": "string"
+          },
+          "generated": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generated"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "csv",
+              "xlsx",
+              "package"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping"
+          },
+          "ready": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready"
+          },
+          "retention_until": {
+            "format": "date-time",
+            "title": "Retention Until",
+            "type": "string"
+          },
+          "rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows"
+          },
+          "sha256": {
+            "title": "Sha256",
+            "type": "string"
+          },
+          "suggested_pipeline": {
+            "enum": [
+              "cs2_demo",
+              "ecommerce_demo",
+              "uksc_evidence"
+            ],
+            "title": "Suggested Pipeline",
+            "type": "string"
+          },
+          "unmapped_columns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unmapped Columns"
+          },
+          "warnings": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Warnings"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "filename",
+          "bytes",
+          "sha256",
+          "created_at",
+          "retention_until",
+          "suggested_pipeline"
+        ],
+        "title": "UploadOut",
+        "type": "object"
+      },
+      "UsagePeriod": {
+        "properties": {
+          "period": {
+            "description": "miesiac kalendarzowy UTC, `YYYY-MM`",
+            "examples": [
+              "2026-10"
+            ],
+            "title": "Period",
+            "type": "string"
+          },
+          "runs": {
+            "title": "Runs",
+            "type": "integer"
+          },
+          "upload_bytes": {
+            "title": "Upload Bytes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "period",
+          "runs",
+          "upload_bytes"
+        ],
+        "title": "UsagePeriod",
+        "type": "object"
+      },
+      "UsageReport": {
+        "properties": {
+          "current": {
+            "$ref": "#/components/schemas/UsagePeriod"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/PlanLimitsOut"
+          },
+          "org_id": {
+            "title": "Org Id",
+            "type": "string"
+          },
+          "plan": {
+            "title": "Plan",
+            "type": "string"
+          },
+          "previous": {
+            "$ref": "#/components/schemas/UsagePeriod"
+          },
+          "retention_days": {
+            "title": "Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "org_id",
+          "plan",
+          "retention_days",
+          "current",
+          "previous",
+          "limits"
+        ],
+        "title": "UsageReport",
+        "type": "object"
+      },
+      "UserOut": {
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "locale": {
+            "default": "pl",
+            "enum": [
+              "pl",
+              "en"
+            ],
+            "title": "Locale",
+            "type": "string"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "id",
+          "email"
+        ],
+        "title": "UserOut",
+        "type": "object"
+      },
+      "ValidationIssue": {
+        "description": "Redacted request validation error, without the submitted value.",
+        "properties": {
+          "loc": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Loc",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Msg",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationIssue",
+        "type": "object"
+      },
+      "VerifyIn": {
+        "properties": {
+          "sha256": {
+            "examples": [
+              "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            ],
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sha256"
+        ],
+        "title": "VerifyIn",
+        "type": "object"
+      },
+      "VerifyOut": {
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "format": {
+            "anyOf": [
+              {
+                "enum": [
+                  "html",
+                  "md",
+                  "json"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Format"
+          },
+          "known": {
+            "title": "Known",
+            "type": "boolean"
+          },
+          "pipeline": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pipeline"
+          },
+          "run_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Id"
+          }
+        },
+        "required": [
+          "known"
+        ],
+        "title": "VerifyOut",
+        "type": "object"
+      },
+      "WebhookCreate": {
+        "properties": {
+          "events": {
+            "items": {
+              "const": "run.finished",
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "url": {
+            "examples": [
+              "https://hooks.example.test/daas"
+            ],
+            "maxLength": 2000,
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "WebhookCreate",
+        "type": "object"
+      },
+      "WebhookCreated": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "secret": {
+            "description": "sekret podpisu (HMAC-SHA256); pokazany TYLKO w tej odpowiedzi",
+            "title": "Secret",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "events",
+          "active",
+          "created_at",
+          "secret"
+        ],
+        "title": "WebhookCreated",
+        "type": "object"
+      },
+      "WebhookOut": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "events": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "events",
+          "active",
+          "created_at"
+        ],
+        "title": "WebhookOut",
+        "type": "object"
+      },
+      "WebhookPingOut": {
+        "properties": {
+          "delivered": {
+            "title": "Delivered",
+            "type": "boolean"
+          },
+          "status": {
+            "deprecated": true,
+            "description": "DEPRECATED, always `null`: the exact status code of the receiver is no longer returned. Use `status_class`.",
+            "title": "Status",
+            "type": "null"
+          },
+          "status_class": {
+            "description": "class of the receiver's answer; `error` = no answer (network, DNS, address refused)",
+            "enum": [
+              "2xx",
+              "3xx",
+              "4xx",
+              "5xx",
+              "error"
+            ],
+            "title": "Status Class",
+            "type": "string"
+          }
+        },
+        "required": [
+          "delivered",
+          "status_class"
+        ],
+        "title": "WebhookPingOut",
+        "type": "object"
+      },
+      "WeekHealth": {
+        "properties": {
+          "avg_run_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "mean `finished_at - started_at` of the finished jobs (seconds); `null` = no finished job",
+            "title": "Avg Run Seconds"
+          },
+          "last_report_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "latest report of the week; `null` = none",
+            "title": "Last Report At"
+          },
+          "partial": {
+            "description": "`true` for the current week, which is still running",
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "reports": {
+            "description": "reports delivered in the week: runs `SUCCESS` or `PARTIAL` whose job did not fail",
+            "minimum": 0.0,
+            "title": "Reports",
+            "type": "integer"
+          },
+          "runs_failed": {
+            "description": "jobs that finished `failed` in the week (`no_records` included)",
+            "minimum": 0.0,
+            "title": "Runs Failed",
+            "type": "integer"
+          },
+          "runs_succeeded": {
+            "description": "jobs that finished `succeeded` in the week",
+            "minimum": 0.0,
+            "title": "Runs Succeeded",
+            "type": "integer"
+          },
+          "upload_bytes": {
+            "description": "bytes uploaded in the week",
+            "minimum": 0.0,
+            "title": "Upload Bytes",
+            "type": "integer"
+          },
+          "uploads": {
+            "description": "files uploaded in the week",
+            "minimum": 0.0,
+            "title": "Uploads",
+            "type": "integer"
+          },
+          "week_start": {
+            "description": "Monday of the ISO week (local date in `timezone`)",
+            "format": "date",
+            "title": "Week Start",
+            "type": "string"
+          }
+        },
+        "required": [
+          "week_start",
+          "partial",
+          "uploads",
+          "upload_bytes",
+          "runs_succeeded",
+          "runs_failed",
+          "reports",
+          "avg_run_seconds",
+          "last_report_at"
+        ],
+        "title": "WeekHealth",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Source-Agnostic B2B Data-as-a-Service Engine (FastAPI + DuckDB + n8n)",
+    "title": "DaaS Engine",
+    "version": "2.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/auth/logout": {
+      "post": {
+        "description": "Deletes the server-side session and clears the cookies. Requires the CSRF header.",
+        "operationId": "logout_api_v1_auth_logout_post",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "End the session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/magic-link": {
+      "post": {
+        "description": "Sends a single-use sign-in link (valid 15 minutes) to the e-mail address. The answer is the same for known and unknown addresses. Limited per e-mail and per IP.",
+        "operationId": "request_magic_link_api_v1_auth_magic_link_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagicLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MagicLinkAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Sign-in e-mails are paused for maintenance (code: maintenance)"
+          }
+        },
+        "summary": "Request a sign-in link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/magic-link/verify": {
+      "post": {
+        "description": "Consumes the token (single use) and starts a session: sets `daas_session` (HttpOnly) and `daas_csrf`. The first sign-in creates the user. Pending invitations for the address are accepted.\n\nLogin-CSRF protection: `POST /auth/magic-link` sets an HttpOnly cookie (`__Host-daas_ml`) in the browser that asked for the link. If the cookie does not match the link (another browser, a cleared cookie, a link someone else planted), the answer is `409 confirm_required` with a masked `email_hint` and the token is NOT consumed; repeat the request with `confirm: true` after the user explicitly agrees to sign in as that address in this browser.",
+        "operationId": "verify_magic_link_api_v1_auth_magic_link_verify_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MagicLinkConfirm"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Token unknown, expired or already used"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`confirm_required`: link was requested from another browser"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Exchange a sign-in link for a session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/health": {
+      "get": {
+        "description": "Liveness. Publiczny i minimalny: status, wersja, tryb. Bez sciezek, konfiguracji i sekretow.",
+        "operationId": "health_api_v1_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Liveness (public)",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/api/v1/me": {
+      "get": {
+        "description": "The caller, their organizations and roles. For an API key: the key's organization and scopes.",
+        "operationId": "me_api_v1_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Who am I",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/oauth/requests/{request_id}": {
+      "get": {
+        "description": "Consent screen data for an application (ChatGPT, Claude, ...) that asked for access through OAuth: its name, the requested scopes, where the browser returns, and the signed-in user's organizations with the scopes each role can grant. Signed-in users only; an API key gets `403`.",
+        "operationId": "get_request_api_v1_oauth_requests__request_id__get",
+        "parameters": [
+          {
+            "description": "Authorization request id from the `request` query parameter of the consent page",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "description": "Authorization request id from the `request` query parameter of the consent page",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthRequestOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not a user session"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unknown request, or already decided"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`expired`: the request is older than DAAS_OAUTH_AUTHORIZATION_TTL_SEC"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Read an authorization request",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/oauth/requests/{request_id}/decision": {
+      "post": {
+        "description": "One decision per request (CSRF header required). Deny: `redirect_to` carries `error=access_denied`. Approve: the user must be a member of `org_id`; the granted scopes are `scopes` (default: all) narrowed to what was requested and what the role allows, and `redirect_to` carries a single-use authorization code valid for 60 seconds. The connection then acts in that organization only, with those scopes, on behalf of the user.",
+        "operationId": "decide_api_v1_oauth_requests__request_id__decision_post",
+        "parameters": [
+          {
+            "description": "Authorization request id from the `request` query parameter of the consent page",
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "description": "Authorization request id from the `request` query parameter of the consent page",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthDecisionIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthDecisionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not a user session, or not a member of `org_id`"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unknown request"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`request_already_decided`"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "`expired`"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Approve or deny an application",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/orgs": {
+      "post": {
+        "description": "Creates an organization with the signed-in user as owner. `dpa_accepted` must be `true`: the data processing agreement (DPA) version `v1` is accepted at creation. Needs a user session.",
+        "operationId": "create_org_api_v1_orgs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not a user session, or selfhost mode"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Create an organization (onboarding)",
+        "tags": [
+          "orgs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}": {
+      "delete": {
+        "description": "Deletes the organization, its control-plane records and its data directory. Refused while jobs are queued or running, and for the selfhost `default` organization.",
+        "operationId": "delete_org_api_v1_orgs__org_id__delete",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Delete an organization (owner only)",
+        "tags": [
+          "orgs"
+        ]
+      },
+      "get": {
+        "operationId": "get_org_api_v1_orgs__org_id__get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Get an organization",
+        "tags": [
+          "orgs"
+        ]
+      },
+      "patch": {
+        "description": "Name, locale, upload retention (days) and the opt-in for LLM-generated summaries.",
+        "operationId": "patch_org_api_v1_orgs__org_id__patch",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Update organization settings",
+        "tags": [
+          "orgs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/api-keys": {
+      "get": {
+        "description": "Metadata only: the key value is never returned after creation.",
+        "operationId": "list_keys_api_v1_orgs__org_id__api_keys_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyOut"
+                  },
+                  "title": "Response List Keys Api V1 Orgs  Org Id  Api Keys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "List API keys",
+        "tags": [
+          "api-keys"
+        ]
+      },
+      "post": {
+        "description": "Returns the key once. Store it in a secret manager; only its hash is kept. A caller can grant only scopes it holds itself.",
+        "operationId": "create_key_api_v1_orgs__org_id__api_keys_post",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Requested scope exceeds the caller's own"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Create an API key",
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/api-keys/{key_id}": {
+      "delete": {
+        "description": "Takes effect immediately. Revoking an already revoked key succeeds.",
+        "operationId": "revoke_key_api_v1_orgs__org_id__api_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Revoke an API key",
+        "tags": [
+          "api-keys"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/audit": {
+      "get": {
+        "description": "Events of this organization only, ordered by `(ts, id)` descending. Pass `next_cursor` as `cursor` to get the next page; `next_cursor` is `null` on the last page. `meta` holds allow-listed fields only (never file names, e-mail addresses or keys).",
+        "operationId": "list_audit_api_v1_orgs__org_id__audit_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 120,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Audit log (newest first)",
+        "tags": [
+          "audit"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/data-health": {
+      "get": {
+        "description": "Is next Monday's report safe? Per ISO week in the time zone of the organization's schedule (Monday 00:00 local; the last week is the current, partial one): uploads, finished jobs, reports and the mean run time. The summary has the last upload, success and failure, the streak of finished weeks with a report, the reminder and auto-run settings and the plan usage; `issues` lists what to fix, most severe first, each with a cockpit link. Computed on the fly, read-only. `weeks` (1-26, default 12) only limits the `weeks` list: the summary and the issues always look at the last 26 weeks.",
+        "operationId": "get_data_health_api_v1_orgs__org_id__data_health_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "how many weeks to return, the current one included (1-26)",
+            "in": "query",
+            "name": "weeks",
+            "required": false,
+            "schema": {
+              "default": 12,
+              "description": "how many weeks to return, the current one included (1-26)",
+              "maximum": 26,
+              "minimum": 1,
+              "title": "Weeks",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DataHealthOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Data health dashboard",
+        "tags": [
+          "data-health"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/evidence": {
+      "get": {
+        "description": "Control -> requirement -> status -> artifact (source and SHA-256) from the latest successful `uksc_evidence` run. `run_status` is `SUCCESS` or `PARTIAL` (an incomplete package). Artifact contents are not returned.",
+        "operationId": "evidence_api_v1_orgs__org_id__evidence_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No collector run yet"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Artifact status of the latest collector run",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/invitations": {
+      "get": {
+        "operationId": "list_invitations_api_v1_orgs__org_id__invitations_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/InvitationOut"
+                  },
+                  "title": "Response List Invitations Api V1 Orgs  Org Id  Invitations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "List pending invitations",
+        "tags": [
+          "members"
+        ]
+      },
+      "post": {
+        "description": "Stores an invitation (valid 7 days) and e-mails the address; it is accepted when the address signs in. The answer is always `202 {\"status\": \"accepted\"}`: it does not reveal whether the address already has an account or is already a member (nothing is sent in that case). Repeating it for the same address refreshes the invitation. Limits: 20 per organization per 24 hours and 5 per minute per caller (`429 invitation_limit`). Use `GET /invitations` to list and `DELETE` to revoke.",
+        "operationId": "invite_api_v1_orgs__org_id__invitations_post",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvitationCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationAccepted"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invitation limit reached"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Invitations are paused for maintenance (code: maintenance)"
+          }
+        },
+        "summary": "Invite by e-mail",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/invitations/{invitation_id}": {
+      "delete": {
+        "description": "Deletes a pending invitation; an accepted one cannot be revoked (remove the member instead).",
+        "operationId": "revoke_invitation_api_v1_orgs__org_id__invitations__invitation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitation_id",
+            "required": true,
+            "schema": {
+              "title": "Invitation Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such pending invitation"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Revoke an invitation",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/jobs": {
+      "get": {
+        "operationId": "list_jobs_api_v1_orgs__org_id__jobs_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "queued",
+                    "running",
+                    "succeeded",
+                    "failed",
+                    "cancelled"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 26,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "List jobs (newest first)",
+        "tags": [
+          "jobs"
+        ]
+      },
+      "post": {
+        "description": "Queues a pipeline run and answers `202 Accepted` with a `Location` header. Follow progress with `GET .../jobs/{job_id}` or the SSE stream `.../events`. One run per organization at a time. `period_from`/`period_to` (inclusive, either may be omitted) limit an `ecommerce_demo` run to the orders dated in that range; other pipelines answer `422 period_not_supported`.",
+        "operationId": "create_job_api_v1_orgs__org_id__jobs_post",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/JobCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Upload not found"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Queue full"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Pipeline runs are paused for maintenance"
+          }
+        },
+        "summary": "Start a job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_job_api_v1_orgs__org_id__jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Get a job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Only `queued` jobs can be cancelled; a running job finishes.",
+        "operationId": "cancel_job_api_v1_orgs__org_id__jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The job already started or finished"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Cancel a queued job",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/jobs/{job_id}/events": {
+      "get": {
+        "description": "`text/event-stream`. Events: `status` (job snapshot on every status change), `progress` (`{id, progress}`), `log` (`{id, message, ts}`) and a final `done` (job snapshot); the stream closes after `done`. A comment line `: heartbeat` is sent every 15 seconds of silence. Limits: 5 open streams per caller and 100 in total (`429 sse_limit`); a stream lives at most 30 minutes (reconnect; the first event of a stream is always a full `status` snapshot).",
+        "operationId": "job_events_api_v1_orgs__org_id__jobs__job_id__events_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Stream job events (SSE)",
+        "tags": [
+          "jobs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/members": {
+      "get": {
+        "operationId": "list_members_api_v1_orgs__org_id__members_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/MemberOut"
+                  },
+                  "title": "Response List Members Api V1 Orgs  Org Id  Members Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "List members",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/members/{user_id}": {
+      "delete": {
+        "description": "Owners and admins (and keys with `members:manage`) can remove members; only an owner session can remove an owner. The last owner cannot be removed (`409 last_owner`). The member's sessions in this organization end and the API keys they created here are revoked.",
+        "operationId": "remove_member_api_v1_orgs__org_id__members__user_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not allowed to remove an owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not a member"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The last owner cannot be removed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Remove a member",
+        "tags": [
+          "members"
+        ]
+      },
+      "patch": {
+        "description": "Owner sessions only. The last owner cannot be demoted (`409 last_owner`).",
+        "operationId": "change_role_api_v1_orgs__org_id__members__user_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "title": "User Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MemberRolePatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemberOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not an owner"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not a member"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "The last owner cannot be demoted"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Change a member's role",
+        "tags": [
+          "members"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/oauth/grants": {
+      "get": {
+        "description": "Applications (ChatGPT, Claude, ...) connected to the organization through OAuth, newest first: who approved them, the granted scopes and the last use. Token values are never returned.",
+        "operationId": "list_grants_api_v1_orgs__org_id__oauth_grants_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OAuthGrantOut"
+                  },
+                  "title": "Response List Grants Api V1 Orgs  Org Id  Oauth Grants Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "List connected applications",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/oauth/grants/{token_id}": {
+      "delete": {
+        "description": "Revokes the connection at once: its refresh token, every access token issued from it and any later rotation. The application must ask for consent again. Disconnecting twice succeeds.",
+        "operationId": "revoke_grant_api_v1_orgs__org_id__oauth_grants__token_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token_id",
+            "required": true,
+            "schema": {
+              "maxLength": 64,
+              "title": "Token Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such connection in this organization"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Disconnect an application",
+        "tags": [
+          "oauth"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/runs": {
+      "get": {
+        "operationId": "list_runs_api_v1_orgs__org_id__runs_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "pipeline",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 40,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Pipeline"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "`next_cursor` z poprzedniej strony",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 80,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "`next_cursor` z poprzedniej strony",
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "List runs (newest first)",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/runs/{run_id}": {
+      "get": {
+        "description": "Run record with report hashes, links and summary metrics. Report paths and raw error text are never returned.",
+        "operationId": "get_run_api_v1_orgs__org_id__runs__run_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunDetail"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Get a run",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/runs/{run_id}/report": {
+      "get": {
+        "description": "`fmt=html|md|json`. Sent with a restrictive `Content-Security-Policy`, `nosniff`, `ETag` = SHA-256 of the file and `Cache-Control: private, no-store`. Embed the HTML only in a sandboxed iframe. `410 report_expired` once the retention job removed the files (the run record and hashes stay).",
+        "operationId": "get_report_api_v1_orgs__org_id__runs__run_id__report_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "fmt",
+            "required": false,
+            "schema": {
+              "default": "html",
+              "enum": [
+                "html",
+                "md",
+                "json"
+              ],
+              "title": "Fmt",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {},
+              "text/html": {},
+              "text/markdown": {}
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "ETag matches"
+          },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "report_expired: files removed by retention"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Download a report",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/schedule": {
+      "get": {
+        "description": "Weekly export reminder, auto-run after upload, the e-mail and the chat message when a run finishes. An organization that never saved its schedule gets the defaults (`updated_at: null`). The chat webhook address is never returned: `notify_webhook_set` and the masked `notify_webhook_hint` say whether and which one is saved.",
+        "operationId": "get_schedule_api_v1_orgs__org_id__schedule_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Get the schedule and notifications",
+        "tags": [
+          "schedule"
+        ]
+      },
+      "put": {
+        "description": "Replaces the whole schedule (an omitted field takes its default), except the chat webhook pair: `notify_webhook_url` omitted = unchanged, `null` = remove, text = set (https, public address, no credentials); `notify_webhook_kind` omitted = unchanged. `reminder_weekday` 0-6 (0 = Monday), `reminder_hour` 0-23 in `timezone` (IANA name); an invalid value answers `422 validation_error` naming the field. `next_reminder_at` is recomputed on every save.",
+        "operationId": "put_schedule_api_v1_orgs__org_id__schedule_put",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Save the schedule and notifications",
+        "tags": [
+          "schedule"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/uploads": {
+      "post": {
+        "description": "Accepts a CSV or XLSX export (up to 10 MiB, XLSX with container, macro, sheet and row limits) or a collector package (`.json`, up to 5 MiB, validated against the collector schema). Returns the file id and, for CSV/XLSX, the detected column mapping. A workbook with several sheets needs `sheet`.",
+        "operationId": "create_upload_api_v1_orgs__org_id__uploads_post",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_create_upload_api_v1_orgs__org_id__uploads_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "File or quota too large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported file type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Upload a file",
+        "tags": [
+          "uploads"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/usage": {
+      "get": {
+        "description": "Runs and uploaded bytes for the current calendar month (UTC) and the previous one, the limits of the organization's plan (`null` = unlimited) and its upload retention. When a limit is reached, `POST .../jobs` and `POST .../uploads` answer `429` with code `plan_limit`.",
+        "operationId": "get_usage_api_v1_orgs__org_id__usage_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UsageReport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Usage and plan limits",
+        "tags": [
+          "usage"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/verify": {
+      "post": {
+        "description": "Tells whether a SHA-256 belongs to a report of this organization. The answer never contains report content.",
+        "operationId": "verify_api_v1_orgs__org_id__verify_post",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Check a report hash",
+        "tags": [
+          "runs"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/webhooks": {
+      "get": {
+        "description": "The signing secret is never returned after creation.",
+        "operationId": "list_webhooks_api_v1_orgs__org_id__webhooks_get",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WebhookOut"
+                  },
+                  "title": "Response List Webhooks Api V1 Orgs  Org Id  Webhooks Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "List webhooks",
+        "tags": [
+          "webhooks"
+        ]
+      },
+      "post": {
+        "description": "Registers an HTTPS endpoint for `run.finished`. The response carries the signing secret once; every delivery has `X-DaaS-Signature: sha256=<HMAC-SHA256(secret, body)>`, `X-DaaS-Event`, `X-DaaS-Delivery` and `X-DaaS-Timestamp`. Non-public addresses are refused outside dev. A delivery is attempted up to 3 times (back-off from `DAAS_WEBHOOK_BACKOFF_SEC`), redirects are not followed.",
+        "operationId": "create_webhook_api_v1_orgs__org_id__webhooks_post",
+        "parameters": [
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebhookCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Duplicate URL or webhook limit reached"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Webhooks need DAAS_SECRET_KEY"
+          }
+        },
+        "summary": "Create a webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/webhooks/{webhook_id}": {
+      "delete": {
+        "operationId": "delete_webhook_api_v1_orgs__org_id__webhooks__webhook_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhook_id",
+            "required": true,
+            "schema": {
+              "title": "Webhook Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Webhook not found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          }
+        },
+        "summary": "Delete a webhook",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/v1/orgs/{org_id}/webhooks/{webhook_id}/ping": {
+      "post": {
+        "description": "Sends one signed `ping` event (single attempt) and reports whether the endpoint answered 2xx and the class of its answer (`status_class`); the exact status code is not returned.",
+        "operationId": "ping_webhook_api_v1_orgs__org_id__webhooks__webhook_id__ping_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "webhook_id",
+            "required": true,
+            "schema": {
+              "title": "Webhook Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Identyfikator organizacji",
+            "in": "path",
+            "name": "org_id",
+            "required": true,
+            "schema": {
+              "description": "Identyfikator organizacji",
+              "title": "Org Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookPingOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Webhook not found"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Webhook delivery is paused for maintenance"
+          }
+        },
+        "summary": "Send a test event",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
+    "/api/v1/ready": {
+      "get": {
+        "description": "Readiness: baza control plane odpowiada (`SELECT 1`), katalog runtime jest zapisywalny, a w trybie\nselfhost takze baza organizacji `default`. Przy bledzie 503 bez szczegolow (szczegoly w logu).",
+        "operationId": "ready_api_v1_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Validation error (RFC 9457 problem details)"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Readiness (public)",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Liveness. Publiczny i minimalny: status, wersja, tryb. Bez sciezek, konfiguracji i sekretow.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/metrics": {
+      "get": {
+        "description": "Prometheus text format 0.0.4: requests per route template and status, a response-time histogram, jobs per status and the number of active tenants. Needs `Authorization: Bearer <metrics token>`; answers 404 when no token is configured. Labels never carry customer data.",
+        "operationId": "metrics_metrics_get",
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "description": "Missing or wrong token"
+          },
+          "404": {
+            "description": "Metrics are not enabled"
+          }
+        },
+        "summary": "Prometheus metrics",
+        "tags": [
+          "system"
+        ]
+      }
+    },
+    "/ready": {
+      "get": {
+        "description": "Readiness: baza control plane odpowiada (`SELECT 1`), katalog runtime jest zapisywalny, a w trybie\nselfhost takze baza organizacji `default`. Przy bledzie 503 bez szczegolow (szczegoly w logu).",
+        "operationId": "ready_ready_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReadyResponse"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Ready",
+        "tags": [
+          "system"
+        ]
+      }
+    }
+  }
+}

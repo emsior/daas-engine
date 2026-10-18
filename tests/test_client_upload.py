@@ -9,10 +9,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.models import DataStatus, RunRequest, RunStatus
+from app.reporting.fmt import pct
 from app.reporting.narrative import build_narrative, template_narrative
 from app.sources.csv_mapper import _to_number, detect_mapping, map_dataframe, read_client_csv
 from app.transforms.ecommerce_transform import transform_ecommerce
-from tests.test_pipelines import PROJECT_ROOT, client, runner, settings  # noqa: F401  (fixtures)
+from tests.conftest import PROJECT_ROOT, auth_headers  # noqa: F401  (fixture'y: tests/conftest.py)
 
 PL_FIXTURE = PROJECT_ROOT / "data" / "fixtures" / "client_export_pl.csv"
 
@@ -106,11 +107,11 @@ def test_narrative_falls_back_to_template(monkeypatch):
     m = transform_ecommerce(out.to_dict(orient="records"))
     text, source = build_narrative("ecommerce_demo", m, "Firma X")
     assert source == "TEMPLATE"
-    assert "Firma X" in text and str(m.orders_total) in text and f"{m.margin_pct}%" in text
+    assert "Firma X" in text and str(m.orders_total) in text and pct(m.margin_pct, 2) in text
 
 
 def test_narrative_llm_error_falls_back(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-fake")
+    # H7: LLM jest opt-in; klucz przekazuje wywolujacy (runner robi to tylko przy DAAS_LLM_NARRATIVE=true)
     import app.reporting.narrative as n
 
     def boom(*a, **k):
@@ -118,7 +119,7 @@ def test_narrative_llm_error_falls_back(monkeypatch):
 
     monkeypatch.setattr(n.httpx, "post", boom)
     m = transform_ecommerce([])
-    _, source = build_narrative("ecommerce_demo", m)
+    _, source = build_narrative("ecommerce_demo", m, api_key="sk-fake")
     assert source == "TEMPLATE"
 
 
@@ -152,7 +153,9 @@ def test_runner_with_client_file_is_live(runner):  # noqa: F811
 def test_runner_missing_source_path_fails_cleanly(runner):  # noqa: F811
     res = runner.run(RunRequest(pipeline="ecommerce_demo", source_path="/does/not/exist.csv"))
     assert res.run_status == RunStatus.FAILED
-    assert "outside" in (res.error or "") or "not found" in (res.error or "")
+    # H3: policy jest domyslnie wlaczone, wiec sciezka poza workspace konczy sie PolicyError zanim zrodlo ja zobaczy
+    err = res.error or ""
+    assert "outside" in err or "not found" in err or "PolicyError" in err
 
 
 # ---------------------------------------------------------------------------
@@ -196,14 +199,11 @@ def test_api_upload_rejects_bad_input(client: TestClient):  # noqa: F811
     assert "a;b" not in detail and "'a'" not in detail
 
 
-def test_api_upload_rejects_xlsx(client: TestClient, settings):  # noqa: F811
-    """XLSX nie jest już przyjmowany przez /upload — wyłącznie CSV (PR #3, punkt 2 kontraktu).
+def test_api_upload_accepts_xlsx_export(client: TestClient, settings):  # noqa: F811
+    """XLSX jest przyjmowany przez /upload (H9, wariant B) i trafia na te sama sciezke co CSV.
 
-    Zastępuje wcześniejszy test_api_upload_xlsx_export, który sprawdzał, że upload
-    pliku .xlsx kończy się powodzeniem. Kontrakt PR #3 zawęża wejście do .csv, bo
-    parser XLSX to nieporównanie szersza powierzchnia ataku niż tekstowy CSV.
-
-    Skutek dla klienta: eksport z Allegro/Shoper/Excela trzeba zapisać jako CSV.
+    Zastepuje test_api_upload_rejects_xlsx (PR #3: tylko .csv). Limity, makra, arkusze i zip-bomb:
+    tests/test_xlsx_upload.py.
     """
 
     import openpyxl
@@ -221,10 +221,11 @@ def test_api_upload_rejects_xlsx(client: TestClient, settings):  # noqa: F811
                                               "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
                     data={"client_name": "Sklep XLSX"})
 
-    assert r.status_code == 415, r.text
+    assert r.status_code == 200, r.text
+    up = r.json()
+    assert up["ready"] is True and up["rows"] == len(df)
 
-    # Odmowa nie może zostawić po sobie ani pliku finalnego, ani tymczasowego.
+    # Na dysku zostaje wylacznie CSV; plik tymczasowy jest sprzatniety.
     uploads = settings.reports_path.parent / "uploads"
-    if uploads.exists():
-        assert list(uploads.glob("*.csv")) == []
-        assert list(uploads.glob("*.tmp")) == []
+    assert len(list(uploads.glob("*.csv"))) == 1
+    assert list(uploads.glob("*.tmp")) == []

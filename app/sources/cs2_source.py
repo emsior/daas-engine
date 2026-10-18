@@ -59,7 +59,7 @@ class CS2Source:
             return SourceResult(
                 records=[],
                 data_status=DataStatus.BLOCKED_MISSING_SECRET,
-                detail=f"{detail}; fixture not found at {self.fixture_path}",
+                detail=f"{detail}; fixture not found",
             )
         payload = json.loads(self.fixture_path.read_text(encoding="utf-8"))
         raw = payload["matches"] if isinstance(payload, dict) else payload

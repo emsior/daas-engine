@@ -1,0 +1,115 @@
+/* =====================================================================
+   tailwind.css — jedyny punkt wejścia stylów kokpitu (importuj w app/layout.tsx)
+   Kolejność ma znaczenie:
+     1. tailwindcss         — warstwy theme, base, components, utilities
+     2. tokens.css          — BEZ warstwy (nie dodawaj layer()!). Wartości w :root są
+                              wtedy silniejsze od deklaracji z @layer theme, więc
+                              tryb dark i data-theme działają, a @theme poniżej tylko
+                              rejestruje nazwy dla narzędzi (patrz DESIGN_SYSTEM.md §5)
+     3. base.css            — do warstwy base (po preflight Tailwinda)
+     4. components.css      — do warstwy components (narzędzia Tailwinda je nadpisują)
+   ===================================================================== */
+@import "tailwindcss";
+@import "./tokens.css";
+@import "./base.css" layer(base);
+@import "./components.css" layer(components);
+
+/* Wyzeruj domyślne skale Tailwinda: w kokpicie obowiązują wyłącznie tokeny PPC
+   (brak surowych kolorów typu bg-red-500 i „magicznych” rozmiarów). */
+@theme {
+  --color-*: initial;
+  --font-*: initial;
+  --text-*: initial;
+  --font-weight-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --ease-*: initial;
+  --breakpoint-*: initial;
+
+  /* breakpointy: 375 px = baza (bez prefiksu); 640 / 1024 / 1280 px.
+     Literały są konieczne — zapytania @media nie przyjmują var(). */
+  --breakpoint-sm: 40rem;
+  --breakpoint-lg: 64rem;
+  --breakpoint-xl: 80rem;
+}
+
+/* `inline`: narzędzia dostają var(--nazwa-tokenu) zamiast kopii wartości, więc zmiana
+   trybu (light/dark) i zmiana tokenu poziomu SEMANTIC propaguje się na wszystkie
+   klasy. Nazwa po lewej i prawej jest ta sama celowo: Tailwind rejestruje narzędzie,
+   a wartość zawsze pochodzi z tokens.css. */
+@theme inline {
+  /* --- kolory (poziom SEMANTIC) → bg-primary, text-danger, border-border … --- */
+  --color-bg: var(--color-bg);
+  --color-surface: var(--color-surface);
+  --color-surface-raised: var(--color-surface-raised);
+  --color-surface-sunken: var(--color-surface-sunken);
+  --color-text: var(--color-text);
+  --color-text-muted: var(--color-text-muted);
+  --color-primary: var(--color-primary);
+  --color-primary-hover: var(--color-primary-hover);
+  --color-primary-active: var(--color-primary-active);
+  --color-on-primary: var(--color-on-primary);
+  --color-secondary: var(--color-secondary);
+  --color-accent: var(--color-accent);
+  --color-success: var(--color-success);
+  --color-success-bg: var(--color-success-bg);
+  --color-warning: var(--color-warning);
+  --color-warning-bg: var(--color-warning-bg);
+  --color-danger: var(--color-danger);
+  --color-danger-bg: var(--color-danger-bg);
+  --color-danger-hover: var(--color-danger-hover);
+  --color-on-danger: var(--color-on-danger);
+  --color-info: var(--color-info);
+  --color-info-bg: var(--color-info-bg);
+  --color-border: var(--color-border);
+  --color-border-subtle: var(--color-border-subtle);
+  --color-focus: var(--color-focus);
+  --color-link: var(--color-link);
+  --color-link-hover: var(--color-link-hover);
+
+  /* aliasy czytelniejsze w klasach: text-fg, text-fg-muted */
+  --color-fg: var(--color-text);
+  --color-fg-muted: var(--color-text-muted);
+
+  /* --- rodziny fontów → font-sans, font-mono --- */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /* --- skala typografii → text-xs … text-4xl (rozmiar + interlinia) --- */
+  --text-xs: var(--text-xs);
+  --text-xs--line-height: var(--text-xs--line-height);
+  --text-sm: var(--text-sm);
+  --text-sm--line-height: var(--text-sm--line-height);
+  --text-base: var(--text-base);
+  --text-base--line-height: var(--text-base--line-height);
+  --text-lg: var(--text-lg);
+  --text-lg--line-height: var(--text-lg--line-height);
+  --text-xl: var(--text-xl);
+  --text-xl--line-height: var(--text-xl--line-height);
+  --text-2xl: var(--text-2xl);
+  --text-2xl--line-height: var(--text-2xl--line-height);
+  --text-3xl: var(--text-3xl);
+  --text-3xl--line-height: var(--text-3xl--line-height);
+  --text-4xl: var(--text-4xl);
+  --text-4xl--line-height: var(--text-4xl--line-height);
+
+  /* --- grubości → font-normal, font-medium, font-semibold, font-bold --- */
+  --font-weight-normal: var(--font-weight-normal);
+  --font-weight-medium: var(--font-weight-medium);
+  --font-weight-semibold: var(--font-weight-semibold);
+  --font-weight-bold: var(--font-weight-bold);
+
+  /* --- promienie i cienie → rounded-md, shadow-sm … --- */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-full: var(--radius-full);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+
+  /* --- ruch → ease-out --- */
+  --ease-out: var(--ease-out);
+
+  /* --- spacing: siatka 4 px. p-4 = 16 px, gap-6 = 24 px (n × --space-1) --- */
+  --spacing: var(--space-1);
+}

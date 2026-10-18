@@ -37,7 +37,7 @@ class EcommerceSource:
         # 0) plik klienta (z POST /upload) — najwyższy priorytet
         #    SECURITY: canonicalization + sprawdzenie, że plik jest w uploads/
         if source_path:
-            uploads_root = (self.settings.reports_path.parent / "uploads").resolve()
+            uploads_root = self.settings.uploads_path.resolve()
             p = Path(source_path).resolve()
             if not p.is_relative_to(uploads_root.resolve()):
                 return SourceResult(
@@ -60,7 +60,7 @@ class EcommerceSource:
         external = os.getenv("ECOMMERCE_CSV_PATH", "").strip()
         if external and Path(external).exists():
             try:
-                return self._load_csv(Path(external), DataStatus.LIVE_DATA, f"external csv: {external}")
+                return self._load_csv(Path(external), DataStatus.LIVE_DATA, "external csv")
             except Exception as exc:  # noqa: BLE001
                 log.warning("External CSV failed (%s) -> fixture fallback", exc)
 
@@ -71,7 +71,7 @@ class EcommerceSource:
     def _load_csv(self, path: Path, status: DataStatus, detail: str) -> SourceResult:
         if not path.exists():
             return SourceResult(records=[], data_status=DataStatus.BLOCKED_MISSING_SECRET,
-                                detail=f"{detail}; csv not found at {path}")
+                                detail=f"{detail}; csv not found")
         df = pd.read_csv(path)
         return SourceResult(
             records=_normalize(df),
@@ -123,7 +123,11 @@ def _normalize(df: pd.DataFrame) -> list[dict[str, Any]]:
     df["discount"] = df["discount"].fillna(0).astype(float)
     # rabat podany w procentach (np. 20) -> ułamek
     df.loc[df["discount"] > 1, "discount"] = df.loc[df["discount"] > 1, "discount"] / 100.0
-    df["date"] = pd.to_datetime(df["date"]).dt.date
+    # B1: ta sama hardened sciezka co mapper plikow klienta (parsowanie per-komorka wg
+    # jawnego formatu), zeby dane z Apify/zewnetrznego CSV nie mialy cicho przestawionego
+    # dnia z miesiacem przy mieszanych formatach. Fixture jest jednoformatowy (ISO) -> bez zmian.
+    from app.sources.csv_mapper import parse_dates
+    df["date"] = parse_dates(df["date"]).dt.date
     records: list[dict[str, Any]] = []
     for row in df.to_dict(orient="records"):
         records.append(EcommerceOrder.model_validate(row).model_dump())

@@ -1,0 +1,5 @@
+# Sekrety i kopie danych: nigdy do repozytorium
+.env
+.env.*
+!.env.example
+backups/

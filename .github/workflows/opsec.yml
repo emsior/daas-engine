@@ -1,0 +1,97 @@
+name: OPSEC
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  opsec:
+    name: opsec
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: OPSEC checks (approved policy)
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+          HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+          TESTED_SHA: ${{ github.sha }}
+          OPSEC_BOOTSTRAP_POLICY: ${{ vars.OPSEC_BOOTSTRAP_POLICY }}
+        run: |
+          set -euo pipefail
+          case "$EVENT_NAME" in
+            pull_request) START="$BASE" ;;
+            push) START="$BEFORE" ;;
+            *) exit 2 ;;
+          esac
+          START=$(git rev-parse --verify --end-of-options "$START^{commit}") || exit 2
+          HEAD=$(git rev-parse --verify --end-of-options "$HEAD^{commit}") || exit 2
+          checkout_sha=$(git rev-parse --verify HEAD) || exit 2
+          [[ "$checkout_sha" == "$TESTED_SHA" ]] || exit 2
+          checkout_status=$(git status --porcelain --untracked-files=all) || exit 2
+          [[ -z "$checkout_status" ]] || exit 2
+          policy_dir=$(mktemp -d "$RUNNER_TEMP/opsec-policy.XXXXXX") || exit 2
+          trap 'rm -rf -- "$policy_dir"' EXIT
+          base_scanner=$(git ls-tree --format='%(objecttype) %(objectname)' \
+            "$START" -- tools/opsec_scan.sh) || exit 2
+          base_allow=$(git ls-tree --format='%(objecttype) %(objectname)' \
+            "$START" -- .opsec-history-allow) || exit 2
+          if [[ -n "$base_scanner" && -n "$base_allow" ]]; then
+            [[ "$base_scanner" == blob\ * && "$base_allow" == blob\ * ]] || exit 2
+            policy_sha="$START"
+            policy_version="approved base \`$START\`"
+          elif [[ -z "$base_scanner" && -z "$base_allow" ]]; then
+            policy_sha="$HEAD"
+            policy_version="candidate \`$HEAD\` (bootstrap)"
+          else
+            exit 2
+          fi
+          git show "$policy_sha:tools/opsec_scan.sh" > "$policy_dir/opsec_scan.sh" || exit 2
+          git show "$policy_sha:.opsec-history-allow" > "$policy_dir/history-allow" || exit 2
+          scanner_blob=$(git hash-object "$policy_dir/opsec_scan.sh") || exit 2
+          allow_blob=$(git hash-object "$policy_dir/history-allow") || exit 2
+          if [[ -z "$base_scanner" && -z "$base_allow" ]]; then
+            [[ "${OPSEC_BOOTSTRAP_POLICY-}" == "$scanner_blob:$allow_blob" ]] || exit 2
+            printf '%s\n' '::warning::OPSEC bootstrap: using candidate policy with explicit approval'
+          fi
+          git diff --no-ext-diff --no-textconv --no-renames --name-only -z \
+            "$START" "$HEAD" -- tools/opsec_scan.sh .opsec-history-allow .github/workflows \
+            > "$policy_dir/changed-policy" || exit 2
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              tools/opsec_scan.sh|.opsec-history-allow) identifier="$path" ;;
+              *)
+                path_blob=$(printf '%s' "$path" | git hash-object --stdin) || exit 2
+                identifier="/name/$path_blob"
+                ;;
+            esac
+            printf '::warning::OPSEC policy changed: %s\n' "$identifier"
+          done < "$policy_dir/changed-policy"
+          {
+            printf '### OPSEC policy\n\n'
+            printf -- '- Base SHA: `%s`\n' "$START"
+            printf -- '- Head SHA: `%s`\n' "$HEAD"
+            printf -- '- Tested SHA: `%s`\n' "$TESTED_SHA"
+            printf -- '- Policy: %s\n' "$policy_version"
+            printf -- '- Scanner blob: `%s`\n' "$scanner_blob"
+            printf -- '- Allowlist blob: `%s`\n' "$allow_blob"
+          } >> "$GITHUB_STEP_SUMMARY" || exit 2
+          tree_status=0
+          bash "$policy_dir/opsec_scan.sh" --tree || tree_status=$?
+          range_status=0
+          bash "$policy_dir/opsec_scan.sh" --range "$START..$HEAD" \
+            --allowlist "$policy_dir/history-allow" || range_status=$?
+          for status in "$tree_status" "$range_status"; do
+            case "$status" in 0|1) ;; *) exit 2 ;; esac
+          done
+          if [[ $tree_status != 0 || $range_status != 0 ]]; then exit 1; fi

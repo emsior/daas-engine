@@ -7,7 +7,8 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from datetime import datetime
+from collections.abc import Callable
+from datetime import date, datetime
 from typing import Any
 
 import httpx
@@ -25,6 +26,9 @@ from app.transforms.uksc_transform import transform_uksc
 
 log = logging.getLogger(__name__)
 
+#: `(procent 0-100, krotki komunikat)`; wolane z watku, w ktorym dziala run.
+ProgressCallback = Callable[[int, str], None]
+
 
 PIPELINES: dict[str, dict[str, Any]] = {
     "cs2_demo": {
@@ -38,7 +42,7 @@ PIPELINES: dict[str, dict[str, Any]] = {
         "required_secrets": ["APIFY_TOKEN"],
     },
     "uksc_evidence": {
-        "description": "Dowód UKSC: kontrole techniczne stacji Windows zmapowane na art. 8 UKSC (paczka z uksc-collector.ps1)",
+        "description": "Kolektor artefaktów UKSC: kontrole techniczne stacji Windows zmapowane na art. 8 UKSC (paczka z uksc-collector.ps1)",
         "domain": "compliance",
         "required_secrets": [],
     },
@@ -49,7 +53,7 @@ class PipelineRunner:
     def __init__(self, settings: Settings | None = None, db: DuckDBClient | None = None):
         self.settings = settings or get_settings()
         self.db = db or DuckDBClient(self.settings.duckdb_file)
-        self.reports = ReportGenerator(self.settings.reports_path)
+        self.reports = ReportGenerator(self.settings.reports_path, llm_api_key=self.settings.llm_api_key)
 
     # ------------------------------------------------------------------
     def list_pipelines(self) -> list[PipelineInfo]:
@@ -68,7 +72,17 @@ class PipelineRunner:
         return out
 
     # ------------------------------------------------------------------
-    def run(self, request: RunRequest) -> RunResult:
+    def run(self, request: RunRequest, on_progress: ProgressCallback | None = None) -> RunResult:
+        """Uruchamia pipeline. `on_progress(procent, komunikat)` jest wolane z watku runu na granicach etapow
+        (zrodlo+transformacja -> raport); wyjatek z callbacku nie przerywa runu."""
+        def progress(percent: int, message: str) -> None:
+            if on_progress is None:
+                return
+            try:
+                on_progress(percent, message)
+            except Exception:  # noqa: BLE001
+                log.warning("progress callback failed", exc_info=True)
+
         run_id = str(uuid.uuid4())
         started = datetime.utcnow()
         t0 = time.perf_counter()
@@ -76,6 +90,7 @@ class PipelineRunner:
         log.info("run start pipeline=%s run_id=%s", pipeline, run_id)
 
         try:
+            progress(10, "reading source")
             if self.settings.daas_policy_enforce:
                 from app.core.policy import Budget, ReadFile, enforce
                 audit_log_path = self.settings.audit_log_path
@@ -94,7 +109,8 @@ class PipelineRunner:
             if pipeline == "cs2_demo":
                 src, metrics, records = self._run_cs2(run_id, request.force_mock)
             elif pipeline == "ecommerce_demo":
-                src, metrics, records = self._run_ecommerce(run_id, request.force_mock, request.source_path)
+                src, metrics, records = self._run_ecommerce(run_id, request.force_mock, request.source_path,
+                                                            period=(request.period_from, request.period_to))
             elif pipeline == "uksc_evidence":
                 src, metrics, records = self._run_uksc(run_id, request.force_mock, request.source_path,
                                                        request.client_name)
@@ -102,11 +118,13 @@ class PipelineRunner:
                 raise ValueError(f"unknown pipeline: {pipeline}")
             if src.data_status == DataStatus.BLOCKED_MISSING_SECRET and not src.records:
                 raise FileNotFoundError(src.detail)
+            progress(60, "metrics computed")
 
             rep = self.reports.write(
                 pipeline, run_id, src.data_status, metrics, src.detail, records, started,
-                client_name=request.client_name,
+                client_name=request.client_name, language=request.language,
             )
+            progress(90, "report written")
             finished = datetime.utcnow()
             result = RunResult(
                 run_id=run_id,
@@ -153,8 +171,13 @@ class PipelineRunner:
         n = self.db.write_cs2_matches(run_id, src.records, src.data_status.value)
         return src, transform_cs2(src.records), n
 
-    def _run_ecommerce(self, run_id: str, force_mock: bool, source_path: str | None = None) -> tuple[SourceResult, Any, int]:
+    def _run_ecommerce(self, run_id: str, force_mock: bool, source_path: str | None = None,
+                       period: tuple[date | None, date | None] = (None, None)) -> tuple[SourceResult, Any, int]:
         src = EcommerceSource(self.settings).fetch(force_mock=force_mock, source_path=source_path)
+        if period != (None, None):
+            # zakres zamowiony przez klienta: filtr PRZED zapisem i metrykami (raport, DuckDB i zakres runu
+            # widza te same rekordy); zero rekordow po filtrze = istniejaca sciezka `no_records`
+            src = _filter_period(src, *period)
         n = self.db.write_ecommerce_orders(run_id, src.records, src.data_status.value)
         return src, transform_ecommerce(src.records), n
 
@@ -189,6 +212,36 @@ class PipelineRunner:
             httpx.post(self.settings.discord_webhook_url, json={"content": content}, timeout=5.0)
         except Exception as exc:  # noqa: BLE001
             log.warning("discord notify failed: %s", exc)
+
+
+def _day(value: Any) -> date | None:
+    """Data rekordu jako `date` (`datetime` -> sam dzien); inny typ -> None (rekord poza kazdym zakresem)."""
+    if isinstance(value, datetime):
+        return value.date()
+    return value if isinstance(value, date) else None
+
+
+def _filter_period(src: SourceResult, start: date | None, end: date | None) -> SourceResult:
+    """Rekordy z data (pole `date`) w zakresie `start..end` wlacznie; None = brak granicy z tej strony.
+
+    `detail` dostaje dopisek z zakresem i licznikami (bez danych klienta), np.
+    `period 2026-08-01..2026-08-07 (8 of 15 records)`; rekordy bez czytelnej daty nie moga trafic do zakresu
+    i sa liczone osobno: `(... records, 2 without a date)`."""
+    total = len(src.records)
+    undated = 0
+    kept: list[dict[str, Any]] = []
+    for record in src.records:
+        day = _day(record.get("date"))
+        if day is None:
+            undated += 1
+        elif (start is None or day >= start) and (end is None or day <= end):
+            kept.append(record)
+    label = f"{start.isoformat() if start else ''}..{end.isoformat() if end else ''}"
+    note = f"period {label} ({len(kept)} of {total} records"
+    note += f", {undated} without a date)" if undated else ")"
+    src.records = kept
+    src.detail = f"{src.detail} | {note}" if src.detail else note
+    return src
 
 
 def _summary(metrics: Any) -> dict[str, Any]:

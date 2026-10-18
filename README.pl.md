@@ -13,94 +13,75 @@ porównanie tydzień do tygodnia, zamówienia stratne i anomalie — plus sekcja
 z konkretnymi akcjami. Liczby pochodzą wyłącznie z Twojego pliku; nic nie jest generowane „z głowy".
 
 Radzi sobie z realnymi polskimi eksportami: separator `;`, kwoty `1 299,00 zł`, rabaty `30%`,
-statusy `Zrealizowane / Zwrot / Anulowane`, kodowanie `cp1250`, nagłówki po polsku i angielsku.
-
-Dostawa: uruchamiane przyciskiem (webhook n8n) albo automatycznie wg harmonogramu, z alertem przy
-spadku przychodu ≥15% lub marży ≥3 pp. Dostajesz kod źródłowy i workflow — rozwiązanie jest Twoje.
-Możesz hostować u siebie (Docker) albo zlecić hosting.
-
-*In short (EN): send any messy sales export (CSV/XLSX) → get an automated weekly HTML report with
-KPIs, week-over-week deltas, loss-making orders and anomaly flags. FastAPI + DuckDB + n8n, tests included.*
-
-Kontakt: prochpc@gmail.com
-
----
-
-## Dokumentacja techniczna
-
-Silnik analityczny, który bierze dane z dowolnego źródła (API / CSV / fixtures), liczy metryki biznesowe i generuje raport JSON + Markdown — orkiestrowany przez n8n, sterowany przez HTTP.
-
-Stack: **FastAPI · DuckDB · pandas · n8n · Docker Compose**. Python 3.11+ (CI: 3.11, 3.12).
-
-Trzy pipeline'y na jednym silniku (ta sama baza, ten sam kontrakt API):
-
-| pipeline | domena | metryki | źródło LIVE | fallback |
-|---|---|---|---|---|
-| `cs2_demo` | esports (portfolio) | win rate, K/D, rating, ADR, HS%, form score, breakdown map | FACEIT Data API (`FACEIT_API_KEY` + `FACEIT_PLAYER_NICKNAME`) | `data/fixtures/cs2_matches.json` |
-| `ecommerce_demo` | e-commerce B2B | zamówienia, przychód, koszt, zysk, marża %, AOV, zamówienia stratne, anomalie, top kategorie/produkty | Apify dataset (`APIFY_TOKEN` + `APIFY_DATASET_ID`) lub własny CSV (`ECOMMERCE_CSV_PATH`) | `data/fixtures/ecommerce_orders.csv` |
-| `uksc_evidence` | zgodność (UKSC/NIS2) | kontrole techniczne stacji Windows zmapowane na art. 8 UKSC, status i dowód każdej kontroli, `package_sha256` | paczka JSON z `tools/uksc-collector.ps1` | `data/fixtures/uksc/host_compliant.json` |
-
-**Zasada nr 1: brak klucza nie jest błędem.** Pipeline automatycznie przełącza się na fixtures i oznacza wynik jako `MOCK_DATA`. Wszystko działa od pierwszego `docker compose up` bez żadnego sekretu.
+statusy `Zrealizowane / Zwrot / Anulowane`, kodowanie `cp1250`, nagłówki po polsku i angielsku. Przyjmuje CSV i XLSX (bez makr).
 
 ![Raport HTML wygenerowany z pliku klienta (client_export_pl.csv): KPI, marża, zamówienia stratne, anomalie, PRAKTYCZNE WNIOSKI](docs/demo_report.png)
 
-*Powyżej: raport z przykładowego eksportu sklepu (15 zamówień) — od uploadu pliku do gotowego HTML w < 1 s, bez ręcznej roboty. Pełny raport: `runtime/reports/<pipeline>_latest.html` po pierwszym runie.*
+*Powyżej: raport z przykładowego eksportu sklepu (15 zamówień) — od uploadu pliku do gotowego HTML w < 1 s, bez ręcznej roboty.*
 
-**Zasada nr 2 (v0.2): plik klienta zamiast integracji.** `POST /upload` przyjmuje dowolny eksport CSV — plik XLSX odrzuca, więc Excel najpierw zapisz jako CSV (Allegro, Shoper, WooCommerce, Baselinker, Excel "po swojemu" — polskie nagłówki, `1 299,00 zł`, `30%`, `Zrealizowane`), mapuje kolumny heurystycznie i zwraca gotowy payload do `POST /run`. Wynik = `LIVE_DATA`, raport HTML pod linkiem. Demo dla klienta: 2 requesty, zero kodu.
+Kontakt: prochpc@gmail.com
 
----
-
-## Architektura
-
-```
-┌──────────────┐   POST http://app:8000/run    ┌───────────────────────────────┐
-│     n8n      │ ────────────────────────────▶ │        app (FastAPI)          │
-│ Manual/Cron  │ ◀──────────────────────────── │                               │
-│ Format+Alert │      JSON RunResult           │  routes ─▶ PipelineRunner     │
-└──────────────┘                               │              │                │
-       sieć docker: daas_network               │   ┌──────────┼──────────┐     │
-                                               │   ▼          ▼          ▼     │
-                                               │ sources   transforms  reporting│
-                                               │ (LIVE →   (pandas)    (JSON+MD)│
-                                               │  fixture)                     │
-                                               │        └──▶ DuckDB ◀──┘        │
-                                               │        runtime/daas.duckdb    │
-                                               └───────────────────────────────┘
-```
-
-Przepływ jednego runu: `source.fetch()` → zapis surowych rekordów do DuckDB (`cs2_matches` / `ecommerce_orders`, klucz `(run_id, id)`, idempotentnie) → `transform()` → `ReportGenerator.write()` do `runtime/reports/` → metadane runu do tabeli `runs` → JSON `RunResult` w odpowiedzi.
-
-n8n **nie wykonuje** Pythona (żadnego `Execute Command`) — wyłącznie `HTTP Request`. Dzięki temu app można podmienić na cokolwiek (Lambda, Cloud Run, inny język) bez ruszania workflow.
-
-### Struktura repo
-
-```
-app/
-  core/        config.py (Pydantic Settings, auto-detekcja sekretów), models.py
-  storage/     duckdb_client.py (schemat, upsert, odczyt runów)
-  sources/     cs2_source.py, ecommerce_source.py (LIVE → fixture fallback)
-  transforms/  cs2_transform.py, ecommerce_transform.py (pandas)
-  reporting/   generator.py (JSON + Markdown, *_latest.*)
-  pipelines/   runner.py (orkiestracja, kontrakt "nigdy nie rzuca")
-  api/         routes.py
-  main.py
-data/fixtures/ cs2_matches.json, ecommerce_orders.csv
-n8n/           daas_workflow.json
-runtime/       daas.duckdb, reports/   (wolumen, gitignore)
-tests/         test_pipelines.py
-```
+*In short (EN): send any messy sales export (CSV/XLSX) → get an automated weekly HTML report with
+KPIs, week-over-week deltas, loss-making orders and anomaly flags. FastAPI + DuckDB + Next.js cockpit, tests included.*
 
 ---
 
-## Uruchomienie — Docker (rekomendowane)
+## Co dostajesz
+
+- **Raport tygodniowy z Twojego pliku** — HTML (do wydruku do PDF), Markdown i JSON.
+- **Kokpit** (tryb `cloud`) — logujesz się linkiem z e-maila (bez haseł), wgrywasz plik, widzisz postęp na żywo, otwierasz raport i masz archiwum. Blok **Sprawdź sam** liczy skrót SHA-256 pobranego raportu w przeglądarce; plik nie jest wysyłany na serwer.
+- **API** — klucz per organizacja z zakresami, postęp na żywo (SSE), podpisane webhooki. Przykłady: [`docs/API.md`](docs/API.md).
+- **Kolektor artefaktów + raport statusu** — kolektor PowerShell tylko do odczytu (`tools/uksc-collector.ps1`) zbiera ustawienia techniczne stacji Windows do paczki JSON ze skrótami; raport pokazuje kontrolę, wymóg (UKSC/NIS2), status i skrót artefaktu.
+- **Twoje dane zostają Twoje** — każda organizacja ma własny katalog danych i własną bazę DuckDB; pliki wygasają po ustawionej retencji; nic nie idzie do dostawcy AI bez Twojej zgody.
+
+Dostawa: uruchamiane przyciskiem w kokpicie, webhookiem n8n albo automatycznie wg harmonogramu, z alertem przy
+spadku przychodu ≥15% lub marży ≥3 pp. Dostajesz kod źródłowy i workflow — rozwiązanie jest Twoje.
+Możesz hostować u siebie (Docker lub `pip`) albo zlecić hosting.
+
+### Dwa tryby, jeden kod (`DAAS_MODE`)
+
+| | `selfhost` | `cloud` |
+|---|---|---|
+| Dla kogo | wszystko na Twoim serwerze lub komputerze | hosting PPC albo własna usługa dla wielu organizacji |
+| Organizacje | jedna (`default`) | wiele, z członkami i rolami |
+| Logowanie | jeden klucz instancji (`X-API-Key`) | link z e-maila dla ludzi, klucze API dla maszyn |
+| Uruchomienie raportu | `POST /run` (synchronicznie) albo zadania API v1 | zadania API v1 (asynchronicznie, postęp SSE) |
+| Kokpit | opcjonalny | w zestawie (`web/`) |
+| Start | `docker compose up` w katalogu głównym albo `pip` | `deploy/compose.yml` na VPS |
+
+---
+
+## Uruchomienie — Docker Compose, tryb cloud (jeden VPS)
 
 ```bash
-cp .env.example .env          # puste klucze = tryb MOCK_DATA
+cd deploy
+./gen-env.sh --domain raporty.example.com     # tworzy .env z losowymi sekretami (nie nadpisuje istniejącego)
+docker compose build
+docker compose --profile edge up -d           # api + web + Caddy (TLS)
+docker compose exec api python -m app.cli create-org --name "Moja Firma" --owner-email wlasciciel@example.com
+./smoke.sh --public https://raporty.example.com --wait 90
+```
+
+Logowanie: `https://raporty.example.com/login` i link z e-maila (w `.env` ustaw `DAAS_EMAIL_BACKEND=smtp`; przy domyślnym `console` link jest w `docker compose logs api`).
+Instalacja, aktualizacja, rollback, kopie zapasowe i dzielenie VPS z drugą aplikacją: [`deploy/README.md`](deploy/README.md).
+
+Próba lokalna bez domeny i TLS: dopisz do `deploy/.env` trzy linie, uruchom `docker compose up -d --build` i otwórz http://127.0.0.1:3000:
+
+```
+NEXT_PUBLIC_API_ORIGIN=http://127.0.0.1:8000
+DAAS_COCKPIT_ORIGIN=http://127.0.0.1:3000
+DAAS_COOKIE_SECURE=false
+```
+
+## Uruchomienie — Docker Compose, tryb selfhost (z n8n)
+
+```bash
+cp .env.example .env          # ustaw DAAS_API_KEY (min. 16 znaków; openssl rand -hex 24) przed pierwszym startem
 docker compose up --build
 ```
 
-- API: http://localhost:8000 (Swagger: http://localhost:8000/docs)
-- n8n: http://localhost:5678 (login z `.env`: `N8N_BASIC_AUTH_USER` / `N8N_BASIC_AUTH_PASSWORD`)
+- API: http://127.0.0.1:8000 (Swagger pod `/docs` tylko z `APP_ENV=dev`)
+- n8n: http://127.0.0.1:5678 (login z `.env`: `N8N_BASIC_AUTH_USER` / `N8N_BASIC_AUTH_PASSWORD`)
 
 Import workflow do n8n: **Workflows → Import from file** (pliki są też zamontowane w kontenerze pod `/srv/workflows/`):
 
@@ -108,130 +89,148 @@ Import workflow do n8n: **Workflows → Import from file** (pliki są też zamon
 ![Workflow n8n: webhook → POST /upload → walidacja → POST /run → odpowiedź z linkiem do raportu](docs/n8n_client_workflow.png)
 
 - `n8n/daas_client_report.json` — webhook `POST /webhook/daas-report` (multipart `file` + `client_name`) → `POST /upload` → `POST /run` → odpowiedź z linkiem do raportu HTML. To jest "przycisk" dla klienta: wysyła plik, dostaje link. Ustaw `DAAS_PUBLIC_URL` w env n8n, jeśli app jest za reverse proxy.
-
-Kliknij *Execute workflow* — node `POST /run` uderza w `http://app:8000/run` po sieci `daas_network`.
+- `n8n/pilot_workflow.json` — harmonogram z bramką `/health`, wpisem logu do Notion i alertem na Slacku przy awarii runu; ustaw zmienne `NOTION_DAAS_DB_ID`, `SLACK_ALERT_CHANNEL` i `DAAS_APP_URL`.
 
 Baza i raporty trafiają na hosta do `./runtime/` (wolumen).
 
----
+## Uruchomienie — Python bez Dockera
 
-## Uruchomienie — Windows PowerShell bez Dockera
+```bash
+python -m venv .venv && . .venv/bin/activate
+pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
+export DAAS_API_KEY="$(openssl rand -hex 24)"
+export APP_HOST=127.0.0.1 APP_PORT=8000                # adres i port nasłuchu zmieniasz tu (zob. .env.example)
+python -m app.main                                     # http://$APP_HOST:$APP_PORT
+```
 
-**Jedno kliknięcie:** `URUCHOM_DAAS_PYTHON.ps1` (prawy klik → *Uruchom w programie PowerShell*). Skrypt sprawdza Pythona 3.11+, tworzy `.venv`, instaluje zależności, odpala testy, startuje API na `:8000`, wgrywa `data/fixtures/client_export_pl.csv` przez `/upload` → `/run` i otwiera raport HTML w przeglądarce. Brak Pythona: `winget install Python.Python.3.12`.
+`python -m app.main` nasłuchuje na `APP_HOST:APP_PORT` (domyślnie `127.0.0.1:8000`); te zmienne zmieniają bind. W `selfhost` adres inny niż loopback wymaga `DAAS_API_KEY`. Na produkcyjny self-host, który nie uruchamia testów, zainstaluj `requirements.lock` zamiast `requirements-dev.lock` — zawiera tylko zależności uruchomieniowe, a `-dev` dokłada pytest, ruff i pozostałe narzędzia deweloperskie (potrzebne do sekcji Testy poniżej).
 
-Ręcznie:
+**Windows, jedno kliknięcie:** `URUCHOM_DAAS_PYTHON.ps1` (prawy klik → *Uruchom w programie PowerShell*). Skrypt sprawdza Pythona 3.11+, tworzy `.venv`, instaluje zależności, odpala testy, startuje API na `:8000`, wgrywa `data/fixtures/client_export_pl.csv` przez `/upload` → `/run` i otwiera raport HTML w przeglądarce. Brak Pythona: `winget install Python.Python.3.12`.
+
+Ręcznie (PowerShell):
 
 ```powershell
-# 1. środowisko
 py -3.11 -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
-
-# 2. konfiguracja (opcjonalnie — bez .env działa w trybie MOCK_DATA)
-Copy-Item .env.example .env
-
-# 3. testy
+Copy-Item .env.example .env      # ustaw DAAS_API_KEY
 pytest
-
-# 4. start API
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
 ```
 
-Jeśli `Activate.ps1` jest blokowany: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`.
+Jeśli `Activate.ps1` jest blokowany: `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`. n8n bez Dockera: `npx n8n` (Node 18+); w workflow podmień URL `http://app:8000/run` na `http://localhost:8000/run`.
 
-n8n bez Dockera: `npx n8n` (wymaga Node 18+). W workflow podmień URL `http://app:8000/run` na `http://localhost:8000/run`.
+Tryb cloud ze źródeł: `DAAS_MODE=cloud DAAS_SECRET_KEY=$(openssl rand -hex 32) python -m app.main`, kokpit: `cd web && npm ci && npm run build` (szczegóły: [`web/README.md`](web/README.md)).
 
 ---
 
-## API
+## Flow „plik klienta → raport"
 
-| metoda | ścieżka | opis |
-|---|---|---|
-| GET | `/health` | status, wersja, ścieżka bazy, mapa obecności sekretów (bez wartości) |
-| GET | `/pipelines` | lista pipeline'ów + jaki `data_status` jest oczekiwany przy obecnej konfiguracji |
-| POST | `/run` | uruchom pipeline; body `{"pipeline": "cs2_demo" \| "ecommerce_demo" \| "uksc_evidence", "force_mock": false, "notify": false}` |
-| GET | `/runs/latest?pipeline=` | ostatni run (opcjonalnie per pipeline) |
-| GET | `/runs?limit=20` | historia runów |
-| GET | `/runs/{run_id}` | konkretny run |
-| GET | `/stats` | liczności tabel DuckDB |
-| POST | `/upload` | multipart `file` (+ `client_name`) → mapowanie kolumn, `source_path`, `run_payload` |
-| GET | `/reports/{pipeline}/latest?fmt=html\|md\|json` | ostatni raport pipeline'u (HTML otwiera się w przeglądarce) |
-| GET | `/reports/run/{run_id}?fmt=` | raport konkretnego runu |
-
-### Flow "plik klienta → raport" (v0.2)
+Tryb cloud, API v1 (pełny opis: [`docs/API.md`](docs/API.md)):
 
 ```bash
-# 1. upload — zwraca wykryte mapowanie kolumn + run_payload
-curl -s -F "file=@data/fixtures/client_export_pl.csv" -F "client_name=Sklep Demo" localhost:8000/upload | jq
+export DAAS=http://127.0.0.1:8000 KEY="daas_..." ORG="01J..."      # klucz i id organizacji z kokpitu lub z create-org
+
+# 1. upload — zwraca wykryte mapowanie kolumn
+curl -s -H "X-API-Key: $KEY" -F "file=@data/fixtures/client_export_pl.csv" "$DAAS/api/v1/orgs/$ORG/uploads" | jq
+
+# 2. zadanie z identyfikatorem uploadu — 202 Accepted (+ nagłówek Location)
+curl -s -X POST -H "X-API-Key: $KEY" -H "Content-Type: application/json" \
+  -d '{"pipeline":"ecommerce_demo","upload_id":"<id z kroku 1>","client_name":"Sklep Demo"}' "$DAAS/api/v1/orgs/$ORG/jobs" | jq
+
+# 3. po statusie succeeded: raport (HTML w przeglądarce / MD / JSON)
+curl -s -H "X-API-Key: $KEY" "$DAAS/api/v1/orgs/$ORG/runs/<run_id>/report?fmt=html" -o raport.html
+```
+
+### Co tydzień bez klikania
+
+W kokpicie *Ustawienia → Harmonogram i powiadomienia* (albo `PUT /api/v1/orgs/{org_id}/schedule`): cotygodniowe przypomnienie e-mailem o eksporcie (np. poniedziałek 8:00 Europe/Warsaw, pomijane, gdy plik już przyszedł), automatyczne uruchomienie raportu zaraz po wgraniu pliku i e-mail z linkiem do raportu, gdy jest gotowy. Krótka wiadomość może też trafić na czat zespołu (Slack, Microsoft Teams albo dowolny webhook JSON): status, okres danych, skrót raportu i link. W wiadomościach nie ma treści raportu — dane zostają w kokpicie. Szczegóły: [`docs/API.md`](docs/API.md#schedule-and-notifications).
+
+Ekran *Zdrowie danych* (albo `GET /api/v1/orgs/{org_id}/data-health`) mówi, czy raport w przyszły poniedziałek jest bezpieczny: pliki, raporty i błędy tydzień po tygodniu, seria tygodni z raportem i to, co naprawić, z linkiem do właściwego ekranu ([`docs/API.md`](docs/API.md#data-health)).
+
+Tryb selfhost, trasy legacy (każda poza `/health` i `/ready` wymaga `X-API-Key` z `DAAS_API_KEY`):
+
+```bash
+curl -s -H "X-API-Key: $DAAS_API_KEY" -F "file=@data/fixtures/client_export_pl.csv" -F "client_name=Sklep Demo" localhost:8000/upload | jq
 # {"rows":15,"confidence":1.0,"ready":true,"mapping":{"revenue":"Wartość brutto",...},
-#  "run_payload":{"pipeline":"ecommerce_demo","source_path":"/srv/app/runtime/uploads/..._client_export_pl.csv","client_name":"Sklep Demo"}}
-
-# 2. run z run_payload z kroku 1
-curl -s -X POST localhost:8000/run -H "Content-Type: application/json" \
-  -d '{"pipeline":"ecommerce_demo","source_path":"<source_path z uploadu>","client_name":"Sklep Demo"}' | jq
-
-# 3. raport dla klienta (HTML w przeglądarce / MD / JSON)
-open http://localhost:8000/reports/ecommerce_demo/latest
-curl -s "localhost:8000/reports/run/<run_id>?fmt=json" | jq .narrative
-```
-
-Mapper (`app/sources/csv_mapper.py`): aliasy PL/EN dla `order_id, date, product, category, quantity, revenue, cost, profit, discount, status`; auto-detekcja separatora (`;`/`,`/tab) i kodowania (utf-8/cp1250); liczby `1 299,00 zł` / `1,299.00` / `12,5%`; statusy `Zrealizowane/Wysłane/Zwrot/Anulowane/Oczekujące` → `completed/refunded/cancelled/pending`. Brakujące kolumny są dopełniane (`profit = revenue - cost`, `status = completed`, `category = Inne`) i raportowane w polu `generated`; `confidence` mówi, ile z kolumn kluczowych znaleziono w pliku.
-
-### Przykłady curl
-
-```bash
-curl -s localhost:8000/health | jq
-curl -s localhost:8000/pipelines | jq
-
-curl -s -X POST localhost:8000/run -H "Content-Type: application/json" \
-  -d '{"pipeline":"cs2_demo"}' | jq
-
-curl -s -X POST localhost:8000/run -H "Content-Type: application/json" \
-  -d '{"pipeline":"ecommerce_demo"}' | jq
-
-curl -s "localhost:8000/runs/latest?pipeline=ecommerce_demo" | jq
-```
-
-PowerShell:
-
-```powershell
-Invoke-RestMethod -Method Post -Uri http://localhost:8000/run -ContentType "application/json" -Body '{"pipeline":"cs2_demo"}' | ConvertTo-Json -Depth 5
-```
-
-### Odpowiedź `POST /run`
-
-```json
-{
-  "run_id": "602915ef-1151-4151-b892-745bfd183659",
-  "pipeline": "cs2_demo",
-  "run_status": "SUCCESS",
-  "data_status": "MOCK_DATA",
-  "records_processed": 10,
-  "report_path": "/srv/app/runtime/reports/cs2_demo_20260906_085505_602915ef.md",
-  "report_json_path": "/srv/app/runtime/reports/cs2_demo_20260906_085505_602915ef.json",
-  "execution_time_sec": 0.139,
-  "started_at": "2026-09-06T08:55:05.721253",
-  "finished_at": "2026-09-06T08:55:05.860736",
-  "source_detail": "FACEIT_API_KEY missing -> fixture fallback",
-  "error": null,
-  "metrics": { "matches": 10, "win_rate": 60.0, "kd_ratio": 1.29, "avg_rating": 1.2, "form_score": 76.6, "form_trend": "UP", "best_map": "de_ancient", "worst_map": "de_nuke" }
-}
+#  "run_payload":{"pipeline":"ecommerce_demo","upload_id":"<32 znaki hex>","client_name":"Sklep Demo"}}
+curl -s -X POST localhost:8000/run -H "X-API-Key: $DAAS_API_KEY" -H "Content-Type: application/json" \
+  -d '{"pipeline":"ecommerce_demo","upload_id":"<upload_id>","client_name":"Sklep Demo"}' | jq
+curl -s -H "X-API-Key: $DAAS_API_KEY" "localhost:8000/reports/ecommerce_demo/latest?fmt=html" -o raport.html
 ```
 
 `run_status`: `SUCCESS` / `PARTIAL` (0 rekordów) / `FAILED` (wyjątek — nadal HTTP 200, szczegół w `error`).
 `data_status`: `LIVE_DATA` / `MOCK_DATA` / `BLOCKED_MISSING_SECRET` (brak sekretu **i** brak fixture — nie powinno się zdarzyć w repo).
 
+Mapper (`app/sources/csv_mapper.py`): aliasy PL/EN dla `order_id, date, product, category, quantity, revenue, cost, profit, discount, status`; auto-detekcja separatora (`;`/`,`/tab) i kodowania (utf-8/cp1250); liczby `1 299,00 zł` / `1,299.00` / `12,5%`; statusy `Zrealizowane/Wysłane/Zwrot/Anulowane/Oczekujące` → `completed/refunded/cancelled/pending`. Brakujące kolumny są dopełniane (`profit = revenue - cost`, `status = completed`, `category = Inne`) i raportowane w polu `generated`; `confidence` mówi, ile z kolumn kluczowych znaleziono w pliku. XLSX przechodzi tę samą ścieżkę po konwersji do CSV (limity: `docs/pilot/INPUT_REQUIREMENTS_PL.md`).
+
+---
+
+## Dostęp dla agentów (MCP)
+
+Asystenci AI (Claude, ChatGPT, Codex, Gemini) mogą używać DaaS Engine jak narzędzia: API ma wbudowany serwer MCP pod `POST /mcp` (Streamable HTTP, bezstanowy, odpowiedzi JSON). Łączysz go kluczem API organizacji w nagłówku `Authorization: Bearer <klucz>` i prosisz zwykłym językiem: „wgraj ten eksport, policz raport i powiedz, co spadło". 13 narzędzi obejmuje upload (tekst CSV albo plik XLSX), runy (opcjonalnie za wybrany okres), raporty, weryfikację hasha, status artefaktów i zużycie — zawsze w organizacji klucza; raporty są też dostępne jako zasoby MCP, a ChatGPT lub Claude mogą połączyć się przez OAuth 2.1 zamiast kluczem.
+
+```bash
+claude mcp add --transport http daas https://raporty.example.com/mcp --header "Authorization: Bearer $KEY"
+```
+
+Treść raportu pochodzi z plików klienta: dla agenta to dane, nie polecenia. Konfiguracja innych klientów, limity i bezpieczeństwo: [`docs/MCP.md`](docs/MCP.md).
+
+---
+
+## Architektura
+
+Jeden proces FastAPI, control plane (konta, klucze, zadania, audyt; SQLite + Alembic) i data plane (katalog `runtime/tenants/<org_id>/` z własnym plikiem DuckDB, uploadami i raportami). Diagram, tryby, wykonawca zadań: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+```
+app/
+  api/         routes.py (legacy, selfhost), v1/ (organizacje, klucze, uploady, zadania, runy, webhooki)
+  control/     control plane: modele, migracje, tenancy, executor zadań, webhooki
+  core/        config.py (Pydantic Settings), auth, limity, upload_guard, import XLSX, redakcja, observability
+  storage/     duckdb_client.py (schemat, upsert, odczyt runów)
+  sources/     cs2_source.py, ecommerce_source.py, csv_mapper.py, uksc_source.py (LIVE → fixture fallback)
+  transforms/  cs2_transform.py, ecommerce_transform.py, uksc_transform.py (pandas)
+  reporting/   generator.py (HTML + Markdown + JSON), narracja
+  pipelines/   runner.py (orkiestracja, kontrakt "nigdy nie rzuca")
+web/           kokpit Next.js 16
+deploy/        compose, Caddyfile, gen-env.sh, backup.sh, restore.sh, smoke.sh
+data/fixtures/ dane przykładowe (syntetyczne)
+n8n/           workflowy
+runtime/       dane i raporty (wolumen, gitignore)
+tests/         testy offline
+```
+
+Trzy pipeline'y na jednym silniku (ta sama baza, ten sam kontrakt API):
+
+| pipeline | domena | metryki | źródło LIVE | fallback |
+|---|---|---|---|---|
+| `cs2_demo` | esports statistics (portfolio) | win rate, K/D, rating, ADR, HS%, form score, breakdown map | FACEIT Data API (`FACEIT_API_KEY` + `FACEIT_PLAYER_NICKNAME`) | `data/fixtures/cs2_matches.json` |
+| `ecommerce_demo` | e-commerce B2B | zamówienia, przychód, koszt, zysk, marża %, AOV, zamówienia stratne, anomalie, top kategorie/produkty | Apify dataset (`APIFY_TOKEN` + `APIFY_DATASET_ID`), własny CSV/XLSX (`ECOMMERCE_CSV_PATH`) albo upload klienta | `data/fixtures/ecommerce_orders.csv` |
+| `uksc_evidence` | kolektor artefaktów + raport statusu (UKSC/NIS2) | kontrole techniczne stacji Windows zmapowane na wymogi UKSC, status i skrót artefaktu każdej kontroli, `package_sha256` | paczka JSON z `tools/uksc-collector.ps1` | `data/fixtures/uksc/host_compliant.json` |
+
+**Zasada nr 1: brak klucza nie jest błędem.** Pipeline automatycznie przełącza się na fixtures i oznacza wynik jako `MOCK_DATA`. Wszystko działa od pierwszego uruchomienia bez żadnego sekretu źródłowego.
+
+**Zasada nr 2: plik klienta zamiast integracji.** Upload przyjmuje dowolny eksport CSV lub XLSX (Allegro, Shoper, WooCommerce, Baselinker, Excel „po swojemu"), mapuje kolumny heurystycznie i zwraca gotowy payload. Wynik = `LIVE_DATA`, raport HTML pod linkiem. Demo dla klienta: 2 requesty, zero kodu.
+
+Przepływ jednego runu: `source.fetch()` → zapis surowych rekordów do DuckDB (klucz `(run_id, id)`, idempotentnie) → `transform()` → `ReportGenerator.write()` → metadane runu do tabeli `runs` → wynik `RunResult`.
+
+n8n **nie wykonuje** Pythona (żadnego `Execute Command`) — wyłącznie `HTTP Request`. Dzięki temu app można podmienić na cokolwiek bez ruszania workflow.
+
 ---
 
 ## Sekrety i fallback
 
+Pełna lista zmiennych z wartościami domyślnymi: [`docs/DEPLOY.md`](docs/DEPLOY.md) i [`.env.example`](.env.example).
+
 | zmienna | używana przez | brak → |
 |---|---|---|
+| `DAAS_API_KEY` | tryb `selfhost`: nagłówek `X-API-Key` | trasy chronione odpowiadają `401`, start poza loopbackiem odmówiony |
+| `DAAS_SECRET_KEY` | tryb `cloud`: podpis sesji i webhooków (min. 32 znaki) | start odmówiony |
 | `FACEIT_API_KEY` (+ `FACEIT_PLAYER_NICKNAME`) | `cs2_demo` | fixture `cs2_matches.json`, `MOCK_DATA` |
 | `APIFY_TOKEN` (+ `APIFY_DATASET_ID`) | `ecommerce_demo` | `ECOMMERCE_CSV_PATH` jeśli ustawiony, inaczej fixture `ecommerce_orders.csv`, `MOCK_DATA` |
-| `LIQUIPEDIA_USER_AGENT` | zarezerwowane (drużynowy kontekst CS2) | ignorowane |
+| `LIQUIPEDIA_USER_AGENT` | zarezerwowane | ignorowane |
 | `DISCORD_WEBHOOK_URL` | `notify=true` w `/run` | powiadomienie pominięte, run OK |
-| `ANTHROPIC_API_KEY` | streszczenie wykonawcze w raporcie | deterministyczny szablon (`narrative_source: TEMPLATE`) |
+| `ANTHROPIC_API_KEY` + zgoda (`DAAS_LLM_NARRATIVE` / ustawienie organizacji) | streszczenie wykonawcze w raporcie | deterministyczny szablon (`narrative_source: TEMPLATE`) |
 
 Błąd sieci przy LIVE (timeout, 401, zmiana schematu API) również kończy się fallbackiem na fixture — pipeline nie wywraca się z powodu źródła. Powód jest zawsze w `source_detail`.
 
@@ -262,7 +261,7 @@ Błąd sieci przy LIVE (timeout, 401, zmiana schematu API) również kończy si�
 Każdy raport Markdown kończy się sekcją **PRAKTYCZNE WNIOSKI** — konkretne akcje wynikające z liczb.
 
 ### Streszczenie (narrative)
-Raport zaczyna się od 3-5 zdań streszczenia. Gdy `ANTHROPIC_API_KEY` jest ustawiony, pisze je model (`NARRATIVE_MODEL`, domyślnie `claude-sonnet-4-5`) z twardą zasadą: **LLM nie liczy** — dostaje policzone metryki jako JSON i tylko je opisuje. Brak klucza lub błąd sieci → szablon deterministyczny z tymi samymi liczbami. Źródło zawsze widoczne w raporcie (`narrative_source: LLM | TEMPLATE`).
+Raport zaczyna się od 3-5 zdań streszczenia. Domyślnie pisze je deterministyczny szablon z policzonych metryk (`narrative_source: TEMPLATE`). Streszczenie przez model (`NARRATIVE_MODEL`, domyślnie `claude-sonnet-4-5`) jest **opt-in**: wymaga zgody (`DAAS_LLM_NARRATIVE=true` w trybie `selfhost`, ustawienie organizacji `llm_narrative` w trybie `cloud`) oraz `ANTHROPIC_API_KEY`; sam klucz niczego nie włącza. Zasada: **LLM nie liczy** — dostaje policzone metryki oraz nazwy kilku największych kategorii i map z pliku (bez identyfikatorów zamówień, nazw produktów i nazwy klienta) i ma je tylko opisać; treść nie jest weryfikowana z danymi, więc czytaj ją jak szkic. Raport oznacza takie streszczenie jako wygenerowane przez model (`narrative_source: LLM`).
 
 ### Raport HTML
 Samodzielny plik (inline CSS, bez zależności zewnętrznych), otwiera się z dysku, z maila, drukuje do PDF (Ctrl+P). Dla każdego runu: `runtime/reports/<pipeline>_<ts>_<id>.html` + `<pipeline>_latest.html`.
@@ -284,14 +283,17 @@ Kontrakt API i workflow n8n nie zmieniają się.
 ## Testy
 
 ```bash
-pytest -v
+pytest                                  # backend, offline
+cd web && npm test && npm run e2e       # kokpit: testy jednostkowe; e2e wymaga API w trybie cloud (web/README.md)
 ```
 
-195 testów, m.in.: detekcja sekretów, pipeline'y w trybie mock, `force_mock`, zapis i idempotencja w tymczasowej bazie DuckDB, transformacje na pustym wejściu, monotoniczność form score, kody odpowiedzi wszystkich endpointów (200/400/404/415/422), mapper CSV (formaty liczb PL/EN, polskie nagłówki, dopełnianie kolumn, odrzucenie pliku bez przychodu), flow upload→run→HTML, fallback narracji przy braku klucza i przy błędzie sieci.
+CI (`.github/workflows/ci.yml`): pytest na Python 3.11/3.12/3.13, testy control plane na prawdziwym PostgreSQL (blokady wierszy, migracje), smoke API przez curl, skanery (gitleaks, semgrep, zizmor, pip-audit), kokpit (eslint, tsc, vitest, build), testy end-to-end Playwright w Chromium, Firefoksie i WebKicie, Lighthouse (mobile), build obrazów Docker (API i kokpit) wraz ze smoke w kontenerze.
 
-CI: `.github/workflows/ci.yml` — pytest na Python 3.11/3.12, smoke API przez curl, build obrazu Docker + smoke w kontenerze.
+Szczegółowa lista kontrolna: [VALIDATION.md](VALIDATION.md). Historia zmian: [CHANGELOG.md](CHANGELOG.md).
 
-Szczegółowa lista kontrolna: [VALIDATION.md](VALIDATION.md).
+## Dokumentacja
+
+[`docs/API.md`](docs/API.md) · [`docs/MCP.md`](docs/MCP.md) · [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) · [`docs/DEPLOY.md`](docs/DEPLOY.md) · [`deploy/README.md`](deploy/README.md) · [`docs/SECURITY.md`](docs/SECURITY.md) · [`docs/DPA_v1_PL.md`](docs/DPA_v1_PL.md) · materiały pilota: [`docs/pilot/`](docs/pilot)
 
 ---
 

@@ -1,0 +1,114 @@
+# Caddy 2: TLS (Let's Encrypt, automatycznie), reverse proxy dla kokpitu i API.
+# Domena z DAAS_DOMAIN (deploy/.env). Bez zmiennej: `localhost` (certyfikat z lokalnego CA Caddy, do prob).
+# Rekordy DNS A/AAAA domeny musza wskazywac na VPS, a porty 80 i 443 byc otwarte.
+#
+#   /api/*   -> api:8000   (API v1, SSE, raporty)
+#   /mcp     -> api:8000   (serwer MCP dla agentow AI, docs/MCP.md)
+#   /authorize /token /register /revoke /.well-known/oauth-*
+#            -> api:8000   (OAuth 2.1 dla konektorow MCP: ChatGPT, Claude; tylko cloud)
+#   reszta   -> web:3000   (kokpit Next.js)
+{
+	# Dziennik domyslny (m.in. bledy proxy, np. 502 przy restarcie API) niesie to samo zapytanie co dziennik dostepu,
+	# wiec dostaje ten sam filtr: bez tokenu linku logowania, cookie i kluczy.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace token REDACTED
+				}
+				request>headers>Referer delete
+				request>headers>X-Api-Key delete
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>headers>X-Csrf-Token delete
+			}
+		}
+	}
+}
+
+{$DAAS_DOMAIN:localhost} {
+	# Dziennik dostepu w JSON na stdout (docker compose logs caddy). Klucz API, cookie i token linku logowania
+	# (?token=... w /login/verify) nie trafiaja do dziennika: naglowki sa usuwane, parametr `token` zamazany.
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>uri query {
+					replace token REDACTED
+				}
+				request>headers>Referer delete
+				request>headers>X-Api-Key delete
+				request>headers>Cookie delete
+				request>headers>Authorization delete
+				request>headers>X-Csrf-Token delete
+				resp_headers>Set-Cookie delete
+			}
+		}
+	}
+
+	# Naglowki bezpieczenstwa. `?` = ustaw tylko gdy aplikacja jeszcze nie ustawila (CSP z nonce zostaje po stronie kokpitu i API).
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		?X-Content-Type-Options "nosniff"
+		?Referrer-Policy "no-referrer"
+		?Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		-Server
+	}
+
+	# Metryki sa tylko dla operatora: na 127.0.0.1:8000, nigdy przez internet.
+	# (blok `handle` przed pozostalymi, bo `handle` wyprzedza `respond` w kolejnosci dyrektyw Caddy)
+	@metrics path /metrics /metrics/* /api/v1/metrics /api/v1/metrics/*
+	handle @metrics {
+		respond 404
+	}
+
+	handle /api/* {
+		# Najwiekszy upload (CSV/XLSX 10 MiB) + narzut multipart.
+		request_body {
+			max_size 12MiB
+		}
+		reverse_proxy api:8000 {
+			# Adres klienta: jawnie NADPISZ X-Forwarded-For (nigdy nie dopisuj do wartosci od klienta). API ufa temu
+			# naglowkowi (FORWARDED_ALLOW_IPS), wiec wpis podstawiony przez klienta dawalby falszywy adres w limitach i audycie.
+			header_up X-Forwarded-For {remote_host}
+			# SSE (/api/v1/orgs/*/jobs/*/events): bez buforowania, zdarzenia ida od razu.
+			flush_interval -1
+		}
+	}
+
+	# Serwer MCP (Streamable HTTP, odpowiedzi JSON): limit ciala nad DAAS_MCP_MAX_BODY_BYTES (3 MiB), bez buforowania.
+	@mcp path /mcp /mcp/*
+	handle @mcp {
+		request_body {
+			max_size 4MiB
+		}
+		reverse_proxy api:8000 {
+			header_up X-Forwarded-For {remote_host}
+			flush_interval -1
+		}
+	}
+
+	# Serwer autoryzacji OAuth 2.1 konektorow MCP (SDK `mcp` w API): rejestracja, zgoda (przekierowanie do kokpitu
+	# /oauth/consent), token, cofniecie i metadane RFC 8414 / RFC 9728. Ciala to male formularze i JSON.
+	@oauth path /authorize /token /register /revoke /.well-known/oauth-*
+	handle @oauth {
+		request_body {
+			max_size 64KiB
+		}
+		reverse_proxy api:8000 {
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+
+	handle {
+		request_body {
+			max_size 1MiB
+		}
+		reverse_proxy web:3000 {
+			header_up X-Forwarded-For {remote_host}
+		}
+	}
+}

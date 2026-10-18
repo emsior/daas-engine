@@ -16,6 +16,7 @@ from app.pipelines.runner import PIPELINES, PipelineRunner
 from app.sources.uksc_source import UkscSource, compute_package_hash
 from app.storage.duckdb_client import DuckDBClient
 from app.transforms.uksc_transform import transform_uksc
+from tests.conftest import auth_headers
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = PROJECT_ROOT / "data" / "fixtures" / "uksc"
@@ -105,7 +106,7 @@ def test_source_fixture_fallback_is_mock(settings: Settings):
 
 def test_source_rejects_tampered_package(settings: Settings):
     raw = _load("host_compliant.json")
-    raw["checks"][3]["evidence"]["tamper_protected"] = False  # zmiana dowodu bez przeliczenia hasha
+    raw["checks"][3]["evidence"]["tamper_protected"] = False  # zmiana artefaktu bez przeliczenia hasha
     path = _put_upload(settings, raw)
     res = UkscSource(settings).fetch(source_path=path)
     assert res.data_status == DataStatus.BLOCKED_MISSING_SECRET
@@ -119,7 +120,7 @@ def test_source_rejects_tampered_package(settings: Settings):
 
 
 def test_source_rejects_package_with_stripped_hashes(settings: Settings):
-    # review PR #9: usuniecie wszystkich evidence_hash nie moze omijac wykrywania edycji dowodu
+    # review PR #9: usuniecie wszystkich evidence_hash nie moze omijac wykrywania edycji artefaktu
     raw = _load("host_compliant.json")
     raw["checks"][3]["evidence"]["tamper_protected"] = False
     for c in raw["checks"]:
@@ -182,7 +183,7 @@ def test_pipeline_run_writes_db_and_report(runner: PipelineRunner):
     counts = runner.db.table_counts()
     assert counts["uksc_hosts"] == 1 and counts["uksc_checks"] == 32 and counts["uksc_inventory"] == 3
     md = Path(res.report_path).read_text(encoding="utf-8")
-    assert "Dowód UKSC" in md and "art. 8 ust. 1 pkt 2 lit. k" in md
+    assert "Raport statusu UKSC — artefakty techniczne stacji" in md and "art. 8 ust. 1 pkt 2 lit. k" in md
     # nazwy dla czytelnika po polsku (dane w paczce zostają w ASCII)
     assert "Polityka bezpieczeństwa / dokumentacja SZBI" in md and "zał. 4 pkt 11" in md and "zal. 4" not in md
     assert "Demo Sp. z o.o." in md
@@ -192,6 +193,14 @@ def test_pipeline_run_writes_db_and_report(runner: PipelineRunner):
     for banned in ("certyfikuje", "gwarantuje zgodnosc", "pelna zgodnosc", "gwarantuje zgodność", "pełna zgodność"):
         assert banned not in md.lower()
     html = Path(res.report_html_path).read_text(encoding="utf-8")
+    # slownictwo publiczne (C7/Q-13): kolektor artefaktow + raport statusu, nigdy "dowod zgodnosci"
+    for text in (md, html, Path(res.report_json_path).read_text(encoding="utf-8")):
+        low = text.lower()
+        for banned in ("dowód", "dowod", "do audytu", "zgodności technicznej"):
+            assert banned not in low, banned
+    assert "Raport statusu UKSC" in html
+    desc = {p.name: p.description for p in runner.list_pipelines()}["uksc_evidence"].lower()
+    assert "dowód" not in desc and "artefakt" in desc
     assert "<table" in html
     assert res.metrics["coverage_pct"] == 81.2
 
@@ -223,7 +232,7 @@ def test_pipeline_failed_run_when_package_bad(runner: PipelineRunner, settings: 
 
 def test_api_accepts_uksc_pipeline(settings: Settings, monkeypatch: pytest.MonkeyPatch):
     from app.main import app
-    with TestClient(app) as client:
+    with TestClient(app, headers=auth_headers()) as client:
         r = client.get("/pipelines")
         assert r.status_code == 200
         assert any(p["name"] == "uksc_evidence" for p in r.json())

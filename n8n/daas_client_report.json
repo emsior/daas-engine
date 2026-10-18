@@ -18,7 +18,13 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://app:8000/upload",
+        "url": "={{ $env.DAAS_APP_URL || 'http://app:8000' }}/upload",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.DAAS_API_KEY }}" }
+          ]
+        },
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {
@@ -60,14 +66,20 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://app:8000/run",
+        "url": "={{ $env.DAAS_APP_URL || 'http://app:8000' }}/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "X-API-Key", "value": "={{ $env.DAAS_API_KEY }}" }
+          ]
+        },
         "sendBody": true,
         "specifyBody": "json",
         "jsonBody": "={{ JSON.stringify($json.run_payload) }}",
         "options": { "timeout": 120000 }
       },
       "id": "b2d3e4f5-0004-4000-8000-000000000004",
-      "name": "POST /run (source_path)",
+      "name": "POST /run (upload_id)",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [780, 200]
@@ -112,11 +124,11 @@
     "POST /upload (plik klienta)": { "main": [[{ "node": "Plik OK?", "type": "main", "index": 0 }]] },
     "Plik OK?": {
       "main": [
-        [{ "node": "POST /run (source_path)", "type": "main", "index": 0 }],
+        [{ "node": "POST /run (upload_id)", "type": "main", "index": 0 }],
         [{ "node": "Respond 422", "type": "main", "index": 0 }]
       ]
     },
-    "POST /run (source_path)": { "main": [[{ "node": "Zbuduj odpowiedź", "type": "main", "index": 0 }]] },
+    "POST /run (upload_id)": { "main": [[{ "node": "Zbuduj odpowiedź", "type": "main", "index": 0 }]] },
     "Zbuduj odpowiedź": { "main": [[{ "node": "Respond OK", "type": "main", "index": 0 }]] }
   },
   "settings": { "executionOrder": "v1", "timezone": "Europe/Warsaw" },

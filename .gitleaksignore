@@ -1,0 +1,14 @@
+# Gitleaks: point exceptions for exactly 8 findings in git history (not a path/regex allowlist).
+# All 8 are synthetic test values in tests/ (literals such as "test...", "zly-...", a sample ULID); none is a real secret.
+# Owner decision of 2026-10-13: narrow exception, format <commit>:<file>:<rule>:<line>.
+# The fingerprints depend on commit hashes: merge PR #13 with a merge commit (no squash, no rebase);
+# otherwise the hashes change and this file must be regenerated (gitleaks git --redact -f json -> Fingerprint).
+# Any NEW finding is not covered here and must still fail CI.
+324b16db3a2b4058980172157b27ac1ccc60b95d:tests/conftest.py:generic-api-key:26
+852b46d4ca9b117b53e3fff69c491ee48a4041f7:tests/test_metrics.py:generic-api-key:178
+e2dece0faabc42c1884659750cb1239215427847:tests/conftest.py:generic-api-key:21
+effa9775149fd598285556c3018ec22ab7cb4092:tests/test_auth.py:generic-api-key:64
+effa9775149fd598285556c3018ec22ab7cb4092:tests/test_observability.py:generic-api-key:104
+effa9775149fd598285556c3018ec22ab7cb4092:tests/test_security.py:generic-api-key:116
+effa9775149fd598285556c3018ec22ab7cb4092:tests/test_security.py:generic-api-key:117
+fa76f838774a815e3947846c15c3dc39e91218c8:tests/test_limits.py:generic-api-key:160

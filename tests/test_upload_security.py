@@ -26,7 +26,7 @@ from app.core.upload_guard import (
 )
 from app.pipelines.runner import PipelineRunner
 from app.storage.duckdb_client import DuckDBClient
-from tests.test_pipelines import PROJECT_ROOT, client, runner, settings  # noqa: F401  (fixtures)
+from tests.conftest import PROJECT_ROOT, auth_headers  # noqa: F401  (fixture'y: tests/conftest.py)
 
 HEADER = "Data,Kwota,Produkt\n"
 ROW = "2026-03-01,100.00,Produkt testowy\n"
@@ -100,7 +100,7 @@ def policy_client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     s.ensure_dirs()
     r = PipelineRunner(settings=s, db=DuckDBClient(s.duckdb_file))
     app = create_app()
-    with TestClient(app) as c:
+    with TestClient(app, headers=auth_headers()) as c:
         app.state.runner = r
         yield c, s
     reset_settings_cache()
@@ -185,11 +185,13 @@ def test_u04_multiple_files_rejected(client: TestClient, settings):  # noqa: F81
 # U05 — niedozwolone rozszerzenia
 # ===========================================================================
 @pytest.mark.parametrize("name", [
-    "dane.xlsx", "dane.xls", "dane.zip", "dane.gz", "dane.tar",
+    "dane.xlsm", "dane.xls", "dane.zip", "dane.gz", "dane.tar",
     "dane.pdf", "dane.json", "dane.xml", "dane.txt", "dane.tsv",
     "dane.png", "dane.exe", "dane", "dane.csv.exe",
 ])
 def test_u05_forbidden_extensions_rejected(client: TestClient, settings, name):  # noqa: F811
+    # H9: dozwolone sa .csv i .xlsx (import z limitami: tests/test_xlsx_upload.py); .xlsx usuniete z tej listy,
+    # w jego miejsce .xlsm (skoroszyt z makrami)
     r = client.post("/upload", files={"file": (name, csv_bytes(3), "text/csv")})
     assert r.status_code == 415, f"{name}: oczekiwano 415, otrzymano {r.status_code}"
     assert_no_leftovers(settings)
@@ -341,7 +343,8 @@ def test_u11_same_filename_twice_distinct_ids(client: TestClient, settings):  # 
 # U12 — policy wyłączona (kompatybilność MVP)
 # ===========================================================================
 def test_u12_policy_disabled_keeps_working(client: TestClient, settings):  # noqa: F811
-    """DAAS_POLICY_ENFORCE=false: upload działa, brak nieoczekiwanych odmów."""
+    """DAAS_POLICY_ENFORCE=false (jawnie; domyslnie policy jest wlaczone): upload dziala, brak nieoczekiwanych odmow."""
+    settings.daas_policy_enforce = False
     assert settings.daas_policy_enforce is False
     r = client.post("/upload", files={"file": ("dane.csv", csv_bytes(5), "text/csv")})
     assert r.status_code == 200, r.text[:200]

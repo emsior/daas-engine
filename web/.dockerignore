@@ -1,0 +1,19 @@
+# Kontekst budowania obrazu kokpitu: bez zaleznosci hosta, wynikow budowania i sekretow.
+node_modules
+.next
+out
+coverage
+playwright-report
+test-results
+*.tsbuildinfo
+.env
+.env.*
+!.env.example
+.git
+.gitignore
+Dockerfile
+.dockerignore
+# materialy, ktorych runtime nie czyta
+e2e
+design
+README.md

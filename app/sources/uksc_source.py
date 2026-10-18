@@ -29,7 +29,7 @@ MAX_PACKAGE_BYTES = 5 * 1024 * 1024  # 5 MiB - paczka ze stacji to kilkadziesiat
 
 
 def canonical_evidence(evidence: dict[str, Any]) -> bytes:
-    """Kanoniczny JSON dowodu: klucze posortowane ordinalnie, bez spacji, non-ASCII jako \\uXXXX.
+    """Kanoniczny JSON artefaktu: klucze posortowane ordinalnie, bez spacji, non-ASCII jako \\uXXXX.
     Identyczne bajty produkuje ConvertTo-CanonicalJson w tools/uksc-collector.ps1."""
     return json.dumps(evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
 
@@ -39,7 +39,7 @@ def compute_evidence_hash(evidence: dict[str, Any]) -> str:
 
 
 def compute_package_hash(evidence_hashes: list[str]) -> str:
-    """Hash paczki = sha256 nad posortowana konkatenacja hashy dowodow (tylko hex, deterministyczne miedzy PS i Py)."""
+    """Hash paczki = sha256 nad posortowana konkatenacja hashy artefaktow (tylko hex, deterministyczne miedzy PS i Py)."""
     joined = "".join(sorted(h.lower() for h in evidence_hashes))
     return hashlib.sha256(joined.encode("ascii")).hexdigest()
 
@@ -55,7 +55,7 @@ class UkscSource:
             reason = "force_mock=true" if force_mock else "no source_path -> fixture fallback"
             return self._load(self.fixture_path, DataStatus.MOCK_DATA, reason)
 
-        uploads_root = (self.settings.reports_path.parent / "uploads").resolve()
+        uploads_root = self.settings.uploads_path.resolve()
         p = Path(source_path).resolve()
         if not p.is_relative_to(uploads_root):
             return _blocked("source_path outside allowed uploads directory")
@@ -66,7 +66,7 @@ class UkscSource:
     # ------------------------------------------------------------------
     def _load(self, path: Path, status: DataStatus, detail: str) -> SourceResult:
         if not path.exists():
-            return _blocked(f"{detail}; package not found at {path}")
+            return _blocked(f"{detail}; package not found")
         if path.stat().st_size > MAX_PACKAGE_BYTES:
             return _blocked(f"package too large (> {MAX_PACKAGE_BYTES} bytes)")
         try:
@@ -86,11 +86,11 @@ class UkscSource:
         missing = [c.control_id for c in pkg.checks if c.evidence_source == "powershell" and not c.evidence_hash]
         if missing:
             return _blocked(f"evidence_hash missing for collector checks: {', '.join(missing[:5])}")
-        # 1) kazdy dowod: hash policzony z tresci musi zgadzac sie z zadeklarowanym (wykrywa edycje evidence)
+        # 1) kazdy artefakt: hash policzony z tresci musi zgadzac sie z zadeklarowanym (wykrywa edycje evidence)
         for c in pkg.checks:
             if c.evidence_hash and c.evidence_source == "powershell" and compute_evidence_hash(c.evidence) != c.evidence_hash:
                 return _blocked(f"evidence_hash mismatch for {c.control_id} (evidence edited after collection)")
-        # 2) paczka: hash nad posortowanymi hashami dowodow (wykrywa dodanie/usuniecie/podmiane kontroli)
+        # 2) paczka: hash nad posortowanymi hashami artefaktow (wykrywa dodanie/usuniecie/podmiane kontroli)
         hashes = [c.evidence_hash for c in pkg.checks if c.evidence_hash]
         integrity = "unverifiable"
         if hashes and len(hashes) == len(pkg.checks):
