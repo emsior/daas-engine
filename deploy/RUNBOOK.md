@@ -331,7 +331,7 @@ Dowód: po pierwszym ręcznym `~/daas-nightly.sh` pojawia się archiwum z `.sha2
 
 ## 5. Próba odtworzenia i odtworzenie w izolacji (co miesiąc)
 
-Comiesięczną próbę wykonuj na **osobnym, zatwierdzonym hoście**, w tym samym regionie i na tych samych zasadach przetwarzania danych co produkcja. Zgodne obrazy aplikacji, Compose, `nft`, `curl`, archiwum z plikiem `.sha256` oraz prywatną konfigurację wdrożenia przygotuj **przed izolacją**. Wszystkie poniższe polecenia wykonuj z katalogu `deploy/`; podczas izolacji nie pobieraj obrazów, nie buduj ich i nie instaluj pakietów. Zachowaj kopię pre-restore oraz jej sumę: zawierają stan sprzed odtworzenia, z którym uzgodnisz odtworzoną bazę.
+Comiesięczną próbę wykonuj na **osobnym, zatwierdzonym hoście**, w tym samym regionie i na tych samych zasadach przetwarzania danych co produkcja. Zgodne obrazy aplikacji, Compose, `nft`, `curl`, archiwum z plikiem `.sha256` oraz prywatną konfigurację wdrożenia przygotuj **przed izolacją**. Wszystkie poniższe polecenia wykonuj z katalogu `deploy/`; podczas izolacji nie pobieraj obrazów, nie buduj ich i nie instaluj pakietów. Próba na osobnym hoście oraz odtworzenie na nowym hoście po utracie serwera wymagają `restore.sh --no-pre-backup` i ścieżki §5.4: nie ma tam bieżących danych odtwarzanego wdrożenia. Przy odtwarzaniu na tym samym hoście zachowaj kopię pre-restore oraz jej sumę wypisane przez `restore.sh` w tym przebiegu; tylko taki stan jest źródłem uzgodnienia z §5.3.
 
 ### 5.1 Zamknięcie wejścia i potwierdzenie blokady wyjścia
 
@@ -382,7 +382,7 @@ Powtórz **bez zmian każde mające zastosowanie polecenie kontroli dodatniej**:
 
 ### 5.2 Odtworzenie bez uruchamiania usług i kwarantanna
 
-Zapisz `DAAS_MAINTENANCE_MODE=true` w prywatnej konfiguracji wdrożenia i wyeksportuj tę zmienną w powłoce operatora. Przypisanie tylko przy jednym poleceniu nie ochroni późniejszego odtworzenia kontenera przez Compose w innej powłoce. Sprawdź, że potrzebne obrazy są już lokalnie. Ustaw `RESTORE_ARCHIVE` na wybrane archiwum, `EXPECTED_VERSION` na zgodną wersję obrazu, a `PUBLIC_ORIGIN` na publiczny adres HTTPS wdrożenia. Następnie:
+Zapisz `DAAS_MAINTENANCE_MODE=true` w prywatnej konfiguracji wdrożenia i wyeksportuj tę zmienną w powłoce operatora. Przypisanie tylko przy jednym poleceniu nie ochroni późniejszego odtworzenia kontenera przez Compose w innej powłoce. Sprawdź, że potrzebne obrazy są już lokalnie. Ustaw `RESTORE_ARCHIVE` na wybrane archiwum, `EXPECTED_VERSION` na zgodną wersję obrazu, a `PUBLIC_ORIGIN` na publiczny adres HTTPS wdrożenia. Poniższe wywołanie `restore.sh` dotyczy **tego samego hosta z bieżącymi danymi wdrożenia**. Na nowym hoście po utracie serwera i podczas comiesięcznej próby zastąp je `./restore.sh "$RESTORE_ARCHIVE" --yes --no-start --no-pre-backup`, a po kwarantannie przejdź do §5.4. Następnie:
 
 ```bash
 export DAAS_MAINTENANCE_MODE=true
@@ -395,15 +395,15 @@ docker compose run --rm --pull never --no-deps api python -m app.cli restore-qua
 docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine
 ```
 
-Błąd dowolnego polecenia zatrzymuje bieżący etap; wejście i wyjście pozostają zamknięte. `restore.sh` odmawia kontynuacji po nieudanej kopii pre-restore, nieudanym zatrzymaniu, przy działającym API/web lub błędzie spójności SQLite albo kluczy obcych. Zapisz wypisaną unikalną ścieżkę kopii pre-restore. `--no-pre-backup` stosuj wyłącznie wtedy, gdy bieżących danych nie da się skopiować, np. po utracie serwera: nie masz wtedy źródła uzgodnienia i musisz przejść ścieżkę z §5.4. Kopia może zatrzymać i uruchomić poprzednie API, dlatego zapora musi działać wcześniej. `--no-start` pozostawia odtworzone API i web zatrzymane.
+Błąd dowolnego polecenia zatrzymuje bieżący etap; wejście i wyjście pozostają zamknięte. `restore.sh` odmawia kontynuacji po nieudanej kopii pre-restore, nieudanym zatrzymaniu, przy działającym API/web lub błędzie spójności SQLite albo kluczy obcych. Na tym samym hoście zapisz wypisaną w tym przebiegu unikalną ścieżkę kopii pre-restore. Na nowym hoście i podczas comiesięcznej próby nawet czytelna, zmigrowana baza utworzona przez wcześniejsze uruchomienie stosu nie jest bieżącym stanem odtwarzanego wdrożenia: stosuj `--no-pre-backup` i §5.4. Tak samo postępuj, gdy bieżących danych nie da się skopiować. Kopia może zatrzymać i uruchomić poprzednie API, dlatego zapora musi działać wcześniej. `--no-start` pozostawia odtworzone API i web zatrzymane.
 
 Uruchamiaj polecenia CLI przy zatrzymanym API, żeby logowanie lub wydawanie uprawnień nie ścigało się z transakcją. Podgląd `--dry-run` nie zmienia wierszy ani audytu. Kwarantanna usuwa wszystkie sesje, oznacza nieużyte magic linki jako wykorzystane i wygasza kody OAuth `pending`/`approved`; zwraca same liczby, a zmiany zapisuje jako zdarzenia `restore.*`. Nie zmienia sekretów wdrożenia ani klucza API trybu selfhost ze zmiennej środowiskowej. Teraz wybierz jedną z dwóch ścieżek poniżej.
 
-### 5.3 Czytelna kopia pre-restore: restrykcyjne uzgodnienie
+### 5.3 Ten sam host i kopia pre-restore z tego przebiegu: uzgodnienie
 
-`restore-reconcile --pre` porównuje odtworzoną bazę z `control/control.db` z kopii pre-restore. Najpierw sprawdza plik `.sha256`, odczytuje potrzebne kolumny bazy tylko do odczytu w katalogu tymczasowym i sprząta po sobie. Dodatkowe kolumny nowszego schematu są pomijane; brak potrzebnej kolumny oznacza błąd. Domyślne wywołanie tylko raportuje, a `--apply` stosuje ograniczenia w jednej transakcji. Pliki runtime usuwa dopiero po zatwierdzeniu transakcji.
+Tę ścieżkę stosuj wyłącznie przy przywracaniu na **tym samym hoście**, z kopią pre-restore wypisaną przez `restore.sh` **w tym przebiegu**. `restore-reconcile --pre` porównuje odtworzoną bazę z `control/control.db` z tej kopii. Najpierw sprawdza plik `.sha256`, odczytuje potrzebne kolumny bazy tylko do odczytu w katalogu tymczasowym i sprząta po sobie. Dodatkowe kolumny nowszego schematu są pomijane; brak potrzebnej kolumny oznacza błąd. Jeśli odtworzona baza zawiera organizacje, ale kopia pre nie zawiera żadnego wspólnego identyfikatora organizacji (także gdy jest zmigrowana i pusta), kontrola pochodzenia odrzuca ją zarówno w podglądzie, jak i z `--apply`: błąd bez wartości, bez zmian i bez audytu, z odesłaniem do §5.4. Częściowe pokrycie identyfikatorów pozostawia dotychczasowe uzgodnienie. Wspólny identyfikator nie zastępuje sprawdzenia hosta i pochodzenia archiwum przez operatora. Domyślne wywołanie tylko raportuje, a `--apply` stosuje zmiany w jednej transakcji. Pliki runtime usuwa dopiero po zatwierdzeniu transakcji.
 
-Ustaw `PRE_RESTORE` na dokładną ścieżkę kopii wypisaną przez `restore.sh`. Kontener API działa jako UID `10001`, a archiwa mają prawa `0600` operatora, więc sam montaż katalogu może nie dać dostępu. Przygotuj prywatną kopię archiwum i sumy dostępną dla tego UID, zachowując nazwy plików; nie udostępniaj ich wszystkim użytkownikom. Poniższy katalog jest na hoście, a `/backups` wyłącznie w kontenerze:
+Ustaw `PRE_RESTORE` na dokładną ścieżkę kopii wypisaną przez `restore.sh` w tym przebiegu. Kontener API działa jako UID `10001`, a archiwa mają prawa `0600` operatora, więc sam montaż katalogu może nie dać dostępu. Przygotuj prywatną kopię archiwum i sumy dostępną dla tego UID, zachowując nazwy plików; nie udostępniaj ich wszystkim użytkownikom. Poniższy katalog jest na hoście, a `/backups` wyłącznie w kontenerze:
 
 ```bash
 PRE_BACKUP_NAME="$(basename "$PRE_RESTORE")"
@@ -417,9 +417,11 @@ docker compose run --rm --pull never --no-deps \
   --pre "/backups/$PRE_BACKUP_NAME"
 ```
 
-**Właściciel przegląda raport przed zastosowaniem.** Wynik zawiera liczby kategorii i identyfikatory ULID, bez e-maili, URL-i i sekretów. Uzgodnienie usuwa obiekty nieobecne w kopii pre-restore, obniża role, cofa unieważnione poświadczenia, usuwa nieaktualne zaproszenia, ogranicza webhooki i harmonogramy oraz usuwa przywrócone uploady, rekordy runów i raporty, które wcześniej usunięto. Zatrzymuje nieaktualne zadania `queued`; przywraca ograniczenia powiadomień i automatycznych uruchomień. Nie importuje brakujących obiektów ani wyższych uprawnień. Różnice planu, retencji i nazw pozostają do oceny w raporcie.
+**Właściciel przegląda raport przed zastosowaniem.** Wynik zawiera liczby kategorii i identyfikatory ULID, bez e-maili, URL-i i sekretów. Uzgodnienie usuwa obiekty nieobecne w kopii pre-restore, obniża role, cofa unieważnione poświadczenia, usuwa nieaktualne zaproszenia, ogranicza webhooki i harmonogramy oraz usuwa przywrócone uploady, rekordy runów i raporty, które wcześniej usunięto. Zatrzymuje nieaktualne zadania `queued`; przywraca ograniczenia powiadomień i automatycznych uruchomień. Nie importuje brakujących obiektów; jedynym dopuszczalnym podwyższeniem roli jest jawne rozwiązanie konfliktu właścicieli opisane poniżej. Różnice planu, retencji i nazw pozostają do oceny w raporcie.
 
-Brak bezpiecznego właściciela organizacji oznacza konflikt: `--apply` kończy się błędem i **nie zapisuje żadnej części uzgodnienia**. Nie obchodź konfliktu ścieżką bez kopii. Jeśli samo archiwum jest nieczytelne, uszkodzone lub nie ma wymaganej struktury, przerwij ten etap i przejdź świadomie do §5.4; nie pomijaj kontroli sumy. Po zatwierdzeniu poprawnego raportu przez właściciela:
+Brak bezpiecznego właściciela organizacji oznacza konflikt: podgląd wypisuje identyfikator organizacji oraz identyfikatory właścicieli z pre, którzy mają członkostwo w odtworzonej bazie, bez e-maili. Nierozwiązany konflikt blokuje całe `--apply` **bez zapisania żadnej części uzgodnienia**. Po potwierdzeniu właściwej osoby z właścicielem organizacji klienta operator może jawnie dodać `--resolve-owner <org_id>:<user_id>` do `--apply`; opcję można powtórzyć dla kolejnych konfliktów. Wskazana organizacja musi mieć konflikt, osoba musi być właścicielem w pre, a jej konto i członkostwo w odtworzonej bazie muszą pozostać po uzgodnieniu. Błędny identyfikator lub niespełniony warunek powoduje błąd bez zmian. Rola `owner` jest nadawana w tej samej transakcji co pozostałe zmiany i zapisywana jako `restore.reconcile.owner_resolved` z identyfikatorami ULID.
+
+Jeśli właściwego właściciela nie ma jako członka w odtworzonej bazie, **utrzymuj izolację i przekaż decyzję właścicielowi platformy**. Polecenia odzyskiwania nie mają narzędzia do rozwiązania tego przypadku; `restore-members` nie dodaje członków ani nie podwyższa ról. Nie obchodź konfliktu ścieżką bez kopii. Jeśli samo archiwum jest nieczytelne, uszkodzone, nie ma wymaganej struktury lub kontrola pochodzenia odrzuca jego historię, przerwij ten etap i przejdź świadomie do §5.4; nie pomijaj kontroli sumy. Po zatwierdzeniu poprawnego raportu bez konfliktów przez właściciela:
 
 ```bash
 docker compose run --rm --pull never --no-deps \
@@ -427,11 +429,19 @@ docker compose run --rm --pull never --no-deps \
   --pre "/backups/$PRE_BACKUP_NAME" --apply
 ```
 
+Przy potwierdzonym konflikcie ustaw `ORG_ID` i `USER_ID` na zweryfikowane identyfikatory i zamiast powyższego wywołania zastosuj:
+
+```bash
+docker compose run --rm --pull never --no-deps \
+  --volume "$PRE_BACKUP_DIR:/backups:ro" api python -m app.cli restore-reconcile \
+  --pre "/backups/$PRE_BACKUP_NAME" --apply --resolve-owner "$ORG_ID:$USER_ID"
+```
+
 Każda zastosowana akcja ma zdarzenie `restore.reconcile.*`. Niezerowy kod wyjścia po błędzie usuwania plików może oznaczać, że transakcja bazy już się zatwierdziła: utrzymaj izolację, sprawdź pozostałe pliki i dokończ zatwierdzone usuwanie przed otwarciem. Samo ponowienie polecenia nie gwarantuje sprzątnięcia plików, których metadane zostały już usunięte. Zachowaj raport oraz kopię pre-restore zgodnie z zasadami przechowywania kopii; prywatny katalog pomocniczy zawiera te same dane i też podlega tym zasadom.
 
-### 5.4 Brak lub uszkodzona kopia pre-restore: reset i korekta członkostw
+### 5.4 Nowy host, próba miesięczna lub brak właściwej kopii: reset i korekta członkostw
 
-Po utracie serwera, nieczytelnej kopii lub nieudanej weryfikacji nie zgaduj stanu sprzed odtworzenia. Przy nadal zatrzymanym API zastosuj pełny reset:
+Na nowym hoście po utracie serwera oraz podczas comiesięcznej próby na osobnym hoście zawsze wybierz tę ścieżkę, używając w §5.2 `restore.sh --no-pre-backup`: bieżących danych tego wdrożenia tam nie ma, nawet gdy stos zdążył utworzyć pustą, zmigrowaną bazę. Dotyczy to także braku, nieczytelnej lub uszkodzonej kopii pre-restore, nieudanej weryfikacji i odrzucenia kopii z innej historii. Nie zgaduj stanu sprzed odtworzenia. Przy nadal zatrzymanym API zastosuj pełny reset:
 
 ```bash
 docker compose run --rm --pull never --no-deps api python -m app.cli restore-quarantine --dry-run --revoke-all
@@ -579,9 +589,9 @@ Dowód: lista odhaczona, a z ostatniego miesiąca istnieje notatka z testu odtwo
 
 Postępuj według [`README.md`](README.md): aktualizacja oraz warianty A/B przywrócenia poprzedniej wersji. Przeczytaj wpisy o migracjach między wersjami, wykonaj zimną kopię i kopię poza serwerem z §4.3, zapisz ścieżkę archiwum i zachowaj poprzednie obrazy lokalnie. Poinformuj klientów o oknie serwisowym. Sprawdź działającą wersję przez `smoke.sh --expect-version <wersja>`, a dostarczanie poczty ponownie sprawdź dopiero po zatwierdzonym otwarciu.
 
-Powrót wyłącznie do poprzedniego obrazu jest dozwolony tylko wtedy, gdy obsługuje on bieżący schemat bazy. Przywrócenie obejmujące dane wymaga **całej §5**, w kolejności: zamknięcie wejścia; potwierdzona blokada wyjścia hosta i ruchu przekazywanego dla IPv4 i IPv6; `restore.sh --no-start`; start API z trwale ustawionym trybem serwisowym; zatrzymanie API i kwarantanna; przy czytelnej kopii pre-restore podgląd `restore-reconcile --pre`, przegląd właściciela i `--apply`, a bez kopii albo przy jej uszkodzeniu `restore-quarantine --revoke-all` i przegląd oraz korekty przez `restore-members`; test dymny w trybie serwisowym; odtworzenie kontenera API z wyłączonym trybem serwisowym; zdjęcie tymczasowej blokady; pełny lokalny test dymny; otwarcie wejścia i test publiczny. Nie używaj do tej procedury starszego obrazu bez obsługi trybu serwisowego, kwarantanny i poleceń korekty.
+Powrót wyłącznie do poprzedniego obrazu jest dozwolony tylko wtedy, gdy obsługuje on bieżący schemat bazy. Przywrócenie obejmujące dane wymaga **całej §5**, w kolejności: zamknięcie wejścia; potwierdzona blokada wyjścia hosta i ruchu przekazywanego dla IPv4 i IPv6; `restore.sh --no-start` (nowy host i próba miesięczna także `--no-pre-backup`); start API z trwale ustawionym trybem serwisowym; zatrzymanie API i kwarantanna; wyłącznie na tym samym hoście z właściwą kopią pre-restore z tego przebiegu podgląd `restore-reconcile --pre`, przegląd właściciela i `--apply` z ewentualnym potwierdzonym `--resolve-owner`, a w pozostałych przypadkach §5.4: `restore-quarantine --revoke-all` i przegląd oraz korekty przez `restore-members`; test dymny w trybie serwisowym; odtworzenie kontenera API z wyłączonym trybem serwisowym; zdjęcie tymczasowej blokady; pełny lokalny test dymny; otwarcie wejścia i test publiczny. Nie używaj do tej procedury starszego obrazu bez obsługi trybu serwisowego, kwarantanny i poleceń korekty.
 
-Uzgodnienie nie importuje obiektów ani uprawnień dodanych po odtwarzanej kopii. Bez czytelnej kopii pre-restore właściciel odtwarza także ewidencję żądań usunięcia danych i potwierdza korekty przed otwarciem. Zachowaj unikalną kopię pre-restore do kontrolowanego odzyskiwania zmian i powiadom klientów o utracie danych. Konflikt właścicieli, nieukończone usuwanie plików albo niepotwierdzony stan danych oznaczają dalszą izolację.
+Uzgodnienie nie importuje obiektów; jedyny wyjątek od zakazu podwyższania ról to jawne `--resolve-owner` według §5.3. Bez właściwej kopii pre-restore właściciel odtwarza także ewidencję żądań usunięcia danych i potwierdza korekty przed otwarciem. Zachowaj unikalną kopię pre-restore do kontrolowanego odzyskiwania zmian i powiadom klientów o utracie danych. Nierozwiązany konflikt właścicieli, nieukończone usuwanie plików albo niepotwierdzony stan danych oznaczają dalszą izolację.
 
 Dowód: zapis odtworzenia w izolacji z §5, wersja działającej aplikacji oraz wyniki lokalnego i publicznego testu dymnego; samo udane rozpakowanie archiwum nie wystarcza.
 

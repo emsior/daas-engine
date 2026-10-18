@@ -56,6 +56,7 @@ _COLUMNS = {
 }
 _RANK = {"member": 0, "admin": 1, "owner": 2}
 _SAFE_ID = re.compile(r"[A-Za-z0-9_-]{1,64}\Z")
+_ULID = re.compile(r"[0-7][0-9A-HJKMNP-TV-Z]{25}")
 
 
 def _key(model, row):
@@ -154,6 +155,7 @@ class Action:
 class ReconcileReport:
     categories: dict[str, list[str]] = field(default_factory=lambda: defaultdict(list))
     blocked: list[str] = field(default_factory=list)
+    owner_candidates: dict[str, list[str]] = field(default_factory=dict)
     cleanup_failed: list[str] = field(default_factory=list)
     applied: bool = False
 
@@ -165,12 +167,17 @@ class ReconcileReport:
         if self.blocked:
             yield f"owner_conflicts: {len(self.blocked)}"
             yield f"  ids: {', '.join(sorted(self.blocked))}"
+            for org_id in sorted(self.blocked):
+                yield f"owner_candidates: {org_id}"
+                yield f"  ids: {', '.join(sorted(self.owner_candidates[org_id]))}"
         if self.cleanup_failed:
             yield f"cleanup_failed: {len(self.cleanup_failed)}"
             yield f"  ids: {', '.join(sorted(self.cleanup_failed))}"
 
 
-def _plan(current, pre, now):
+def _plan(current, pre, now, resolutions):
+    if current[m.Org] and not current[m.Org].keys() & pre[m.Org].keys():
+        raise ReconcileError("pre-restore copy does not belong to this database history; use RUNBOOK section 5.4")
     report = ReconcileReport()
     actions = []
     deleted_orgs = current[m.Org].keys() - pre[m.Org].keys()
@@ -181,11 +188,25 @@ def _plan(current, pre, now):
                            and key in pre[m.Membership] and pre[m.Membership][key]["role"] == "owner"]
         if not retained_owners:
             report.blocked.append(org_id)
+            report.owner_candidates[org_id] = [
+                row.user_id for key, row in current[m.Membership].items()
+                if row.org_id == org_id and row.user_id in current[m.User] and row.user_id not in deleted_users
+                and key in pre[m.Membership] and pre[m.Membership][key]["role"] == "owner"
+            ]
+
+    # Check every explicit choice before planning any promotion or clearing a conflict.
+    for org_id, user_id in resolutions.items():
+        if org_id not in report.blocked or user_id not in report.owner_candidates[org_id]:
+            raise ReconcileError("owner resolution requires a conflicting organization and a retained pre-restore owner")
+    report.blocked = [org_id for org_id in report.blocked if org_id not in resolutions]
 
     def add(category, model, row, values=None):
         action = Action(category, model, row, values)
         report.categories[category].append(action.identifier)
         actions.append(action)
+
+    for org_id, user_id in resolutions.items():
+        add("owner_resolved", m.Membership, current[m.Membership][(org_id, user_id)], {"role": "owner"})
 
     for model, rows in current.items():
         for key, row in rows.items():
@@ -305,7 +326,19 @@ def _cleanup(settings, actions):
     return failures
 
 
-async def restore_reconcile(settings: Settings, archive: Path, *, apply: bool = False) -> ReconcileReport:
+async def restore_reconcile(settings: Settings, archive: Path, *, apply: bool = False,
+                            resolve_owners: list[str] | None = None) -> ReconcileReport:
+    resolutions = {}
+    if resolve_owners and not apply:
+        raise ReconcileError("owner resolution requires --apply")
+    for choice in resolve_owners or []:
+        parts = choice.split(":")
+        if len(parts) != 2 or not all(_ULID.fullmatch(value) for value in parts):
+            raise ReconcileError("invalid owner resolution identifiers")
+        org_id, user_id = parts
+        if org_id in resolutions:
+            raise ReconcileError("choose only one owner resolution per organization")
+        resolutions[org_id] = user_id
     pre = read_archive(archive)
     engine = create_engine(settings)
     try:
@@ -315,7 +348,7 @@ async def restore_reconcile(settings: Settings, archive: Path, *, apply: bool = 
                 for model in _COLUMNS:
                     rows = (await db.execute(select(model))).scalars().all()
                     current[model] = {_key(model, row.__dict__): row for row in rows}
-                report, actions = _plan(current, pre, utcnow())
+                report, actions = _plan(current, pre, utcnow(), resolutions)
                 if not apply or report.blocked:
                     return report
                 # Validate every runtime target before any control write.

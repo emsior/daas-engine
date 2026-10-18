@@ -55,6 +55,7 @@ AUDIT_ACTIONS_V1: frozenset[str] = frozenset({
     "restore.reconcile.client_revoked", "restore.reconcile.webhook_deleted", "restore.reconcile.webhook_updated",
     "restore.reconcile.schedule_deleted", "restore.reconcile.schedule_updated", "restore.reconcile.upload_deleted",
     "restore.reconcile.run_deleted", "restore.reconcile.report_purged", "restore.reconcile.job_cancelled",
+    "restore.reconcile.owner_resolved",
 })
 
 _MAX_STR = 200

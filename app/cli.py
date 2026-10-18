@@ -174,7 +174,8 @@ def cmd_restore_reconcile(settings: Settings, args: argparse.Namespace) -> int:
     from app.control.restore_reconcile import ReconcileError, restore_reconcile
 
     try:
-        report = asyncio.run(restore_reconcile(settings, Path(args.pre), apply=args.apply))
+        report = asyncio.run(restore_reconcile(settings, Path(args.pre), apply=args.apply,
+                                              resolve_owners=args.resolve_owner))
     except ReconcileError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -234,6 +235,8 @@ def build_parser() -> argparse.ArgumentParser:
     rr = sub.add_parser("restore-reconcile", help="restrict restored state using a pre-restore archive; stop the API first")
     rr.add_argument("--pre", required=True, help="pre-restore .tar.gz archive with its .sha256 sidecar")
     rr.add_argument("--apply", action="store_true", help="apply changes; the default only reports planned actions")
+    rr.add_argument("--resolve-owner", action="append", metavar="ORG_ID:USER_ID",
+                    help="with --apply, resolve an owner conflict using a retained pre-restore owner; repeatable")
     rr.set_defaults(func=cmd_restore_reconcile)
     rm = sub.add_parser("restore-members", help="review and restrict restored memberships while the API is stopped")
     rm.add_argument("--org", help="organization id")

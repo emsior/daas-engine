@@ -52,10 +52,11 @@ def archive_pre(settings, tmp_path, change=lambda db: None):
     return archive
 
 
-def command(settings, monkeypatch, archive, *, apply=True):
+def command(settings, monkeypatch, archive, *, apply=True, resolve_owner=()):
     monkeypatch.setattr(cli, "get_settings", lambda: settings)
     try:
-        return cli.main(["restore-reconcile", "--pre", str(archive), *(["--apply"] if apply else [])])
+        return cli.main(["restore-reconcile", "--pre", str(archive), *(["--apply"] if apply else []),
+                         *[arg for choice in resolve_owner for arg in ("--resolve-owner", choice)]])
     except SystemExit as exc:
         pytest.fail(f"restore-reconcile must be available; parser exit={exc.code}")
 
@@ -215,15 +216,19 @@ def test_outbound_configuration_only_tightens(restored, tmp_path, monkeypatch, m
 @pytest.mark.parametrize("target", ["org", "user", "upload", "run", "report"])
 def test_deleted_objects_and_runtime_data_are_removed(restored, tmp_path, monkeypatch, target):
     settings, org, admin, _, ids, paths = restored
+    if target == "org":
+        survivor = seed_org(settings, name="TEST-Survivor", owner_email="survivor@example.invalid")
     def change(db):
         if target == "user":
             db.execute("DELETE FROM users WHERE id=?", (admin,))
+        elif target == "org":
+            db.execute("DELETE FROM orgs WHERE id=?", (org.org_id,))
         else:
-            db.execute({"org": "DELETE FROM orgs", "upload": "DELETE FROM uploads", "run": "DELETE FROM run_records",
+            db.execute({"upload": "DELETE FROM uploads", "run": "DELETE FROM run_records",
                         "report": "UPDATE run_records SET report_purged_at='2026-01-01'"}[target])
     assert command(settings, monkeypatch, archive_pre(settings, tmp_path, change)) == 0
     if target == "org":
-        assert get_rows(settings, models.Org) == [] and not paths.root.exists()
+        assert [row.id for row in get_rows(settings, models.Org)] == [survivor.org_id] and not paths.root.exists()
     elif target == "user":
         assert admin not in {u.id for u in get_rows(settings, models.User)}
     elif target == "upload":
@@ -546,3 +551,169 @@ def test_redirected_runtime_path_aborts_before_control_or_sibling_data_changes(
                             for name, contents in sibling_files.items())
     assert unchanged_control and unchanged_sibling, "redirected runtime paths must cause no writes or deletion"
     assert result != 0
+
+
+def _runtime_snapshot(paths):
+    return {path.relative_to(paths.root): path.read_bytes() for path in paths.root.rglob("*") if path.is_file()}
+
+
+def _transfer_owner(db, org_id, owner_id):
+    db.execute("DELETE FROM users WHERE id IN (SELECT user_id FROM memberships WHERE org_id=? AND role='owner')",
+               (org_id,))
+    db.execute("UPDATE memberships SET role='owner' WHERE org_id=? AND user_id=?", (org_id, owner_id))
+    db.execute("DELETE FROM uploads WHERE org_id=?", (org_id,))
+
+
+@pytest.mark.parametrize("apply", [False, True], ids=["dry_run", "apply"])
+@pytest.mark.parametrize("history", ["empty", "unrelated"])
+def test_pre_without_shared_history_rejected_without_changes(restored, tmp_path, monkeypatch, capsys, apply, history):
+    settings, org, _, _, _, paths = restored
+    unrelated = new_ulid()
+    def change(db):
+        for table in reversed(models.Base.metadata.sorted_tables):
+            db.execute(f'DELETE FROM "{table.name}"')  # noqa: S608
+        if history == "unrelated":
+            db.execute("INSERT INTO orgs (id,slug,name,plan,retention_days,locale,llm_narrative,created_at) "
+                       "VALUES (?,'test-unrelated','TEST-Unrelated','free',30,'pl',0,?)", (unrelated, utcnow().isoformat()))
+    archive = archive_pre(settings, tmp_path, change)
+    before, files = snapshot(settings), _runtime_snapshot(paths)
+    result = command(settings, monkeypatch, archive, apply=apply)
+    output = capsys.readouterr()
+    assert result != 0, "an unrelated pre-restore archive must be rejected in both modes"
+    assert snapshot(settings) == before and _runtime_snapshot(paths) == files
+    assert "5.4" in output.err and "history" in output.err.lower()
+    assert org.org_id not in output.err and unrelated not in output.err and "@" not in output.err
+
+
+def test_owner_transfer_conflict_dry_run_lists_eligible_pre_owner(restored, tmp_path, monkeypatch, capsys):
+    settings, org, admin, _, _, paths = restored
+    archive = archive_pre(settings, tmp_path, lambda db: _transfer_owner(db, org.org_id, admin))
+    before, files = snapshot(settings), _runtime_snapshot(paths)
+    assert command(settings, monkeypatch, archive, apply=False) == 0
+    output = capsys.readouterr()
+    assert org.org_id in output.out and admin in output.out
+    assert "@" not in output.out + output.err
+    assert snapshot(settings) == before and _runtime_snapshot(paths) == files
+
+
+def test_owner_transfer_without_resolution_is_atomic(restored, tmp_path, monkeypatch):
+    settings, org, admin, _, _, paths = restored
+    archive = archive_pre(settings, tmp_path, lambda db: _transfer_owner(db, org.org_id, admin))
+    before, files = snapshot(settings), _runtime_snapshot(paths)
+    assert command(settings, monkeypatch, archive) != 0
+    assert snapshot(settings) == before and _runtime_snapshot(paths) == files
+
+
+def test_explicit_owner_resolution_applies_with_deletions_and_safe_audit(restored, tmp_path, monkeypatch):
+    settings, org, admin, second, _, paths = restored
+    archive = archive_pre(settings, tmp_path, lambda db: _transfer_owner(db, org.org_id, admin))
+    assert command(settings, monkeypatch, archive, resolve_owner=[f"{org.org_id}:{admin}"]) == 0
+    assert {(row.org_id, row.user_id): row.role for row in get_rows(settings, models.Membership)} == {
+        (org.org_id, admin): "owner"}
+    assert not {org.user_id, second} & {row.id for row in get_rows(settings, models.User)}
+    assert get_rows(settings, models.Upload) == [] and not list(paths.uploads.iterdir())
+    events = get_rows(settings, models.AuditEvent)
+    resolutions = [event for event in events if event.action == "restore.reconcile.owner_resolved"]
+    assert len(resolutions) == 1 and resolutions[0].target == f"{org.org_id}:{admin}"
+    assert resolutions[0].actor_type == "system" and resolutions[0].actor_id is None
+    assert "@" not in json.dumps([{"target": event.target, "meta": event.meta} for event in events])
+
+
+@pytest.mark.parametrize("invalid", ["no_conflict", "not_pre_owner", "no_restored_membership", "deleted_account"])
+def test_ineligible_owner_resolution_changes_nothing(restored, tmp_path, monkeypatch, capsys, invalid):
+    settings, org, admin, _, _, paths = restored
+    candidate = seed_member(settings, org.org_id, "candidate@example.invalid", "member")
+    if invalid == "no_restored_membership":
+        other = seed_org(settings, name="TEST-Other", owner_email="other@example.invalid")
+        candidate = other.user_id
+    def change(db):
+        if invalid != "no_conflict":
+            _transfer_owner(db, org.org_id, admin)
+        if invalid == "no_conflict":
+            db.execute("UPDATE memberships SET role='owner' WHERE user_id=?", (candidate,))
+        elif invalid == "no_restored_membership":
+            db.execute("INSERT INTO memberships VALUES (?,?,'owner',?)", (org.org_id, candidate, utcnow().isoformat()))
+        elif invalid == "deleted_account":
+            db.execute("DELETE FROM users WHERE id=?", (candidate,))
+        db.execute("DELETE FROM uploads")
+    archive = archive_pre(settings, tmp_path, change)
+    before, files = snapshot(settings), _runtime_snapshot(paths)
+    assert command(settings, monkeypatch, archive, resolve_owner=[f"{org.org_id}:{candidate}"]) != 0
+    assert snapshot(settings) == before and _runtime_snapshot(paths) == files
+    assert "@" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("selection", ["missing_separator", "empty_org", "empty_user", "invalid_org", "invalid_user",
+                                       "overflow_org", "extra_separator"])
+def test_invalid_owner_resolution_identifier_changes_nothing(restored, tmp_path, monkeypatch, capsys, selection):
+    settings, org, admin, _, _, paths = restored
+    archive = archive_pre(settings, tmp_path, lambda db: _transfer_owner(db, org.org_id, admin))
+    choices = {"missing_separator": org.org_id, "empty_org": f":{admin}", "empty_user": f"{org.org_id}:",
+               "invalid_org": f"TEST-invalid:{admin}", "invalid_user": f"{org.org_id}:invalid@example.invalid",
+               "overflow_org": f"8{org.org_id[1:]}:{admin}", "extra_separator": f"{org.org_id}:{admin}:extra"}
+    before, files = snapshot(settings), _runtime_snapshot(paths)
+    assert command(settings, monkeypatch, archive, resolve_owner=[choices[selection]]) != 0
+    assert snapshot(settings) == before and _runtime_snapshot(paths) == files
+    assert "@" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("mode", ["dry_run", "duplicate"])
+def test_owner_resolution_requires_apply_and_unique_organization(restored, tmp_path, monkeypatch, mode):
+    settings, org, admin, _, _, paths = restored
+    archive = archive_pre(settings, tmp_path, lambda db: _transfer_owner(db, org.org_id, admin))
+    before, files = snapshot(settings), _runtime_snapshot(paths)
+    choices = [f"{org.org_id}:{admin}"] * (2 if mode == "duplicate" else 1)
+    assert command(settings, monkeypatch, archive, apply=mode != "dry_run", resolve_owner=choices) != 0
+    assert snapshot(settings) == before and _runtime_snapshot(paths) == files
+
+
+@pytest.mark.parametrize("resolve_all", [False, True])
+def test_multiple_owner_conflicts_are_resolved_atomically(restored, tmp_path, monkeypatch, resolve_all):
+    settings, org, admin, _, _, paths = restored
+    other = seed_org(settings, name="TEST-Other", owner_email="other@example.invalid")
+    other_member = seed_member(settings, other.org_id, "other-member@example.invalid", "member")
+    def change(db):
+        _transfer_owner(db, org.org_id, admin)
+        _transfer_owner(db, other.org_id, other_member)
+    archive = archive_pre(settings, tmp_path, change)
+    before, files = snapshot(settings), _runtime_snapshot(paths)
+    choices = [f"{org.org_id}:{admin}"]
+    if resolve_all:
+        choices.append(f"{other.org_id}:{other_member}")
+    result = command(settings, monkeypatch, archive, resolve_owner=choices)
+    if resolve_all:
+        assert result == 0
+        assert {(row.org_id, row.user_id): row.role for row in get_rows(settings, models.Membership)} == {
+            (org.org_id, admin): "owner", (other.org_id, other_member): "owner"}
+        events = get_rows(settings, models.AuditEvent)
+        assert {event.target for event in events if event.action == "restore.reconcile.owner_resolved"} == set(choices)
+    else:
+        assert result != 0
+        assert snapshot(settings) == before and _runtime_snapshot(paths) == files
+
+
+def test_owner_resolution_audit_failure_rolls_back_promotion_and_deletions(restored, tmp_path, monkeypatch, capsys):
+    settings, org, admin, _, _, paths = restored
+    archive = archive_pre(settings, tmp_path, lambda db: _transfer_owner(db, org.org_id, admin))
+    async def reject(db):
+        await db.execute(text("CREATE TRIGGER reject_resolution BEFORE INSERT ON audit_events "
+                              "WHEN NEW.action = 'restore.reconcile.owner_resolved' "
+                              "BEGIN SELECT RAISE(ABORT,'TEST-private@example.invalid'); END"))
+    with_db(settings, reject)
+    before, files = snapshot(settings), _runtime_snapshot(paths)
+    assert command(settings, monkeypatch, archive, resolve_owner=[f"{org.org_id}:{admin}"]) != 0
+    assert snapshot(settings) == before and _runtime_snapshot(paths) == files
+    assert "@" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("role", ["admin", "member"])
+def test_resolved_owner_can_manage_members_after_real_login(cloud_client, cloud_settings, tmp_path, monkeypatch, role):
+    org = seed_org(cloud_settings, name="TEST-Resolved-Login", owner_email="owner@example.invalid")
+    member = seed_member(cloud_settings, org.org_id, "member@example.invalid", role)
+    url = f"/api/v1/orgs/{org.org_id}/invitations"
+    assert cloud_client.get(url, headers=user_headers(cloud_settings, member)).status_code == (200 if role == "admin" else 403)
+    archive = archive_pre(cloud_settings, tmp_path, lambda db: _transfer_owner(db, org.org_id, member))
+    assert command(cloud_settings, monkeypatch, archive, resolve_owner=[f"{org.org_id}:{member}"]) == 0
+    assert [(row.user_id, row.role) for row in get_rows(cloud_settings, models.Membership)] == [(member, "owner")]
+    login_via_magic_link(cloud_client, cloud_settings, "member@example.invalid")
+    assert cloud_client.get(url).status_code == 200
