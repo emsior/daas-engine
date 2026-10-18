@@ -56,7 +56,7 @@ pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -
 python -m pytest -p no:cacheprovider      # addopts=-q już jest: nie dodawaj drugiego -q (znika podsumowanie)
 pip install --require-hashes -r requirements-postgres.lock   # asyncpg: testy na Postgresie i control plane na Postgresie
 DAAS_TEST_POSTGRES_URL=postgresql+asyncpg://<rola z CREATEDB>:<hasło>@127.0.0.1:5432/postgres python -m pytest tests/test_postgres.py -p no:cacheprovider   # bez URL-a: 1 skipped
-ruff check app tests                      # ta sama wersja co w CI (0.16.8)
+ruff check app tests                      # ta sama wersja co w CI (0.17.0)
 python -m app.main                        # API na 127.0.0.1:8000; selfhost wymaga DAAS_API_KEY, cloud wymaga DAAS_SECRET_KEY
 python -m app.cli migrate | migrate-runtime | create-org --name ... --owner-email ... | set-plan --org ... --plan free|pro|selfhost
 python tools/export_openapi.py            # odświeża docs/openapi.json (test pilnuje aktualności)

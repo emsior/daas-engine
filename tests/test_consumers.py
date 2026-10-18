@@ -102,7 +102,11 @@ def test_lock_files_pin_every_package_with_hashes(name):
 def test_dev_lock_includes_pinned_ruff_and_runtime_lock_does_not():
     runtime = (PROJECT_ROOT / "requirements.lock").read_text(encoding="utf-8")
     dev = (PROJECT_ROOT / "requirements-dev.lock").read_text(encoding="utf-8")
-    assert "\nruff==0.16.8" in dev
+    pyproject = (PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    pinned = re.search(r'"ruff==([^"]+)"', pyproject)
+    assert pinned, "pyproject.toml pins ruff in the dev extra"
+    # CI installs from the lock, not from pyproject.toml: a bump must change both
+    assert re.search(rf"^ruff=={re.escape(pinned.group(1))} \\$", dev, flags=re.M)
     assert "\nruff==" not in runtime and "\npytest==" not in runtime
 
 
