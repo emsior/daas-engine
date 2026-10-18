@@ -4,6 +4,10 @@ set -euo pipefail
 export LC_ALL=C
 trap 'printf "%s\n" "OPSEC scanner error" >&2; exit 2' ERR
 
+# Preserve raw line bytes when Git for Windows tools default to text mode.
+awk() { command awk -v BINMODE=3 "$@"; }
+grep() { command grep -U "$@"; }
+
 fail() {
   printf 'OPSEC: %s\n' "$1" >&2
   exit 2
