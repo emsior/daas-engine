@@ -34,7 +34,7 @@ postgres = ["asyncpg>=0.29"]  # control plane na Postgresie: DAAS_CONTROL_DB_URL
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "ruff==0.16.8",  # ta sama wersja co w CI; zależność wyłącznie developerska
+    "ruff==0.17.0",  # ta sama wersja co w CI; zależność wyłącznie developerska
 ]
 
 [tool.setuptools.packages.find]
