@@ -33,6 +33,16 @@ updates:
     open-pull-requests-limit: 5
     groups:
       web-deps: { patterns: ["*"] }
+    ignore:
+      # TypeScript 7 (natywny kompilator): openapi-typescript 7.13 wymaga TS ^5, typescript-eslint 8.72 wymaga TS < 6.1 (stan 19.10.2026)
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      # ESLint 10: eslint-plugin-react 7.37, eslint-plugin-import 2.32 i eslint-plugin-jsx-a11y 6.10 (z eslint-config-next 16.4) wspieraja najwyzej ESLint 9
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      # jsdom 30 wymaga Node >= 22.22.2; CI i lokalnie Node 22.22.0 (podniesienie Node = osobna decyzja)
+      - dependency-name: "jsdom"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "docker"
     directory: "/web"
     schedule: { interval: "weekly", day: "monday" }
