@@ -118,4 +118,4 @@ def test_n8n_image_is_pinned_to_an_exact_version():
     import yaml
 
     compose = yaml.safe_load((PROJECT_ROOT / "docker-compose.yml").read_text(encoding="utf-8"))
-    assert compose["services"]["n8n"]["image"] == "n8nio/n8n:2.43.1"
+    assert compose["services"]["n8n"]["image"] == "n8nio/n8n:2.45.5"

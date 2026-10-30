@@ -96,7 +96,7 @@ SSO i kluczami dostępu (passkeys), umowa SLA.
 
 ### 9. Łańcuch dostaw
 - Zależności produkcyjne są przypięte do wersji i skrótów SHA-256 (`requirements.lock`); obraz Docker i CI
-  instalują je z `--require-hashes`, a CI sprawdza je narzędziem `pip-audit`. Obraz `n8n` w `docker-compose.yml` jest przypięty do wersji `2.43.1`.
+  instalują je z `--require-hashes`, a CI sprawdza je narzędziem `pip-audit`. Obraz `n8n` w `docker-compose.yml` jest przypięty do wersji `2.45.5`.
 - Kontenery aplikacji i kokpitu działają jako użytkownik bez uprawnień administratora, z `no-new-privileges` i bez dodatkowych uprawnień systemowych.
 
 ### 10. Webhooki (tryb `cloud`)
