@@ -122,6 +122,8 @@ clients before upgrading. The `cloud` section is additive; `selfhost` keeps the 
 - Reusing a rotated refresh token revokes the entire grant and all its access and refresh tokens,
   including when the presented token has expired; rotation history is retained with the grant,
   while legacy tokens without a grant are purged after retention so unused clients can be removed (P1-3).
+- Docker Compose pins `n8nio/n8n` to `2.45.5` (was `2.43.1`), fixing GHSA-9p7v-45m2-wxgj,
+  GHSA-f2cw-9483-7vcp and GHSA-gx3v-3x3v-f8r5 (all rated High, published 2026-10-28).
 
 ### Fixed
 
