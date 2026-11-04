@@ -74,9 +74,9 @@ a `git checkout` kolejnego taga i tak odtwarza zmienione pliki jako `deploy`. Ko
 Profil `edge` (Caddy) jest domyślnie włączony. Host ze wspólnym proxy wpisuje do `.env` linię `COMPOSE_PROFILES=` (może być pusta); nakładki (`compose.llm.yml`,
 obserwowalność) włącza `COMPOSE_FILE` w `.env`, tak jak w README.
 
-## b) Włącznik produkcji: checklista właściciela (≈ 60 min)
+## b) Włącznik produkcji: checklista właściciela (⚠ ≈ 65 min, kroki 1–10; + 10 min nakładka obserwowalności)
 
-Wyłącznie czynności, które wymagają Twojej tożsamości. Reszta (obrazy, skrypty, testy) jest już gotowa w repozytorium. Czasy są szacunkami ⚠. Krok 1 (konto) możesz zrobić wcześniej, a krok 11 (nakładka obserwowalności) w osobnej sesji po pierwszym wdrożeniu: kroki 2–10 to ⚠ ok. 47 min.
+Wyłącznie czynności, które wymagają Twojej tożsamości. Reszta (obrazy, skrypty, testy) jest już gotowa w repozytorium. Czasy są szacunkami ⚠. Krok 1 (konto) możesz zrobić wcześniej, a krok 11 (nakładka obserwowalności) w osobnej sesji po pierwszym wdrożeniu: kroki 2–10 to ⚠ ok. 49 min (suma wierszy tabeli), z kontem ok. 64 min.
 
 | # | Krok | ⚠ min |
 |---|---|---|
@@ -153,6 +153,6 @@ migracji na danych klienta ani rollbacku po rzeczywistej migracji (dlatego zmian
 
 - **„N-1” w stagingu to ten sam kod z podmienioną wersją w metadanych**, a zmiana schematu jest symulowana (`DAAS_CD_FAKE_NEW_HEAD`). Prawdziwa migracja N-1 → N na danych będzie sprawdzona dopiero wtedy, gdy w GHCR będzie wydanie N-1 (staging pobierze je po digeście).
 - `deploy.sh`, `ssh-gate.sh` i `lib.sh` działają z zaufanej kopii w `/usr/local/lib/daas-cd/`: zmiany samego procesu wdrożenia wchodzą w życie dopiero po `bootstrap.sh --refresh-cd` wykonanym przez operatora (wydanie z poprawką procesu = najpierw wydanie, potem odświeżenie kopii, potem kolejne wydanie).
-- Jedna instancja `api` i jeden VPS: wdrożenie to krótka przerwa (⚠ 20–90 s), nie blue-green. To decyzja architektoniczna, nie brak.
+- Jedna instancja `api` i jeden VPS: wdrożenie to krótka przerwa (⚠ 1–3,5 min: kopia zimna `backup.sh` zatrzymuje `api`, potem odtworzenie kontenera i smoke; patrz `SLO.md`), nie blue-green. To decyzja architektoniczna, nie brak.
 - Kopia zimna zatrzymuje `api` na kilka sekund przy każdym wdrożeniu i rollbacku.
 - Obrazy pomocnicze (Caddy) są pobierane po tagu z `compose.yml`, nie po digeście; aktualizuje je Dependabot.
