@@ -1,0 +1,45 @@
+#cloud-config
+# Pierwszy start hosta DaaS Engine Cloud (Ubuntu 24.04 lub Debian 12, 2 vCPU / 4 GB). Neutralne wobec dostawcy:
+# wklej CALOSC do pola "user data / cloud-init" w panelu dostawcy przy tworzeniu serwera.
+#
+# ZERO SEKRETOW w tym pliku. User-data jest czytelny z poziomu hosta (metadane instancji) i bywa widoczny w panelu,
+# dlatego wpisujesz tu wylacznie KLUCZE PUBLICZNE. Sekrety aplikacji (.env) generuje potem deploy/gen-env.sh na hoscie.
+#
+# Przed uzyciem zastap oba placeholdery jedna linia klucza publicznego ed25519 (bez cudzyslowow):
+#   <<OPERATOR_SSH_PUBLIC_KEY>>  twoj klucz do logowania administracyjnego (konto `operator`)
+#   <<DEPLOY_SSH_PUBLIC_KEY>>    klucz publiczny pary, ktorej klucz PRYWATNY trafia do sekretu GitHub DEPLOY_SSH_KEY
+# Skrypt bootstrap.sh odmowi pracy, jesli placeholder zostanie w tresci. Cala konfiguracja hosta jest w deploy/host/bootstrap.sh
+# (idempotentnym): ten plik tylko go uruchamia, a ten sam efekt daje reczne `sudo bash bootstrap.sh` na istniejacym serwerze.
+#
+# Dziennik wykonania: /var/log/cloud-init-output.log (bez sekretow).
+
+ssh_pwauth: false
+disable_root: true
+package_update: true
+packages:
+  - git
+  - ca-certificates
+  - curl
+
+write_files:
+  - path: /root/.daas-bootstrap/operator.pub
+    permissions: "0600"
+    owner: root:root
+    content: |
+      <<OPERATOR_SSH_PUBLIC_KEY>>
+  - path: /root/.daas-bootstrap/deploy.pub
+    permissions: "0600"
+    owner: root:root
+    content: |
+      <<DEPLOY_SSH_PUBLIC_KEY>>
+
+runcmd:
+  # Plytki klon tylko po to, by uruchomic bootstrap.sh; wlasciwy klon w /opt/daas-engine tworzy bootstrap.sh.
+  # Katalog z kluczami publicznymi jest usuwany tylko po sukcesie (przy bledzie zostaje do diagnozy i ponowienia).
+  - |
+    set -e
+    git clone --quiet --depth 1 https://github.com/emsior/daas-engine.git /root/.daas-bootstrap/src
+    OPERATOR_SSH_PUBLIC_KEY_FILE=/root/.daas-bootstrap/operator.pub \
+      DEPLOY_SSH_PUBLIC_KEY_FILE=/root/.daas-bootstrap/deploy.pub \
+      bash /root/.daas-bootstrap/src/deploy/host/bootstrap.sh
+    rm -rf /root/.daas-bootstrap
