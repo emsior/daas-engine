@@ -13,7 +13,8 @@
 #   3. kopia backup.sh + sha256sum -c
 #   4. tryb serwisowy on/off na zdrowym stosie
 #   5. wstrzykniete uszkodzenie (obraz-pulapka konczy sie bledem): kod 10 i powrot do N
-#   6. symulacja zmiany schematu (DAAS_CD_FAKE_NEW_HEAD, tylko DAAS_CD_STAGING=1) + ta sama awaria: kod 11, bez rollbacku
+#   6. symulacja zmiany schematu (DAAS_CD_FAKE_NEW_HEAD, tylko DAAS_CD_STAGING=1) + awaria kokpitu przy zdrowym api:
+#      kod 11, bez rollbacku, tryb serwisowy wlaczony i potwierdzony w /api/v1/health, /ready = 200, dowody w katalogu incydentu
 #   7. smoke selfhost na tym samym obrazie api (jak job `docker` w ci.yml)
 set -euo pipefail
 
@@ -32,7 +33,8 @@ if [ -e "$DEPLOY/.env" ]; then
   exit 2
 fi
 
-FAIL_VERSION="99.0.0" # tag obrazu-pulapki: musi byc nowszy od N, zeby deploy nie byl odrzucony jako downgrade
+FAIL_VERSION="99.0.0" # tag obrazu-pulapki api: musi byc nowszy od N, zeby deploy nie byl odrzucony jako downgrade
+WEB_FAIL_VERSION="99.0.1" # tag ze zdrowym api i uszkodzonym kokpitem (scenariusz kodu 11)
 PREV_VERSION="0.0.1"  # tag obrazu N-1
 WORK="$(mktemp -d)"
 STACK_UP=0
@@ -111,6 +113,13 @@ FROM $IMG_API
 CMD ["sh", "-c", "exit 1"]
 EOF
 docker tag "$WEB_REPO:$VERSION" "$WEB_REPO:$FAIL_VERSION"
+# Scenariusz kodu 11: api zdrowe (ten sam obraz co N), kokpit pada. Lokalny smoke jest czerwony, ale api zyje,
+# wiec da sie potwierdzic tryb serwisowy w /api/v1/health.
+docker tag "$API_REPO:$VERSION" "$API_REPO:$WEB_FAIL_VERSION"
+docker build -q -t "$WEB_REPO:$WEB_FAIL_VERSION" - >/dev/null <<DOCKERFILE
+FROM $WEB_REPO:$VERSION
+CMD ["sh", "-c", "exit 1"]
+DOCKERFILE
 
 # ---------------------------------------------------------------- 1. stos N-1
 
@@ -187,19 +196,23 @@ expect ".env po rollbacku" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$VERSION"
 
 # ---------------------------------------------------------------- 6. zmiana schematu + awaria -> kod 11
 
-step "6. Symulacja zmiany schematu + ta sama awaria -> kod 11 (bez rollbacku)"
-DAAS_CD_FAKE_NEW_HEAD=9999 run_deploy deploy "$FAIL_VERSION" local local 0000000000000000000000000000000000000000 0
+step "6. Symulacja zmiany schematu + awaria kokpitu -> kod 11 (bez rollbacku, tryb serwisowy)"
+DAAS_CD_FAKE_NEW_HEAD=9999 run_deploy deploy "$WEB_FAIL_VERSION" local local 0000000000000000000000000000000000000000 0
 expect "bez allow_schema_change: kod" "$RC" 2
 expect "bez allow_schema_change: result" "$(field result)" blocked
 expect "wersja bez zmian" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$VERSION"
-DAAS_CD_FAKE_NEW_HEAD=9999 run_deploy deploy "$FAIL_VERSION" local local 0000000000000000000000000000000000000000 1
+DAAS_CD_FAKE_NEW_HEAD=9999 run_deploy deploy "$WEB_FAIL_VERSION" local local 0000000000000000000000000000000000000000 1
 expect "z allow_schema_change: kod" "$RC" 11
 expect "z allow_schema_change: result" "$(field result)" failed
 expect "schema" "$(field schema)" changed
-expect "brak rollbacku (.env zostaje na wersji N+)" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$FAIL_VERSION"
-case "$(field maintenance)" in on | unverified) echo "ok    kod 11 po czerwonym lokalnym smoke: tryb serwisowy zadany ($(field maintenance))" ;; *) fail "kod 11 bez proby trybu serwisowego" ;; esac
-ls -d "$DEPLOY"/cd/log/*-incident >/dev/null 2>&1 || fail "brak katalogu incydentu"
-echo "ok    katalog incydentu zapisany"
+expect "brak rollbacku (.env zostaje na wersji N+)" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$WEB_FAIL_VERSION"
+expect "podsumowanie: maintenance" "$(field maintenance)" on
+expect "health.maintenance=true" "$(curl -fsS http://127.0.0.1:8000/api/v1/health | sed -n 's/.*"maintenance" *: *\(true\|false\).*/\1/p')" true
+expect "/ready = 200 w trybie serwisowym" "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/ready)" 200
+ls "$DEPLOY"/cd/log/*-incident/logs.txt "$DEPLOY"/cd/log/*-incident/ps.txt >/dev/null 2>&1 || fail "brak plikow w katalogu incydentu"
+echo "ok    katalog incydentu zawiera logs.txt i ps.txt"
+OUT="$("$DEPLOY/cd/deploy.sh" maintenance off)"
+expect "maintenance off po incydencie" "$OUT" "DAAS_MAINTENANCE result=ok code=0 maintenance=off"
 
 # ---------------------------------------------------------------- 7. smoke selfhost
 

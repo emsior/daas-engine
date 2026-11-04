@@ -174,7 +174,11 @@ do_maintenance() { # do_maintenance on|off
 capture_incident() {
   local dir="$LOG_DIR/${RUN_ID}-incident"
   mkdir -p "$dir" && chmod 700 "$dir" || return 1
-  compose logs --no-color --timestamps api web >"$dir/logs.txt" 2>&1 || true
+  if [ "${#PROFILE_ARGS[@]}" -gt 0 ]; then
+    compose logs --no-color --timestamps api web caddy >"$dir/logs.txt" 2>&1 || true
+  else
+    compose logs --no-color --timestamps api web >"$dir/logs.txt" 2>&1 || true
+  fi
   compose ps >"$dir/ps.txt" 2>&1 || true
   chmod 600 "$dir"/* 2>/dev/null || true
   log "zapisano dowody incydentu: $dir"
@@ -375,6 +379,12 @@ version_not_older() { # running new
 
 drain_jobs() {
   [ -n "$RUNNING_VERSION" ] || return 0 # API nie dziala: nie ma zadan w locie
+  # Tryb serwisowy wlaczony (np. po kodzie 11): executor nie startuje, a zadania `running` sprzed odtworzenia kontenera
+  # zostaja "zombie" do zwyklego restartu, wiec czekanie na running = 0 nie ma sensu (latka naprzod nie moze blokowac).
+  if [ "$(env_get "$ENV_FILE" DAAS_MAINTENANCE_MODE)" = "true" ]; then
+    log "drenaz pominiety: DAAS_MAINTENANCE_MODE=true w .env"
+    return 0
+  fi
   local token hdr deadline body running
   token="$(env_get "$ENV_FILE" DAAS_METRICS_TOKEN)"
   if [ -z "$token" ]; then
