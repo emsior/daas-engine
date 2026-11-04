@@ -60,7 +60,7 @@ obserwowalność) włącza `COMPOSE_FILE` w `.env`, tak jak w README.
 
 ## b) Włącznik produkcji: checklista właściciela (≈ 60 min)
 
-Wyłącznie czynności, które wymagają Twojej tożsamości. Reszta (obrazy, skrypty, testy) jest już gotowa w repozytorium. Czasy są szacunkami ⚠.
+Wyłącznie czynności, które wymagają Twojej tożsamości. Reszta (obrazy, skrypty, testy) jest już gotowa w repozytorium. Czasy są szacunkami ⚠. Krok 1 (konto) możesz zrobić wcześniej, a krok 11 (nakładka obserwowalności) w osobnej sesji po pierwszym wdrożeniu: kroki 2–10 to ⚠ ok. 47 min.
 
 | # | Krok | ⚠ min |
 |---|---|---|
@@ -74,7 +74,8 @@ Wyłącznie czynności, które wymagają Twojej tożsamości. Reszta (obrazy, sk
 | 8 | **GitHub → Settings → Environments → New environment `production`:** *Required reviewers* = Ty; *Deployment branches and tags* = *Selected* → dodaj regułę tagów `v*`. Sekrety środowiska: `DEPLOY_SSH_KEY` (cała zawartość pliku `daas_deploy`) i `DEPLOY_KNOWN_HOSTS`. Zmienne środowiska: `DEPLOY_HOST` (adres serwera), `DEPLOY_USER` (`deploy`), `DAAS_PUBLIC_URL` (`https://<domena>`). Potem usuń plik `daas_deploy` z dysku | 10 |
 | 9 | **Zmienna repozytorium `DAAS_CD_ENABLED=true`** (Settings → Secrets and variables → Actions → Variables → *repository*, nie środowiska: warunek joba jest oceniany przed wyborem środowiska) | 1 |
 | 10 | **Pierwsze wydanie:** tag `vX.Y.Z` (sekcja a). Po pierwszej publikacji pakiety `daas-engine-api` i `daas-engine-web` w GHCR ustaw jako **publiczne** (profil → *Packages* → pakiet → *Package settings* → *Change visibility*); host pobiera je bez logowania. Zatwierdź deployment w Actions. Pierwsze wdrożenie na pustych wolumenach nie wymaga `allow_schema_change` | 5 |
-| 11 | **Po wdrożeniu:** pierwsza organizacja (README, krok 4, przez `sudo -u deploy docker compose exec …`) i monitor zewnętrzny z RUNBOOK §6 | — |
+| 11 | **Nakładka obserwowalności** (Prometheus, Alertmanager, node_exporter): skopiuj `deploy/observability/secrets/*.example` → pliki sekretów (prawa i UID: [`observability/README.md`](observability/README.md), sekcja 1), uruchom `deploy/observability/render-alertmanager.sh` i dopisz `compose.observability.yml` do `COMPOSE_FILE` w `.env` (razem z `DAAS_ALERTMANAGER_CONFIG`). Dopóki `COMPOSE_FILE` zawiera nakładkę, brak któregokolwiek pliku sekretu zatrzymuje wdrożenie kodem 2 (w dzienniku tylko nazwa brakującego pliku) | 10 |
+| 12 | **Po wdrożeniu:** pierwsza organizacja (README, krok 4, przez `sudo -u deploy docker compose exec …`) i monitor zewnętrzny z RUNBOOK §6 | — |
 
 Sprawdzenie końcowe: job `deploy` kończy się zielono, a krok „Kontrola z zewnątrz” potwierdza wersję przez domenę (DNS, TLS, proxy).
 
@@ -114,8 +115,9 @@ Kod 3 i 4 dotyczą wyłącznie `status` (operacja trwa, brak stanu). `maintenanc
 
 ## Kopia poza serwerem
 
-`deploy.sh` wywołuje (jeśli istnieje i jest wykonywalny) `deploy/cd/offsite-backup.hook` z jednym argumentem: ścieżką świeżo zrobionego archiwum. Plik jest lokalny dla hosta (ignorowany przez git) i zawiera
-Twoją konfigurację z RUNBOOK §4.3 (np. wysyłka `restic`, dane dostępowe w pliku 0600 poza repozytorium). Przy `allow_schema_change=1` brak haka albo jego błąd przerywa wdrożenie kodem 2.
+`deploy.sh` (przed wdrożeniem) i `deploy/cd/nightly-backup.sh` (cron 03:15 UTC z `bootstrap.sh`) wywołują, jeśli istnieje i jest wykonywalny, `deploy/cd/offsite-backup.hook` z jednym argumentem: ścieżką świeżo zrobionego archiwum.
+Hak jest lokalny dla hosta (ignorowany przez git); wzór z kolejnością `restic backup` → `forget --prune` → `sha256sum -c` → `backup-marker.sh offsite` → heartbeat to `deploy/cd/offsite-backup.hook.example`.
+Znacznik `backup-marker.sh offsite` (SLO-4) zapisuje się dopiero po całym łańcuchu sukcesu. Przy `allow_schema_change=1` brak haka albo jego błąd przerywa wdrożenie kodem 2.
 
 ## Staging: co dowodzi, a czego nie
 

@@ -179,11 +179,11 @@ for d in deploy/cd/state deploy/cd/log deploy/backups; do
 done
 [ -x "$DAAS_DIR/deploy/cd/ssh-gate.sh" ] || die "brak $DAAS_DIR/deploy/cd/ssh-gate.sh (zly DAAS_REPO_REF? wymagane wydanie z deploy/cd)"
 
-# --- 9. kopia lokalna (RUNBOOK 4.2): codziennie 03:15 UTC, dziennik z rotacja; bez wysylki poza serwer ---
+# --- 9. kopia nocna (RUNBOOK 4.2): codziennie 03:15 UTC, dziennik z rotacja; wysylka poza serwer tylko przez hak hosta ---
 touch /var/log/daas-backup.log
 chown "$DEPLOY_USER:$DEPLOY_USER" /var/log/daas-backup.log
 chmod 600 /var/log/daas-backup.log
-write_file /etc/logrotate.d/daas-backup 0644 root:root <<'EOF'
+write_file /etc/logrotate.d/daas-backup 0644 root:root <<'EOF2'
 /var/log/daas-backup.log {
     weekly
     rotate 8
@@ -191,11 +191,20 @@ write_file /etc/logrotate.d/daas-backup 0644 root:root <<'EOF'
     missingok
     notifempty
 }
-EOF
-write_file /etc/cron.d/daas-backup 0644 root:root <<EOF
-# Kopia zimna (api stoi kilka sekund). Pomija sie, dopoki nie istnieje deploy/.env (przed gen-env.sh).
-15 3 * * * $DEPLOY_USER cd $DAAS_DIR/deploy && [ -f .env ] && ./backup.sh >> /var/log/daas-backup.log 2>&1
-EOF
+EOF2
+write_file /etc/cron.d/daas-backup 0644 root:root <<EOF2
+# Kopia zimna (api stoi kilka sekund) + hak kopii poza serwerem, jesli istnieje. Pomija sie bez deploy/.env.
+15 3 * * * $DEPLOY_USER [ -x $DAAS_DIR/deploy/cd/nightly-backup.sh ] && $DAAS_DIR/deploy/cd/nightly-backup.sh >> /var/log/daas-backup.log 2>&1
+EOF2
+
+# --- 10. integracja z nakladka obserwowalnosci (deploy/compose.observability.yml; wlaczana przez COMPOSE_FILE w .env) ---
+# Katalog textfile dla node_exportera istnieje zawsze (Docker bind-mount zalozylby go jako root-owy katalog bez prawa zapisu dla `deploy`).
+# root:deploy 0775: skrypty textfile (backup-marker.sh z haka kopii i nocnej kopii, mail-failures.sh z crona) dzialaja jako `deploy`.
+install -d -m 0775 -o root -g "$DEPLOY_USER" /var/lib/node_exporter/textfile
+# Przejsciowy licznik L-4 (blad wysylki linku logowania), co 5 min; po cichu nic nie robi, dopóki nakladka nie jest wlaczona.
+write_file /etc/cron.d/daas-observability 0644 root:root <<EOF2
+*/5 * * * * $DEPLOY_USER grep -qs '^COMPOSE_FILE=.*compose\.observability\.yml' $DAAS_DIR/deploy/.env && [ -x $DAAS_DIR/deploy/observability/textfile/mail-failures.sh ] && $DAAS_DIR/deploy/observability/textfile/mail-failures.sh >/dev/null 2>&1
+EOF2
 
 log "gotowe. Nastepne kroki (deploy/CD.md): zaloguj sie jako $OPERATOR_USER w DRUGIM oknie, potem:"
 log "  sudo -u $DEPLOY_USER bash -c 'cd $DAAS_DIR/deploy && ./gen-env.sh --domain <domena>'   # .env z sekretami powstaje tu, nie w user-data"

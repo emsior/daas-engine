@@ -309,6 +309,32 @@ pf_disk() {
   done
 }
 
+# Nakladka obserwowalnosci (COMPOSE_FILE zawiera compose.observability.yml): pliki sekretow musza istniec PRZED `up`,
+# inaczej Docker zalozy w ich miejscu katalogi. Test przez stat (-s): pliki maja wlasciciela 65534 i prawa 0400,
+# wiec deploy ich nie odczyta, ale istnienie sprawdzi. Tresci nie czytamy i nie wypisujemy; w dzienniku tylko nazwy.
+pf_overlay() {
+  local cf f cfg missing=0
+  local -a need=(metrics_token smtp_password heartbeat_url)
+  cf="$(env_get "$ENV_FILE" COMPOSE_FILE)"
+  case "$cf" in *compose.observability.yml*) ;; *) return 0 ;; esac
+  case ",$(env_get "$ENV_FILE" COMPOSE_PROFILES)," in *,dash,*) need+=(grafana_admin_password) ;; esac
+  for f in "${need[@]}"; do
+    if [ ! -s "$DEPLOY_DIR/observability/secrets/$f" ]; then
+      log "BRAK pliku sekretu nakladki obserwowalnosci: observability/secrets/$f (szablon: $f.example; deploy/observability/README.md)"
+      missing=1
+    fi
+  done
+  cfg="$(env_get "$ENV_FILE" DAAS_ALERTMANAGER_CONFIG)"
+  if [ -n "$cfg" ]; then
+    [[ "$cfg" == /* ]] || cfg="$DEPLOY_DIR/$cfg"
+    if [ ! -s "$cfg" ]; then
+      log "BRAK pliku konfiguracji Alertmanagera wskazanego w DAAS_ALERTMANAGER_CONFIG (uruchom observability/render-alertmanager.sh)"
+      missing=1
+    fi
+  fi
+  [ "$missing" = "0" ]
+}
+
 pf_git() {
   [ "$STAGING" = "1" ] && return 0
   local tag_commit
@@ -418,24 +444,14 @@ run_offsite_hook() {
   fi
 }
 
-pull_aux_images() { # obrazy pomocnicze z compose (np. Caddy): `up --pull never` ich nie pobierze
-  local images img
-  images="$(cd "$DEPLOY_DIR" && DAAS_API_IMAGE="$API_REPO" DAAS_VERSION="$VERSION" docker compose "${PROFILE_ARGS[@]}" config --images 2>/dev/null)" || {
-    log "docker compose config --images nie powiodl sie"
+# Obrazy NIEBUDOWANE (Caddy, nakladka obserwowalnosci, opcjonalnie Grafana): `up --pull never` ich nie pobierze.
+# Obrazy api/web maja `build:` w compose, wiec `--ignore-buildable` je pomija (one przychodza wylacznie po digescie z rejestru).
+# Nieudane pobranie = kod 2, nic nie zmieniono (do_apply cofa checkout).
+pull_aux_images() {
+  (cd "$DEPLOY_DIR" && timeout 600 docker compose "${PROFILE_ARGS[@]}" pull --ignore-buildable --quiet >/dev/null) || {
+    log "docker compose pull --ignore-buildable nie powiodl sie (obrazy pomocnicze)"
     return 1
   }
-  while IFS= read -r img; do
-    [ -n "$img" ] || continue
-    [ "$img" = "$API_REPO:$VERSION" ] || [ "$img" = "$WEB_REPO:$VERSION" ] && continue
-    if ! timeout 600 docker pull --quiet "$img" >/dev/null 2>&1; then
-      if docker image inspect "$img" >/dev/null 2>&1; then
-        log "ostrzezenie: nie pobrano $img, uzywam obrazu lokalnego"
-      else
-        log "brak obrazu pomocniczego $img i pobranie nie powiodlo sie"
-        return 1
-      fi
-    fi
-  done <<<"$images"
 }
 
 do_apply() {
@@ -530,6 +546,7 @@ run_deploy() {
   pf_env || { abort_pre failed "preflight .env"; return 0; }
   load_env_settings
   pf_disk || { abort_pre failed "preflight dysk"; return 0; }
+  pf_overlay || { abort_pre failed "preflight nakladka obserwowalnosci (brak plikow sekretow)"; return 0; }
   RUNNING_VERSION="$(current_version)"
   [ -z "$RUNNING_VERSION" ] || PREV_VERSION="$RUNNING_VERSION"
   if [ "$PREV_VERSION" = "none" ] && [ -f "$cur_json" ]; then

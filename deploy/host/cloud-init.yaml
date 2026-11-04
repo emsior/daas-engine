@@ -11,6 +11,9 @@
 # Skrypt bootstrap.sh odmowi pracy, jesli placeholder zostanie w tresci. Cala konfiguracja hosta jest w deploy/host/bootstrap.sh
 # (idempotentnym): ten plik tylko go uruchamia, a ten sam efekt daje reczne `sudo bash bootstrap.sh` na istniejacym serwerze.
 #
+# bootstrap.sh tworzy tez /var/lib/node_exporter/textfile (root:deploy 0775) i wpis cron licznika L-4 dla nakladki obserwowalnosci
+# (nic nie robi, dopoki COMPOSE_FILE w deploy/.env nie zawiera compose.observability.yml). Zadnych adresow ani sekretow.
+#
 # Dziennik wykonania: /var/log/cloud-init-output.log (bez sekretow).
 
 ssh_pwauth: false
