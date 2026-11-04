@@ -243,20 +243,29 @@ jobs:
             ssh -q -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$kh" \
               -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$DEPLOY_USER@$DEPLOY_HOST" "$1" 2>/dev/null
           }
+          # Bezwzgledny termin odpytywania: ~62 min od startu kroku (job ma timeout-minutes: 70, host czeka na wynik maks. 50 min).
+          deadline=$((SECONDS + 3720))
           rc=0
           out="$(remote "deploy $VERSION $API_DIGEST $WEB_DIGEST $SHA $ALLOW")" || rc=$?
-          if [ "$rc" = "255" ]; then
-            # Zerwane polaczenie: praca na hoscie trwa odlaczona od sesji. Odpytujemy `status` do wyniku (maks. 40 min).
-            echo "Polaczenie SSH zerwane; odpytuje stan operacji na hoscie."
-            for _ in $(seq 1 80); do
+          if [ "$rc" = "255" ] || [ "$rc" = "3" ]; then
+            # 255: zerwane polaczenie SSH. 3: host przestal czekac (limit 50 min), a operacja nadal trwa. W obu przypadkach praca
+            # biegnie odlaczona od sesji, wiec odpytujemy `status` do wyniku albo do terminu.
+            echo "Polaczenie SSH zerwane albo operacja trwa dluzej niz limit czekania hosta; odpytuje stan operacji na hoscie."
+            while [ "$SECONDS" -lt "$deadline" ]; do
               sleep 30
               rc=0
               out="$(remote status)" || rc=$?
               if [ "$rc" != "255" ] && [ "$rc" != "3" ]; then break; fi
             done
+            if [ "$rc" = "255" ] || [ "$rc" = "3" ]; then
+              echo "::error::Operacja trwa na hoscie, wynik nieznany po terminie odpytywania; sprawdz na hoscie: deploy.sh status (deploy/CD.md). To nie jest potwierdzony incydent."
+              exit 1
+            fi
           fi
-          # Do publicznego logu trafia wylacznie linia o scislym formacie (host nie moze wstrzyknac polecen workflow).
-          line="$(printf '%s\n' "$out" | grep -E '^DAAS_DEPLOY result=(ok|noop|rollback|blocked|failed) code=[0-9]{1,2} version=[0-9.-]+ previous=[0-9.a-z]+ schema=(same|changed|unknown) duration=[0-9]+ maintenance=(on|off|unverified)$' | tail -n 1 || true)"
+          # Do publicznego logu trafia wylacznie linia o scislym formacie (host nie moze wstrzyknac polecen workflow);
+          # wersja w linii musi byc wersja tego wydania (nie przejdzie stara linia z cudzego przebiegu).
+          ver_re="${VERSION//./\\.}"
+          line="$(printf '%s\n' "$out" | grep -E "^DAAS_DEPLOY result=(ok|noop|rollback|blocked|failed) code=[0-9]{1,2} version=${ver_re} previous=[0-9.a-z]+ schema=(same|changed|unknown) duration=[0-9]+ maintenance=(on|off|unverified) edge=(ok|red)$" | tail -n 1 || true)"
           if [ -z "$line" ]; then
             echo "::error::Brak poprawnego podsumowania z hosta (kod SSH $rc)"
             exit 1
@@ -264,11 +273,18 @@ jobs:
           echo "$line"
           { echo "### Wdrozenie produkcyjne"; echo; echo '```'; echo "$line"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
           code="$(printf '%s\n' "$line" | sed -n 's/.* code=\([0-9]*\) .*/\1/p')"
+          edge="$(printf '%s\n' "$line" | sed -n 's/.* edge=\([a-z]*\)$/\1/p')"
           case "$code" in
             0) ;;
             2) echo "::error::Kod 2: preflight lub brama nie przeszly, nic nie zmieniono (deploy/CD.md)"; exit 1 ;;
             10) echo "::error::Kod 10: smoke nie przeszedl, rollback do poprzedniej wersji udany"; exit 1 ;;
-            11) echo "::error::Kod 11: INCYDENT, rollback zabroniony (schemat); deploy/CD.md i RUNBOOK sekcja 9"; exit 1 ;;
+            11)
+              if [ "$edge" = "red" ]; then
+                echo "::error::Kod 11, edge=red: krawedz (Caddy/DNS/TLS) - wersja wdrozona, lokalny smoke zielony; sprawdz recznie smoke --public (deploy/CD.md)"
+              else
+                echo "::error::Kod 11: INCYDENT, rollback zabroniony (schemat, pierwsze wdrozenie albo powtorka); deploy/CD.md i RUNBOOK sekcja 9"
+              fi
+              exit 1 ;;
             12) echo "::error::Kod 12: INCYDENT P1, rollback nieudany; deploy/CD.md i RUNBOOK sekcja 9"; exit 1 ;;
             *) echo "::error::Nieoczekiwany kod wyjscia"; exit 1 ;;
           esac
@@ -292,7 +308,8 @@ jobs:
 
   release-notes:
     needs: [verify, images, staging, deploy]
-    if: ${{ !cancelled() && needs.staging.result == 'success' }}
+    # deploy: success albo skipped (wlacznik CD wylaczony) pozwala wydac Release; failure (kod 10/11/12) wstrzymuje publikacje
+    if: ${{ !cancelled() && needs.staging.result == 'success' && needs.deploy.result != 'failure' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -327,7 +344,9 @@ jobs:
             echo
             echo "schema: $PREV_HEAD -> $NEW_HEAD (poprzednie wydanie: $PREV_TAG)"
             echo
-            echo "Wdrozenie produkcyjne w tym przebiegu: $DEPLOY_RESULT (success, failure albo skipped, gdy wlacznik wylaczony)."
+            echo "deploy: $DEPLOY_RESULT"
+            echo
+            echo "(success = wdrozone na produkcje w tym przebiegu; skipped = wlacznik CD wylaczony, wydanie tylko opublikowane)."
             echo
             echo "### Obrazy (GHCR, tag niezmienny, bez latest)"
             echo
