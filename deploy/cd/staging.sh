@@ -276,9 +276,13 @@ expect "maintenance off po incydencie" "$OUT" "DAAS_MAINTENANCE result=ok code=0
 
 step "7. Smoke selfhost na tym samym obrazie api"
 HDR="$WORK/selfhost.hdr"
-(umask 077 && printf 'X-API-Key: %s\n' "$(openssl rand -hex 24)" >"$HDR")
+SELFHOST_ENV="$WORK/selfhost.env"
+SELFHOST_KEY="$(openssl rand -hex 24)"
+(umask 077 && printf 'X-API-Key: %s\n' "$SELFHOST_KEY" >"$HDR" && printf 'DAAS_API_KEY=%s\n' "$SELFHOST_KEY" >"$SELFHOST_ENV")
+SELFHOST_KEY=""
+# Klucz trafia do kontenera przez --env-file (plik 0600), nie przez -e w argumentach procesu docker.
 docker run -d --rm --name daas-selfhost \
-  -e DAAS_API_KEY="$(sed -n 's/^X-API-Key: //p' "$HDR")" -p 127.0.0.1:8002:8000 "$API_REPO:$VERSION" >/dev/null
+  --env-file "$SELFHOST_ENV" -p 127.0.0.1:8002:8000 "$API_REPO:$VERSION" >/dev/null
 for _ in $(seq 1 30); do curl -sf http://127.0.0.1:8002/health >/dev/null && break || sleep 1; done
 curl -sf http://127.0.0.1:8002/health >/dev/null
 expect "bez klucza 401" "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8002/run -H 'Content-Type: application/json' -d '{"pipeline":"cs2_demo"}')" 401

@@ -29,9 +29,20 @@ if grep -qs '^COMPOSE_FILE=.*compose\.observability\.yml' "$deploy_dir/.env" && 
   "$marker" offsite
 fi
 
-# Heartbeat (dead man's switch) kopii: adres z pliku 0600 uzytkownika deploy (observability/secrets/heartbeat_url nalezy do UID
-# Alertmanagera i jest dla deploy nieczytelny), przekazany curlowi przez stdin (nie trafia do argumentow procesu).
+# Heartbeat (dead man's switch) kopii: adres z pliku uzytkownika deploy (observability/secrets/heartbeat_url nalezy do UID
+# Alertmanagera i jest dla deploy nieczytelny). Plik MUSI miec prawa 0600 i nalezec do biezacego uzytkownika, a adres musi byc
+# prostym https://... (bez cudzyslowow, spacji i znakow specjalnych). Adres trafia do curla przez stdin (`-K -`), wiec nie
+# widac go w argumentach procesow, i bez cudzyslowow w pliku konfiguracyjnym curla, wiec nic nie da sie w nim wstrzyknac.
 hb="${DAAS_HEARTBEAT_URL_FILE:-$HOME/.config/daas-heartbeat-url}"
-if [ -r "$hb" ]; then
-  printf 'url = "%s"\n' "$(cat "$hb")" | curl -fsS -m 10 -o /dev/null -K -
+if [ -e "$hb" ]; then
+  if [ "$(stat -c %a "$hb")" != "600" ] || [ "$(stat -c %u "$hb")" != "$(id -u)" ]; then
+    echo "plik z adresem heartbeat musi miec prawa 600 i nalezec do biezacego uzytkownika: $hb" >&2
+    exit 1
+  fi
+  hb_url="$(head -n 1 "$hb")"
+  if ! [[ "$hb_url" =~ ^https://[A-Za-z0-9._/-]+$ ]]; then
+    echo "adres heartbeat w pliku ma niepoprawny format (oczekiwano https://[A-Za-z0-9._/-]+)" >&2
+    exit 1
+  fi
+  printf 'url = %s\n' "$hb_url" | curl -fsS -m 10 -o /dev/null -K -
 fi

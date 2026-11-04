@@ -43,11 +43,29 @@
 set -euo pipefail
 
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
-CD_DIR="$(dirname "$SELF")"
+SELF_DIR="$(dirname "$SELF")"
 # shellcheck source=deploy/cd/lib.sh
-. "$CD_DIR/lib.sh"
+. "$SELF_DIR/lib.sh"
 
-DEPLOY_DIR="$(cd "$CD_DIR/.." && pwd)"
+# Dwa miejsca uruchomienia:
+#  - w repozytorium (staging, praca reczna): katalogi wynikaja z polozenia skryptu;
+#  - ze ZAUFANEJ KOPII root:root w /usr/local/lib/daas-cd (produkcja, ssh-gate.sh z authorized_keys): obok skryptow lezy plik
+#    `daas-dir` z sciezka klonu (np. /opt/daas-engine). Uzytkownik `deploy` nie moze zmienic tej kopii, wiec nie moze podmienic bramki
+#    ani deploy.sh, ktore wykonuje klucz CI. Kopie odswieza root (bootstrap.sh --refresh-cd), patrz deploy/CD.md.
+if [ -f "$SELF_DIR/daas-dir" ]; then
+  DAAS_ROOT="$(head -n 1 "$SELF_DIR/daas-dir")"
+  if ! [[ "$DAAS_ROOT" =~ ^/[A-Za-z0-9._/-]+$ ]] || [ ! -d "$DAAS_ROOT/deploy/cd" ]; then
+    printf 'DAAS_DEPLOY result=failed code=2 version=- previous=none schema=unknown duration=0 maintenance=off edge=ok\n'
+    exit 2
+  fi
+  DEPLOY_DIR="$DAAS_ROOT/deploy"
+  CD_DIR="$DEPLOY_DIR/cd"
+  TRUSTED_COPY=1
+else
+  CD_DIR="$SELF_DIR"
+  DEPLOY_DIR="$(cd "$CD_DIR/.." && pwd)"
+  TRUSTED_COPY=0
+fi
 REPO_DIR="$(cd "$DEPLOY_DIR/.." && pwd)"
 STATE_DIR="$CD_DIR/state"
 LOG_DIR="$CD_DIR/log"
@@ -75,7 +93,7 @@ PROFILE_ARGS=()
 PUBLIC_URL=""
 DB_REV="" NEW_HEAD="" PREV_COMMIT="" BACKUP_ARCHIVE=""
 ENV_SWAPPED=0 CHECKED_OUT=0 PREV_SAVED=0 FIRST_DEPLOY=0 FINALIZED=0
-RUNNING_VERSION="" KNOWN_REVS_FILE="" MAINT_STATE="off" EDGE="ok"
+RUNNING_VERSION="" KNOWN_REVS_FILE="" MAINT_STATE="off" EDGE="ok" HDR_FILE=""
 
 # ---------------------------------------------------------------- stan i podsumowanie
 
@@ -159,7 +177,7 @@ run_smoke() { # run_smoke X.Y.Z [wait_s] -> kod smoke.sh (lokalnie, a przy PUBLI
 }
 
 run_smoke_local() { # tylko API i kokpit na 127.0.0.1 (bez --public): rozroznia awarie aplikacji od awarii krawedzi
-  (cd "$DEPLOY_DIR" && ./smoke.sh --api "http://127.0.0.1:${API_PORT}" --web "http://127.0.0.1:${WEB_PORT}" --wait 30)
+  (cd "$DEPLOY_DIR" && ./smoke.sh --api "http://127.0.0.1:${API_PORT}" --web "http://127.0.0.1:${WEB_PORT}" --wait 30 --expect-version "$VERSION")
 }
 
 # Tryb serwisowy (DAAS_MAINTENANCE_MODE): atomowa zmiana .env, odtworzenie TYLKO usługi api, potwierdzenie w /api/v1/health.
@@ -356,6 +374,10 @@ pf_overlay() {
   if [ ! -s "$cfg" ]; then
     log "BRAK konfiguracji Alertmanagera ($(basename "$cfg")): uruchom observability/render-alertmanager.sh (deploy/observability/README.md)"
     missing=1
+  elif grep -q '<<' "$cfg"; then
+    # Niewyrenderowany szablon (placeholdery <<...>>): Alertmanager wystartowalby, ale nie wyslalby zadnego powiadomienia.
+    log "KONFIGURACJA Alertmanagera ($(basename "$cfg")) zawiera niewyrenderowane placeholdery '<<': uruchom observability/render-alertmanager.sh"
+    missing=1
   fi
   [ "$missing" = "0" ]
 }
@@ -420,6 +442,7 @@ drain_jobs() {
   fi
   # Token tylko w pliku naglowka 0600 (curl -H @plik): nie trafia do argumentow procesow (ps).
   hdr="$(umask 077 && mktemp "$STATE_DIR/.hdr.XXXXXX")"
+  HDR_FILE="$hdr" # worker_exit i start kolejnego przebiegu usuwaja go nawet po przerwaniu (SIGTERM/SIGKILL)
   printf 'Authorization: Bearer %s\n' "$token" >"$hdr"
   token=""
   deadline=$((SECONDS + DRAIN_TIMEOUT))
@@ -579,6 +602,7 @@ prune_logs() { # zostaw 30 ostatnich dziennikow i plikow stanu
   for f in $(find "$STATE_DIR" -maxdepth 1 -type f -name '2*.json' | sort | head -n -30); do rm -f "$f"; done
   for f in $(find "$LOG_DIR" -maxdepth 1 -type d -name '2*-incident' | sort | head -n -10); do rm -rf "$f"; done
   for f in $(find "$DEPLOY_DIR" -maxdepth 1 -type f -name '.env.prev.2*' | sort | head -n -3); do rm -f "$f"; done
+  find "$STATE_DIR" -maxdepth 1 -type f -name '.hdr.*' -delete 2>/dev/null || true
 }
 
 # ---------------------------------------------------------------- przebieg: deploy
@@ -644,6 +668,18 @@ incident_12() {
   retire_env_prev
 }
 
+# Zaufana kopia (root:root) nie aktualizuje sie sama z wydaniem: po checkout nowego taga porownaj ja z plikami wydania i ostrzez.
+warn_cd_drift() {
+  [ "$TRUSTED_COPY" = "1" ] || return 0
+  local f
+  for f in deploy.sh lib.sh ssh-gate.sh; do
+    [ -f "$CD_DIR/$f" ] || continue
+    if ! cmp -s "$SELF_DIR/$f" "$CD_DIR/$f"; then
+      log "UWAGA: skrypt CD $f w $SELF_DIR rozni sie od wydania $VERSION; operator odswieza kopie: sudo bash $DEPLOY_DIR/host/bootstrap.sh --refresh-cd"
+    fi
+  done
+}
+
 run_deploy() {
   local cur_json="$STATE_DIR/current.json" cur_ver cur_api cur_web cur_sha
 
@@ -704,6 +740,7 @@ run_deploy() {
     abort_pre failed "przygotowanie wersji (checkout/obrazy/.env); przywrocono poprzedni stan"
     return 0
   fi
+  warn_cd_drift
 
   set_phase up
   local up_ok=0 smoke_ok=0
@@ -846,6 +883,7 @@ run_rollback() {
 
 # Niespodziewane zakonczenie procesu roboczego (blad powloki, SIGTERM): domknij plik stanu, zeby `status` nie klamal.
 worker_exit() {
+  [ -z "$HDR_FILE" ] || rm -f "$HDR_FILE" # plik naglowka z tokenem metryk nie moze przezyc przebiegu
   [ "$FINALIZED" = "1" ] && return 0
   RESULT="failed"
   case "$PHASE" in
@@ -883,6 +921,9 @@ worker() { # worker deploy|rollback RUN_ID [argumenty...]
     return 0
   fi
   trap worker_exit EXIT
+  trap 'exit 143' TERM INT HUP # sygnaly konczace tez przechodza przez worker_exit
+  # Jestesmy jedynym posiadaczem blokady: wszystko, co zostalo po przerwanym przebiegu (SIGKILL), jest stale.
+  rm -f "$STATE_DIR"/.hdr.* "$STATE_DIR"/.known.* "$STATE_DIR"/.state.* "$STATE_DIR"/.prev.* "$STATE_DIR"/.cur.* 2>/dev/null || true
   state_write 0
   if [ "$ACTION" = "deploy" ]; then run_deploy || true; else run_rollback || true; fi
   PHASE="done"
