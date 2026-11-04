@@ -1,0 +1,177 @@
+# Testy promtool (promtool test rules). Uruchamiane w CI przez kontener obrazu prometheus:
+#   docker run --rm -v "$PWD/deploy/observability:/work:ro" -w /work/tests --entrypoint promtool <obraz prometheus> test rules <plik>
+# Plik jest WYGENEROWANY z rules/alerts.yml (adnotacje i etykiety musza zgadzac sie co do znaku): zmieniasz regule ->
+# zmien test. Odstep probek 1 min; liczby probek w "axN" to N+1 wartosci. Scenariusze (a)-(j): deploy/ALERTS.md / raport SRE S2.
+# (b) 5xx; (c)(d) kolejka; (e) zadania failed. Warianty source: l2/l3 sprawdzaja reguly czekajace na luki.
+rule_files:
+- ../rules/recording.yml
+- ../rules/alerts.yml
+evaluation_interval: 1m
+tests:
+- interval: 1m
+  input_series:
+  - series: daas_http_requests_total{route="/api/v1/orgs/{org_id}/jobs",status="200"}
+    values: 0+9x40
+  - series: daas_http_requests_total{route="/api/v1/orgs/{org_id}/jobs",status="500"}
+    values: 0+1x40
+  alert_rule_test:
+  - eval_time: 4m
+    alertname: ApiHighErrorRatio
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: ApiHighErrorRatio
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: api
+      exp_annotations:
+        summary: Ponad 5 % zapytan uzytkownikow konczy sie bledem 5xx
+        description: Udzial odpowiedzi 5xx na trasach uzytkownika przekracza 5 % w 10 minutach (co najmniej 3 bledy). Etykieta route w metryce wskazuje trase.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#apihigherrorratio
+- interval: 1m
+  input_series:
+  - series: daas_http_requests_total{route="/api/v1/orgs/{org_id}/jobs",status="200"}
+    values: 0+1x41
+  - series: daas_http_requests_total{route="/api/v1/orgs/{org_id}/jobs",status="500"}
+    values: 0x19 1 2 2x19
+  alert_rule_test:
+  - eval_time: 30m
+    alertname: ApiHighErrorRatio
+    exp_alerts: []
+  - eval_time: 40m
+    alertname: ApiHighErrorRatio
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: daas_http_requests_total{route="/api/v1/orgs/{org_id}/jobs",status="200"}
+    values: 0+9x40
+  - series: daas_http_requests_total{route="/api/v1/ready",status="503"}
+    values: 0+5x40
+  - series: daas_http_requests_total{route="/metrics",status="500"}
+    values: 0+5x40
+  alert_rule_test:
+  - eval_time: 30m
+    alertname: ApiHighErrorRatio
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: daas_jobs{status="failed"}
+    values: 0x64 4x20
+  alert_rule_test:
+  - eval_time: 50m
+    alertname: JobsFailedRising
+    exp_alerts: []
+  - eval_time: 75m
+    alertname: JobsFailedRising
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: jobs
+        source: interim
+      exp_annotations:
+        summary: Przybywa zadan ze statusem failed
+        description: Co najmniej 3 nowe zadania failed w ostatniej godzinie (licznik biezacy z bazy; wlicza bledy danych klienta).
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobsfailedrising
+- interval: 1m
+  input_series:
+  - series: daas_jobs{status="failed"}
+    values: 0x64 2x20
+  alert_rule_test:
+  - eval_time: 75m
+    alertname: JobsFailedRising
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: daas_jobs_finished_total{pipeline="p1",status="failed",class="platform"}
+    values: 0x20 3x30
+  - series: daas_jobs_finished_total{pipeline="p1",status="failed",class="client"}
+    values: 0+5x50
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: JobsFailedRising
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: JobsFailedRising
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: jobs
+        source: l2
+      exp_annotations:
+        summary: Przybywa zadan ze statusem failed
+        description: Co najmniej 2 zadania zakonczone bledem klasy platforma w ostatniej godzinie.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobsfailedrising
+- interval: 1m
+  input_series:
+  - series: daas_jobs{status="queued"}
+    values: 1x29
+  - series: daas_jobs{status="running"}
+    values: '0x29'
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: JobQueueStuck
+    exp_alerts: []
+  - eval_time: 16m
+    alertname: JobQueueStuck
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: jobs
+        source: interim
+        reason: queued_idle
+      exp_annotations:
+        summary: Zadania czekaja w kolejce, a zadne nie jest wykonywane
+        description: Co najmniej jedno zadanie queued przez 15 minut przy zerowej liczbie zadan running (executor martwy lub tryb serwisowy).
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobqueuestuck
+- interval: 1m
+  input_series:
+  - series: daas_jobs{status="queued"}
+    values: 1x25
+  - series: daas_jobs{status="running"}
+    values: 1x25
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: JobQueueStuck
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: daas_jobs{status="queued"}
+    values: '0x39'
+  - series: daas_jobs{status="running"}
+    values: 1x39
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: JobQueueStuck
+    exp_alerts: []
+  - eval_time: 31m
+    alertname: JobQueueStuck
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: jobs
+        source: interim
+        reason: running_long
+      exp_annotations:
+        summary: Zadanie jest wykonywane nieprzerwanie dluzej niz 30 minut
+        description: 'Co najmniej jedno zadanie running przez 30 minut bez przerwy (cel SLO-3: p95 do 5 minut).'
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobqueuestuck
+- interval: 1m
+  input_series:
+  - series: daas_job_queue_oldest_age_seconds
+    values: 700x20
+  alert_rule_test:
+  - eval_time: 3m
+    alertname: JobQueueStuck
+    exp_alerts: []
+  - eval_time: 7m
+    alertname: JobQueueStuck
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: jobs
+        source: l3
+        reason: oldest_queued
+      exp_annotations:
+        summary: Najstarsze zadanie w kolejce czeka dluzej niz 10 minut
+        description: Wiek najstarszego zadania queued przekracza 600 s przez 5 minut.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobqueuestuck

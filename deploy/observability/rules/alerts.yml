@@ -1,0 +1,277 @@
+# Alerty DaaS Engine: odwzorowanie 1:1 tabeli z deploy/ALERTS.md (autor specyfikacji: SRE). Zmiana progu lub nazwy
+# = zmiana ALERTS.md i SLO.md w tym samym PR. Nazwa alertu = kotwica w ALERTS.md (runbook_url, litery male).
+# Zasady: tylko objawy (budzet bledu) i bezposrednie zagrozenie danych; adnotacje statyczne, bez danych klienta
+# (zadne wartosci etykiet z aplikacji nie trafiaja do tresci); etykieta `service` sluzy do tlumienia w Alertmanagerze.
+# `ExternalProbeDown` (alert 1) NIE jest regula Prometheusa: to sonda monitora zewnetrznego (RUNBOOK §6, ALERTS.md).
+# Wersje zastepcze dzialajace dzis maja etykiete source: interim; wersje docelowe (po luce L-n) source: l<n> i sa
+# nieaktywne, dopoki metryka nie istnieje. Po wdrozeniu luki usun regule interim (inaczej alert zaplonie podwojnie).
+groups:
+  - name: daas_slo_burn
+    rules:
+      # A1: szybkie spalanie budzetu SLO-1 (99,5 % / 30 dni): 14,4 x 0,005 = 7,2 % w 1 h i w 5 min.
+      - alert: SloAvailabilityFastBurn
+        expr: daas:slo1_error_ratio:1h > (14.4 * 0.005) and daas:slo1_error_ratio:5m > (14.4 * 0.005)
+        for: 0m
+        labels:
+          severity: page
+          service: api
+        annotations:
+          summary: "Budzet SLO-1 (dostepnosc) spala sie 14 razy szybciej niz rownomiernie"
+          description: "Co najmniej 7,2 % bledow dostepnosci w ostatniej godzinie i w ostatnich 5 minutach (up lub 5xx z /ready). Gdy monitor zewnetrzny jest zielony, sprawdz token scrape (401), nie usluge."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#sloavailabilityfastburn"
+
+      # A2: wolne spalanie: 6 x 0,005 = 3 % w 6 h i w 30 min.
+      - alert: SloAvailabilitySlowBurn
+        expr: daas:slo1_error_ratio:6h > (6 * 0.005) and daas:slo1_error_ratio:30m > (6 * 0.005)
+        for: 0m
+        labels:
+          severity: ticket
+          service: api
+        annotations:
+          summary: "Budzet SLO-1 (dostepnosc) spala sie 6 razy szybciej niz rownomiernie"
+          description: "Co najmniej 3 % bledow dostepnosci w ostatnich 6 godzinach i w ostatnich 30 minutach. Szukaj wzorca czasowego (kopia zimna, restarty)."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#sloavailabilityslowburn"
+
+  - name: daas_symptoms
+    rules:
+      # A3: 5xx na trasach uzytkownika (bez /ready, /health, /metrics, unmatched). Wzorzec wykluczen rozszerzony
+      # wzgledem szkicu SRE o `/metrics`: aplikacja serwuje metryki pod /metrics (poza /api/v1), a scrape co 30 s
+      # zawyzalby mianownik.
+      - alert: ApiHighErrorRatio
+        expr: |
+          (
+              sum(rate(daas_http_requests_total{status=~"5..",route!~"(/api/v1)?/(ready|health)|(/api/v1)?/metrics|unmatched"}[10m]))
+            / sum(rate(daas_http_requests_total{route!~"(/api/v1)?/(ready|health)|(/api/v1)?/metrics|unmatched"}[10m]))
+            > 0.05
+          )
+          and
+          (
+            sum(increase(daas_http_requests_total{status=~"5..",route!~"(/api/v1)?/(ready|health)|(/api/v1)?/metrics|unmatched"}[10m])) >= 3
+          )
+        for: 5m
+        labels:
+          severity: ticket
+          service: api
+        annotations:
+          summary: "Ponad 5 % zapytan uzytkownikow konczy sie bledem 5xx"
+          description: "Udzial odpowiedzi 5xx na trasach uzytkownika przekracza 5 % w 10 minutach (co najmniej 3 bledy). Etykieta route w metryce wskazuje trase."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#apihigherrorratio"
+
+      # A4 (dzis, gauge z bazy): >= 3 nowe zadania failed w 1 h. Liczy tez bledy danych klienta (szum).
+      - alert: JobsFailedRising
+        expr: sum(delta(daas_jobs{status="failed"}[1h])) >= 3
+        for: 0m
+        labels:
+          severity: ticket
+          service: jobs
+          source: interim
+        annotations:
+          summary: "Przybywa zadan ze statusem failed"
+          description: "Co najmniej 3 nowe zadania failed w ostatniej godzinie (licznik biezacy z bazy; wlicza bledy danych klienta)."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobsfailedrising"
+      # 🚫 wymaga L-2 (daas_jobs_finished_total {pipeline,status,class}); A4b: tylko bledy klasy platforma.
+      - alert: JobsFailedRising
+        expr: sum(increase(daas_jobs_finished_total{status="failed",class="platform"}[1h])) >= 2
+        for: 0m
+        labels:
+          severity: ticket
+          service: jobs
+          source: l2
+        annotations:
+          summary: "Przybywa zadan ze statusem failed"
+          description: "Co najmniej 2 zadania zakonczone bledem klasy platforma w ostatniej godzinie."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobsfailedrising"
+
+      # A5 (zastepnik dzis): kolejka stoi albo jedno zadanie trwa zbyt dlugo.
+      - alert: JobQueueStuck
+        expr: max(daas_jobs{status="queued"}) > 0 and on() max(daas_jobs{status="running"}) == 0
+        for: 15m
+        labels:
+          severity: ticket
+          service: jobs
+          source: interim
+          reason: queued_idle
+        annotations:
+          summary: "Zadania czekaja w kolejce, a zadne nie jest wykonywane"
+          description: "Co najmniej jedno zadanie queued przez 15 minut przy zerowej liczbie zadan running (executor martwy lub tryb serwisowy)."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobqueuestuck"
+      - alert: JobQueueStuck
+        expr: max(daas_jobs{status="running"}) > 0
+        for: 30m
+        labels:
+          severity: ticket
+          service: jobs
+          source: interim
+          reason: running_long
+        annotations:
+          summary: "Zadanie jest wykonywane nieprzerwanie dluzej niz 30 minut"
+          description: "Co najmniej jedno zadanie running przez 30 minut bez przerwy (cel SLO-3: p95 do 5 minut)."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobqueuestuck"
+      # 🚫 wymaga L-3 (daas_job_queue_oldest_age_seconds); A5b: najstarsze zadanie queued starsze niz 10 min.
+      - alert: JobQueueStuck
+        expr: max(daas_job_queue_oldest_age_seconds) > 600
+        for: 5m
+        labels:
+          severity: ticket
+          service: jobs
+          source: l3
+          reason: oldest_queued
+        annotations:
+          summary: "Najstarsze zadanie w kolejce czeka dluzej niz 10 minut"
+          description: "Wiek najstarszego zadania queued przekracza 600 s przez 5 minut."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#jobqueuestuck"
+
+      # A6 (dzis): przejsciowy licznik linii `magic link e-mail failed` z hosta (textfile, cron co 5 min).
+      # Metryka jest gauge z oknem przesuwnym (liczba linii z ostatnich 30 min), nie licznikiem: stad `>= 2` bez increase().
+      - alert: MailSendFailing
+        expr: max(daas_mail_failures_30m) >= 2
+        for: 0m
+        labels:
+          severity: page
+          service: mail
+          source: interim
+        annotations:
+          summary: "Link logowania nie jest przekazywany do SMTP"
+          description: "Co najmniej 2 bledy wysylki linku logowania w ostatnich 30 minutach (licznik z dziennika api, zapisany przez cron hosta)."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#mailsendfailing"
+      # 🚫 wymaga L-4 (daas_mail_send_total {kind,result}, bez adresow); A6b.
+      - alert: MailSendFailing
+        expr: sum(increase(daas_mail_send_total{kind="magic_link",result="error"}[30m])) >= 2
+        for: 0m
+        labels:
+          severity: page
+          service: mail
+          source: l4
+        annotations:
+          summary: "Link logowania nie jest przekazywany do SMTP"
+          description: "Co najmniej 2 bledy wysylki linku logowania w ostatnich 30 minutach (licznik aplikacji)."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#mailsendfailing"
+      # Slepa plama interim (Q26, SRE): gdy cron hosta stanie, plik textfile zostaje ze starym "0 bledow" i
+      # MailSendFailing milczy. Warunki (dowolny): skrypt zglosil porazke odczytu dziennika (collect_success == 0),
+      # plik nie byl odswiezony od 15 min (cron co 5 min = 3 cykle; node_exporter etykietuje `file` nazwa pliku,
+      # tu daas_mail_failures.prom, jak zapisuje textfile/mail-failures.sh) albo pliku nie ma wcale (cron nigdy nie
+      # zainstalowany). Ticket, bo to awaria monitoringu, nie klienta. Usunac razem z regulami interim po wdrozeniu L-4.
+      - alert: MailSendFailing
+        expr: |
+          max(daas_textfile_collect_success{collector="mail_failures"}) == 0
+          or max(time() - node_textfile_mtime_seconds{file="daas_mail_failures.prom"}) > 900
+          or absent(node_textfile_mtime_seconds{file="daas_mail_failures.prom"})
+        for: 15m
+        labels:
+          severity: ticket
+          service: mail
+          source: interim
+          reason: stale_textfile
+        annotations:
+          summary: "Licznik bledow poczty (textfile) nie jest aktualizowany: MailSendFailing jest slepy"
+          description: "Plik daas_mail_failures.prom jest starszy niz 15 minut, zglasza porazke odczytu dziennika albo nie istnieje (cron hosta nie dziala). Do czasu naprawy bledy wysylki linku logowania nie sa wykrywane."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#mailsendfailing"
+
+  - name: daas_data_safety
+    rules:
+      # A7: znacznik pisany przez host po udanym restic backup/forget i sha256sum -c (textfile, L-8 interim).
+      # Heartbeat usluge zewnetrznej jest niezaleznym zrodlem prawdy; ta regula daje to samo na kokpicie.
+      - alert: BackupStale
+        expr: max(time() - daas_backup_last_success_timestamp_seconds{target="offsite"}) > 26 * 3600
+        for: 0m
+        labels:
+          severity: ticket
+          service: backup
+          source: interim
+          reason: age
+        annotations:
+          summary: "Ostatnia kopia poza serwerem jest starsza niz 26 godzin"
+          description: "Znacznik ostatniej udanej kopii poza serwerem (SLO-4) ma wiecej niz 26 h."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#backupstale"
+      - alert: BackupStale
+        expr: absent(daas_backup_last_success_timestamp_seconds{target="offsite"})
+        for: 30m
+        labels:
+          severity: ticket
+          service: backup
+          source: interim
+          reason: absent
+        annotations:
+          summary: "Brak znacznika kopii poza serwerem"
+          description: "Brak znacznika ostatniej udanej kopii poza serwerem przez 30 minut (kopia nigdy nie wykonana, wrapper hosta nie dziala albo node_exporter nie czyta katalogu textfile)."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#backupstale"
+
+  - name: daas_host
+    rules:
+      # A8: partycja / powyzej 80 % albo zapelni sie w ciagu doby (trend z 6 h).
+      - alert: DiskSpaceLow
+        expr: |
+          max(1 - node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}
+                / node_filesystem_size_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}) > 0.80
+        for: 15m
+        labels:
+          severity: ticket
+          service: host
+          reason: used
+        annotations:
+          summary: "Partycja / jest zajeta w ponad 80 %"
+          description: "Zajetosc partycji / przekracza 80 % od 15 minut. Pelny dysk zatrzyma api, kopie i wdrozenia."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#diskspacelow"
+      - alert: DiskSpaceLow
+        expr: min(predict_linear(node_filesystem_avail_bytes{mountpoint="/",fstype!~"tmpfs|overlay"}[6h], 24 * 3600)) < 0
+        for: 30m
+        labels:
+          severity: ticket
+          service: host
+          reason: forecast
+        annotations:
+          summary: "Partycja / zapelni sie w ciagu doby wg trendu z 6 godzin"
+          description: "Prognoza liniowa z 6 godzin wskazuje brak wolnego miejsca na / w ciagu 24 godzin."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#diskspacelow"
+
+      # A9 (dzis): zabicie procesu przez OOM (kolektor vmstat, pole oom_kill) albo malo pamieci hosta.
+      - alert: ApiMemoryPressure
+        expr: sum(increase(node_vmstat_oom_kill[15m])) > 0
+        for: 0m
+        labels:
+          severity: ticket
+          service: api
+          source: interim
+          reason: oom_kill
+        annotations:
+          summary: "Jadro zabilo proces z powodu braku pamieci (OOM)"
+          description: "Licznik oom_kill hosta wzrosl w ostatnich 15 minutach (zwykle api przy duzym imporcie XLSX albo brak pamieci hosta)."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#apimemorypressure"
+      - alert: ApiMemoryPressure
+        expr: min(node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.10
+        for: 10m
+        labels:
+          severity: ticket
+          service: api
+          source: interim
+          reason: host_low_memory
+        annotations:
+          summary: "Hostowi zostalo mniej niz 10 % dostepnej pamieci"
+          description: "MemAvailable jest ponizej 10 % pamieci hosta od 10 minut."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#apimemorypressure"
+      # 🚫 wymaga L-7 (process_resident_memory_bytes z /metrics api); A9b: RSS > 85 % limitu 1,5 GiB.
+      - alert: ApiMemoryPressure
+        expr: max(process_resident_memory_bytes{job="api"}) > 0.85 * 1.5 * 1024 * 1024 * 1024
+        for: 10m
+        labels:
+          severity: ticket
+          service: api
+          source: l7
+          reason: rss
+        annotations:
+          summary: "Proces api uzywa ponad 85 % limitu pamieci"
+          description: "RSS procesu api przekracza 1,31 GiB (limit kontenera 1,5 GiB) od 10 minut."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#apimemorypressure"
+
+  - name: daas_meta
+    rules:
+      # A10: plonie zawsze; Alertmanager przekazuje go na heartbeat uslugi zewnetrznej (dead man's switch).
+      - alert: Watchdog
+        expr: vector(1)
+        labels:
+          severity: none
+          service: meta
+        annotations:
+          summary: "Watchdog: stos alertow dziala (alert ma plonac zawsze)"
+          description: "Regula meta, wysylana na heartbeat. Cisza po stronie uslugi heartbeat oznacza awarie hosta, Prometheusa lub Alertmanagera."
+          runbook_url: "https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#watchdog"

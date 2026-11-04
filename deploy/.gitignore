@@ -8,3 +8,6 @@ backups/
 cd/state/
 cd/log/
 cd/offsite-backup.hook
+
+# Obserwowalnosc: sekrety (poza *.example, patrz observability/secrets/.gitignore) i lokalna konfiguracja Alertmanagera
+observability/local/

@@ -1,0 +1,84 @@
+# Alertmanager: kanal e-mail przez przekaznik SMTP (wspolny z aplikacja, RUNBOOK §2.2) i heartbeat dla Watchdog.
+#
+# TEN PLIK TO SZABLON Z PLACEHOLDERAMI. Wartosci uzupelnia operator NA HOSCIE, nie w repozytorium:
+#   <<SMTP_HOST:587>>  adres i port przekaznika SMTP (STARTTLS)
+#   <<SMTP_USER>>      login konta SMTP
+#   <<ALERT_FROM>>     adres nadawcy alertow
+#   <<ALERT_TO>>       adres odbiorcy alertow (adres kontaktowy operatora)
+# Polecenie: deploy/observability/render-alertmanager.sh (zapisuje deploy/observability/local/alertmanager.yml,
+# katalog ignorowany przez git). Nakladka compose montuje WYLACZNIE ten wyrenderowany plik (fail-closed).
+# Haslo SMTP i adres heartbeat NIE sa w tym pliku: czytane z plikow sekretow (montowane :ro).
+# Walidacja szablonu w CI: amtool check-config (deploy/observability/README.md).
+global:
+  resolve_timeout: 5m
+  smtp_smarthost: '<<SMTP_HOST:587>>'
+  smtp_from: '<<ALERT_FROM>>'
+  smtp_auth_username: '<<SMTP_USER>>'
+  smtp_auth_password_file: /etc/alertmanager/secrets/smtp_password
+  smtp_require_tls: true
+
+route:
+  receiver: mail-ticket
+  group_by: [alertname]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 24h
+  routes:
+    # Watchdog plonie zawsze: pinguje heartbeat co 5 min (dead man's switch), bez e-maila.
+    - matchers:
+        - alertname="Watchdog"
+      receiver: heartbeat
+      group_wait: 0s
+      group_interval: 5m
+      repeat_interval: 5m
+    - matchers:
+        - severity="page"
+      receiver: mail-page
+      repeat_interval: 2h
+    - matchers:
+        - severity="ticket"
+      receiver: mail-ticket
+      repeat_interval: 24h
+
+inhibit_rules:
+  # Page wycisza tickety tej samej uslugi (service): jeden objaw, jedna wiadomosc.
+  - source_matchers:
+      - severity="page"
+    target_matchers:
+      - severity="ticket"
+    equal: [service]
+  # Wg ALERTS.md: szybkie spalanie SLO-1 (service=api) wycisza takze tickety zadan (service=jobs).
+  - source_matchers:
+      - alertname="SloAvailabilityFastBurn"
+    target_matchers:
+      - alertname=~"JobQueueStuck|JobsFailedRising"
+
+receivers:
+  - name: mail-page
+    email_configs:
+      - to: '<<ALERT_TO>>'
+        send_resolved: true
+        headers:
+          Subject: '[PILNE] {{ .GroupLabels.alertname }} ({{ .Status }})'
+        html: ''
+        text: &mail_body |-
+          {{ range .Alerts -}}
+          {{ .Annotations.summary }}
+          {{ .Annotations.description }}
+          Runbook: {{ .Annotations.runbook_url }}
+          {{ end -}}
+          Dashboard (tunel SSH): ssh -L 3001:127.0.0.1:3001 <uzytkownik>@<host>, potem http://127.0.0.1:3001/d/daas-overview
+          Wymaga uruchomienia Grafany: docker compose --profile dash up -d grafana
+  - name: mail-ticket
+    email_configs:
+      - to: '<<ALERT_TO>>'
+        send_resolved: false
+        headers:
+          Subject: '[ZADANIE] {{ .GroupLabels.alertname }}'
+        html: ''
+        text: *mail_body
+  # Adres heartbeat (usluga zewnetrzna) tylko w pliku sekretu, nie w repozytorium.
+  - name: heartbeat
+    webhook_configs:
+      - url_file: /etc/alertmanager/secrets/heartbeat_url
+        send_resolved: false

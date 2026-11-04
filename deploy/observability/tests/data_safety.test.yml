@@ -1,0 +1,184 @@
+# Testy promtool (promtool test rules). Uruchamiane w CI przez kontener obrazu prometheus:
+#   docker run --rm -v "$PWD/deploy/observability:/work:ro" -w /work/tests --entrypoint promtool <obraz prometheus> test rules <plik>
+# Plik jest WYGENEROWANY z rules/alerts.yml (adnotacje i etykiety musza zgadzac sie co do znaku): zmieniasz regule ->
+# zmien test. Odstep probek 1 min; liczby probek w "axN" to N+1 wartosci. Scenariusze (a)-(j): deploy/ALERTS.md / raport SRE S2.
+# (f) MailSendFailing; (g) BackupStale: wiek > 26 h, swiezy znacznik, brak znacznika.
+rule_files:
+- ../rules/recording.yml
+- ../rules/alerts.yml
+evaluation_interval: 1m
+tests:
+- interval: 1m
+  input_series:
+  - series: daas_mail_failures_30m
+    values: 0x9 2x10
+  alert_rule_test:
+  - eval_time: 8m
+    alertname: MailSendFailing
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: MailSendFailing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        service: mail
+        source: interim
+      exp_annotations:
+        summary: Link logowania nie jest przekazywany do SMTP
+        description: Co najmniej 2 bledy wysylki linku logowania w ostatnich 30 minutach (licznik z dziennika api, zapisany przez cron hosta).
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#mailsendfailing
+- interval: 1m
+  input_series:
+  - series: daas_mail_failures_30m
+    values: 0x9 1x10
+  alert_rule_test:
+  - eval_time: 12m
+    alertname: MailSendFailing
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: daas_mail_send_total{kind="magic_link",result="error"}
+    values: 0x9 3x20
+  - series: daas_mail_send_total{kind="magic_link",result="ok"}
+    values: 0+5x29
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: MailSendFailing
+    exp_alerts: []
+  - eval_time: 14m
+    alertname: MailSendFailing
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        service: mail
+        source: l4
+      exp_annotations:
+        summary: Link logowania nie jest przekazywany do SMTP
+        description: Co najmniej 2 bledy wysylki linku logowania w ostatnich 30 minutach (licznik aplikacji).
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#mailsendfailing
+- interval: 1m
+  input_series:
+  - series: daas_textfile_collect_success{collector="mail_failures"}
+    values: 1x9 0x40
+  - series: node_textfile_mtime_seconds{file="daas_mail_failures.prom"}
+    values: 0+60x49
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: MailSendFailing
+    exp_alerts: []
+  - eval_time: 30m
+    alertname: MailSendFailing
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: mail
+        source: interim
+        reason: stale_textfile
+      exp_annotations:
+        summary: 'Licznik bledow poczty (textfile) nie jest aktualizowany: MailSendFailing jest slepy'
+        description: Plik daas_mail_failures.prom jest starszy niz 15 minut, zglasza porazke odczytu dziennika albo nie istnieje (cron hosta nie dziala). Do czasu naprawy bledy wysylki linku logowania nie sa wykrywane.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#mailsendfailing
+- interval: 1m
+  input_series:
+  - series: daas_textfile_collect_success{collector="mail_failures"}
+    values: 1x50
+  - series: node_textfile_mtime_seconds{file="daas_mail_failures.prom"}
+    values: 0+60x10 600x40
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: MailSendFailing
+    exp_alerts: []
+  - eval_time: 45m
+    alertname: MailSendFailing
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: mail
+        source: interim
+        reason: stale_textfile
+      exp_annotations:
+        summary: 'Licznik bledow poczty (textfile) nie jest aktualizowany: MailSendFailing jest slepy'
+        description: Plik daas_mail_failures.prom jest starszy niz 15 minut, zglasza porazke odczytu dziennika albo nie istnieje (cron hosta nie dziala). Do czasu naprawy bledy wysylki linku logowania nie sa wykrywane.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#mailsendfailing
+- interval: 1m
+  input_series:
+  - series: daas_textfile_collect_success{collector="mail_failures"}
+    values: 1x59
+  - series: node_textfile_mtime_seconds{file="daas_mail_failures.prom"}
+    values: 0+60x59
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: MailSendFailing
+    exp_alerts: []
+  - eval_time: 50m
+    alertname: MailSendFailing
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: up{job="api",instance="api:8000"}
+    values: 1x30
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: MailSendFailing
+    exp_alerts: []
+  - eval_time: 20m
+    alertname: MailSendFailing
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: mail
+        source: interim
+        reason: stale_textfile
+      exp_annotations:
+        summary: 'Licznik bledow poczty (textfile) nie jest aktualizowany: MailSendFailing jest slepy'
+        description: Plik daas_mail_failures.prom jest starszy niz 15 minut, zglasza porazke odczytu dziennika albo nie istnieje (cron hosta nie dziala). Do czasu naprawy bledy wysylki linku logowania nie sa wykrywane.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#mailsendfailing
+- interval: 1m
+  input_series:
+  - series: daas_backup_last_success_timestamp_seconds{target="offsite"}
+    values: '0x1700'
+  alert_rule_test:
+  - eval_time: 1500m
+    alertname: BackupStale
+    exp_alerts: []
+  - eval_time: 1600m
+    alertname: BackupStale
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: backup
+        source: interim
+        reason: age
+      exp_annotations:
+        summary: Ostatnia kopia poza serwerem jest starsza niz 26 godzin
+        description: Znacznik ostatniej udanej kopii poza serwerem (SLO-4) ma wiecej niz 26 h.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#backupstale
+- interval: 1m
+  input_series:
+  - series: daas_backup_last_success_timestamp_seconds{target="offsite"}
+    values: 0+60x1700
+  alert_rule_test:
+  - eval_time: 1600m
+    alertname: BackupStale
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: up{job="api",instance="api:8000"}
+    values: 1x60
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: BackupStale
+    exp_alerts: []
+  - eval_time: 31m
+    alertname: BackupStale
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: backup
+        source: interim
+        reason: absent
+        target: offsite
+      exp_annotations:
+        summary: Brak znacznika kopii poza serwerem
+        description: Brak znacznika ostatniej udanej kopii poza serwerem przez 30 minut (kopia nigdy nie wykonana, wrapper hosta nie dziala albo node_exporter nie czyta katalogu textfile).
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#backupstale

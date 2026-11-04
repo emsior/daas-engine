@@ -88,5 +88,23 @@ jobs:
           STAGING_WEB_DIGEST: ${{ inputs.web_digest }}
         run: bash deploy/cd/staging.sh
 
-  # Miejsce na osobny job `observability` (promtool/amtool + asercja scrape'u api): doda go Inzynier Obserwowalnosci.
-  # Nie zmieniaj jobow staging-local / staging-registry; nowy job moze miec `needs:` na nie i wlasne `permissions`.
+  # Obserwowalnosc (Inzynier Obserwowalnosci): kontrole statyczne przez kontenery oficjalnych obrazow Prometheus/Alertmanager
+  # (promtool check config/rules, promtool test rules, amtool check-config na konfiguracji wyrenderowanej z atrapami)
+  # oraz asercja na minimalnym stosie api + nakladka obserwowalnosci: cel `api` ma up == 1, istnieje daas_build_info,
+  # Watchdog plonie. Stos DevOps (staging.sh) jest po przebiegu kasowany, wiec asercja ma wlasny stos (bez web, Caddy,
+  # Grafany). Bez sekretow i bez rejestru; obrazy z Docker Hub, tagi z deploy/compose.observability.yml.
+  # Logika w skryptach (deploy/observability/check.sh, stack-check.sh), zeby workflow nie wstrzykiwal niczego do `run`.
+  observability:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Kontrole statyczne (promtool, amtool, dashboard)
+        run: bash deploy/observability/check.sh
+      - name: Asercja stosu (api up == 1, daas_build_info, Watchdog)
+        run: bash deploy/observability/stack-check.sh

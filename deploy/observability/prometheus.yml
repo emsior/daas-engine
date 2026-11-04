@@ -1,0 +1,46 @@
+# Prometheus: konfiguracja scrape i reguly dla DaaS Engine (nakladka deploy/compose.observability.yml).
+# Przeladowanie po zmianie: docker compose kill -s SIGHUP prometheus (--web.enable-lifecycle jest wylaczone).
+# Nazwy hostow to uslugi compose z tej samej sieci projektu. Sekrety tylko przez pliki (nigdy w tym pliku).
+global:
+  scrape_interval: 30s
+  scrape_timeout: 10s
+  evaluation_interval: 30s
+  # Etykiety wspolne: bez danych klienta, bez nazw hostow i adresow.
+  external_labels:
+    system: daas-engine
+
+rule_files:
+  - /etc/prometheus/rules/recording.yml
+  - /etc/prometheus/rules/alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+scrape_configs:
+  # Aplikacja: GET /metrics (poza /api/v1), token Bearer = DAAS_METRICS_TOKEN z deploy/.env, zapisany w pliku
+  # sekretu observability/secrets/metrics_token. Publicznie /metrics zwraca 404 (Caddyfile); tu idziemy siecia compose.
+  # Uwaga: bledny lub zrotowany token daje HTTP 401, czyli up == 0 przy zdrowym API (patrz ALERTS.md,
+  # SloAvailabilityFastBurn). sample_limit to bezpiecznik kardynalnosci: przy ok. 1 200 seriach limit 10 000 nigdy
+  # nie powinien zadzialac; jego przekroczenie oznacza wybuch etykiet (scrape odrzucony, up == 0).
+  - job_name: api
+    metrics_path: /metrics
+    authorization:
+      type: Bearer
+      credentials_file: /etc/prometheus/secrets/metrics_token
+    sample_limit: 10000
+    static_configs:
+      - targets: ["api:8000"]
+
+  - job_name: node
+    static_configs:
+      - targets: ["node_exporter:9100"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: alertmanager
+    static_configs:
+      - targets: ["alertmanager:9093"]
