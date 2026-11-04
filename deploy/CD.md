@@ -38,8 +38,8 @@ wariant B z README. To świadoma decyzja właściciela przy każdym takim wydani
 1. blokada (`flock`; dwa wdrożenia naraz są niemożliwe);
 2. preflight: `.env` z prawami 0600, ≥ 3 GB wolnego miejsca, bieżąca wersja z `/api/v1/health`, `git fetch --tags`, **commit tagu musi być równy SHA z workflow**, `docker pull` obu obrazów po digeście i porównanie `RepoDigests`;
 3. brama schematu: rewizja Alembica w `control.db` (odczyt z kopii pliku w kontenerze `maint`, bez sieci) kontra head kodu wydania;
-4. drenaż: czekanie (do 10 min) aż `daas_jobs{status="running"}` spadnie do 0;
-5. kopia zimna `backup.sh` + hak kopii poza serwerem;
+4. drenaż: czekanie (do 10 min) aż `daas_jobs{status="running"}` spadnie do 0; pomijany, gdy **żywy** `/api/v1/health` mówi `maintenance:true` (gdy `api` nie odpowiada: wg flagi w `.env`);
+5. ponowny odczyt zadań w toku tuż przed kopią (wyścig po drenażu), potem kopia zimna `backup.sh` (twardy limit **15 min**) i hak kopii poza serwerem (twardy limit **20 min**; po limicie proces jest przerywany, a blokada wdrożeń zwalniana);
 6. checkout taga, pobranie obrazów pomocniczych (np. Caddy), atomowa podmiana `DAAS_VERSION`/`DAAS_API_IMAGE`/`DAAS_WEB_IMAGE` w `.env` (poprzedni `.env` jako `.env.prev`, 0600);
 7. `docker compose up -d --no-build --pull never` (honoruje `COMPOSE_FILE` z `.env`);
 8. `smoke.sh --wait 90 --expect-version X.Y.Z` lokalnie i `--public https://<domena>` (domena z `DAAS_DOMAIN`);
@@ -48,12 +48,21 @@ wariant B z README. To świadoma decyzja właściciela przy każdym takim wydani
 Na stdout (i w publicznym logu GitHub) wraca **wyłącznie** jedna linia:
 
 ```
-DAAS_DEPLOY result=<ok|noop|rollback|blocked|failed> code=<n> version=<X.Y.Z> previous=<X.Y.Z|none> schema=<same|changed|unknown> duration=<s> maintenance=<on|off|unverified>
+DAAS_DEPLOY result=<ok|noop|rollback|blocked|failed> code=<n> version=<X.Y.Z> previous=<X.Y.Z|none> schema=<same|changed|unknown> duration=<s> maintenance=<on|off|unverified> edge=<ok|red>
 ```
+
+`edge=red` znaczy: lokalny smoke (API i kokpit na `127.0.0.1`) jest zielony, a czerwony jest tylko `--public` (Caddy, DNS, TLS). Wersja jest wtedy wdrożona, nie było rollbacku ani trybu serwisowego, a wynik to kod 11 (tabela w sekcji d).
+Workflow przepuszcza do publicznego logu tylko linię o ścisłym wzorcu, który wymaga **wersji tego wydania** i pola `edge`.
 
 Pełny dziennik jest tylko na hoście: `deploy/cd/log/<id>.log` (prawa 0700, bez wysyłki do GitHub). Stan: `sudo -u deploy /opt/daas-engine/deploy/cd/deploy.sh status`
 (kod 3 = operacja trwa, 4 = brak stanu). Zerwanie SSH niczego nie przerywa, a workflow dopytuje `status`; ponowne `deploy` z tymi samymi argumentami dołącza do trwającej
 operacji, a gdy ta wersja już działa i smoke jest zielony, kończy się `result=noop`.
+
+**Limity czasu.** `deploy` czeka na wynik maksymalnie 50 min. Jeśli operacja nadal trwa, host zwraca **kod 3** i `DAAS_STATUS … state=running` (wynik nieznany, nie incydent). Workflow odpytuje wtedy `status` (tak samo jak po zerwaniu SSH, kod 255) do
+bezwzględnego terminu ok. 62 min od startu kroku; job ma `timeout-minutes: 70`. Po terminie kończy się błędem „operacja trwa na hoście, sprawdź `deploy.sh status`” i **nie deklaruje incydentu**. `status` wykrywa też martwy proces roboczy (restart hosta, OOM):
+blokada wolna, a stan bez zmian od > 15 s oznacza `failed` z kodem 2 (przed `apply`, nic nie zmieniono) albo 12 (po `apply`, stan nieokreślony).
+
+**`--force`** (pominięcie drenażu) istnieje wyłącznie w konsoli hosta (`sudo -u deploy …/deploy.sh deploy … --force`). Klucz SSH z workflow nie może go użyć (`ssh-gate.sh`), podobnie jak `rollback`.
 
 Profil `edge` (Caddy) jest domyślnie włączony. Host ze wspólnym proxy wpisuje do `.env` linię `COMPOSE_PROFILES=` (może być pusta); nakładki (`compose.llm.yml`,
 obserwowalność) włącza `COMPOSE_FILE` w `.env`, tak jak w README.
@@ -74,7 +83,7 @@ Wyłącznie czynności, które wymagają Twojej tożsamości. Reszta (obrazy, sk
 | 8 | **GitHub → Settings → Environments → New environment `production`:** *Required reviewers* = Ty; *Deployment branches and tags* = *Selected* → dodaj regułę tagów `v*`. Sekrety środowiska: `DEPLOY_SSH_KEY` (cała zawartość pliku `daas_deploy`) i `DEPLOY_KNOWN_HOSTS`. Zmienne środowiska: `DEPLOY_HOST` (adres serwera), `DEPLOY_USER` (`deploy`), `DAAS_PUBLIC_URL` (`https://<domena>`). Potem usuń plik `daas_deploy` z dysku | 10 |
 | 9 | **Zmienna repozytorium `DAAS_CD_ENABLED=true`** (Settings → Secrets and variables → Actions → Variables → *repository*, nie środowiska: warunek joba jest oceniany przed wyborem środowiska) | 1 |
 | 10 | **Pierwsze wydanie:** tag `vX.Y.Z` (sekcja a). Po pierwszej publikacji pakiety `daas-engine-api` i `daas-engine-web` w GHCR ustaw jako **publiczne** (profil → *Packages* → pakiet → *Package settings* → *Change visibility*); host pobiera je bez logowania. Zatwierdź deployment w Actions. Pierwsze wdrożenie na pustych wolumenach nie wymaga `allow_schema_change` | 5 |
-| 11 | **Nakładka obserwowalności** (Prometheus, Alertmanager, node_exporter): skopiuj `deploy/observability/secrets/*.example` → pliki sekretów (prawa i UID: [`observability/README.md`](observability/README.md), sekcja 1), uruchom `deploy/observability/render-alertmanager.sh` i dopisz `compose.observability.yml` do `COMPOSE_FILE` w `.env` (razem z `DAAS_ALERTMANAGER_CONFIG`). Dopóki `COMPOSE_FILE` zawiera nakładkę, brak któregokolwiek pliku sekretu zatrzymuje wdrożenie kodem 2 (w dzienniku tylko nazwa brakującego pliku) | 10 |
+| 11 | **Nakładka obserwowalności** (Prometheus, Alertmanager, node_exporter): skopiuj `deploy/observability/secrets/*.example` → pliki sekretów (prawa i UID: [`observability/README.md`](observability/README.md), sekcja 1), uruchom `deploy/observability/render-alertmanager.sh` i dopisz `compose.observability.yml` do `COMPOSE_FILE` w `.env` (`DAAS_ALERTMANAGER_CONFIG` tylko nadpisuje ścieżkę pliku). Dopóki `COMPOSE_FILE` zawiera nakładkę, brak któregokolwiek pliku sekretu albo wyrenderowanego `observability/local/alertmanager.yml` (lub pliku wskazanego w `DAAS_ALERTMANAGER_CONFIG`) zatrzymuje wdrożenie kodem 2 (w dzienniku tylko nazwa brakującego pliku) | 10 |
 | 12 | **Po wdrożeniu:** pierwsza organizacja (README, krok 4, przez `sudo -u deploy docker compose exec …`) i monitor zewnętrzny z RUNBOOK §6 | — |
 
 Sprawdzenie końcowe: job `deploy` kończy się zielono, a krok „Kontrola z zewnątrz” potwierdza wersję przez domenę (DNS, TLS, proxy).
@@ -97,12 +106,14 @@ SRE: [`ALERTS.md`](ALERTS.md) opisuje reakcję operatora na każdy kod.
 | Kod | `result` | Znaczenie | Stan po | Tryb serwisowy | Reakcja |
 |---|---|---|---|---|---|
 | 0 | `ok` / `noop` | wdrożone i smoke zielony (albo ta wersja już działa) | wersja N | bez zmian | brak |
-| 2 | `blocked` / `failed` | preflight lub brama nie przeszły (zmiana schematu bez zgody, downgrade, drenaż, brak kopii, niezgodny digest lub SHA) | wersja N-1, **nic nie zmieniono** | bez zmian | popraw przyczynę i uruchom ponownie |
+| 2 | `blocked` / `failed` | preflight lub brama nie przeszły (zmiana schematu bez zgody, downgrade, drenaż, brak kopii albo przekroczony limit kopii/haka, niezgodny digest lub SHA, brak plików sekretów albo konfiguracji Alertmanagera przy nakładce) | wersja N-1, **nic nie zmieniono** | bez zmian | popraw przyczynę i uruchom ponownie |
+| 3 | (brak, `DAAS_STATUS state=running`) | operacja trwa, wynik nieznany: minął limit czekania `deploy` (50 min) albo `status` widzi trwający proces | w toku | bez zmian | czekaj i sprawdzaj `status`; to **nie** jest incydent |
 | 10 | `rollback` | smoke N nie przeszedł, rollback do N-1 udany | wersja N-1 | bez zmian | analiza bez presji czasu |
-| 11 | `failed` | smoke N nie przeszedł, rollback zabroniony (zmiana schematu albo pierwsze wdrożenie) | wersja N, stan niepewny | **automatycznie `on`**, gdy czerwony jest lokalny smoke (`maintenance=on`); **bez zmian** (`off`), gdy czerwony jest tylko `--public` (Caddy, DNS, TLS) | **incydent**, sekcja e |
-| 12 | `failed` | rollback podjęty i nieudany | nieokreślony | bez zmian | **incydent P1**, sekcja e |
+| 11 | `failed`, `edge=ok` | smoke N nie przeszedł (lokalnie), rollback zabroniony: zmiana schematu, pierwsze wdrożenie, **powtórka wdrożenia tej samej wersji** (w tym przebiegu nie zapisano `.env.prev`) albo schemat bazy różny od schematu poprzedniej wersji (żywy odczyt tuż przed rollbackiem) | wersja N, stan niepewny | **automatycznie `on`** (`maintenance=on`); `.env.prev` przenoszony na `.env.prev.<id>` | **incydent**, sekcja e |
+| 11 | `failed`, **`edge=red`** | lokalny smoke zielony, czerwony tylko `--public` (Caddy, DNS, TLS), w każdym wariancie schematu | wersja N **wdrożona**, bez rollbacku | bez zmian (`off`, albo `on`, jeśli był włączony wcześniej) | sprawdź krawędź, sekcja e (punkt 6); to **nie** incydent schematu |
+| 12 | `failed` | rollback podjęty i nieudany | nieokreślony | `on` tylko gdy `api` odpowiada na `/health` (inaczej `unverified`); dowody w `…-incident/` zapisane zawsze | **incydent P1**, sekcja e |
 
-Kod 3 i 4 dotyczą wyłącznie `status` (operacja trwa, brak stanu). `maintenance=unverified` oznacza, że `.env` zmieniono, ale `/api/v1/health` nie potwierdził trybu (np. `api` nie wstaje).
+Kod 4 dotyczy wyłącznie `status` (brak stanu). `maintenance=unverified` oznacza, że `.env` zmieniono albo nie było jak sprawdzić, ale `/api/v1/health` nie potwierdził trybu (np. `api` nie wstaje). `maintenance=on` w wyniku udanego wdrożenia znaczy, że tryb był włączony już w `.env`.
 
 ## e) Co robić przy kodach 11 i 12
 
@@ -111,22 +122,29 @@ Kod 3 i 4 dotyczą wyłącznie `status` (operacja trwa, brak stanu). `maintenanc
    Tryb serwisowy **nie** zwraca 503 na całym API: wstrzymuje executor zadań, harmonogram, retencję i powiadomienia, a uruchomienia zadań, zaproszenia, linki logowania i webhooki dostają 503 `maintenance`; `/ready` i odczyt raportów działają dalej, więc `/ready` nie zrobi się czerwony.
 3. Zdecyduj: poprawka wprzód (nowy tag z naprawą) albo odtworzenie danych z kopii. Odtworzenie to **wariant B** w [README](README.md#przywracanie-poprzedniej-wersji) i [RUNBOOK §5](RUNBOOK.md#5-próba-odtworzenia-i-odtworzenie-w-izolacji-co-miesiąc); incydent prowadzisz według [RUNBOOK §9](RUNBOOK.md#9-incydent) (powiadomienie klienta wg DPA).
 4. Powrót z trybu serwisowego tylko ręcznie, po potwierdzeniu, że aplikacja jest zdrowa: `sudo -u deploy /opt/daas-engine/deploy/cd/deploy.sh maintenance off`. Skrypt nigdy nie wyłącza go sam.
-5. Kod 12 (rollback nieudany): zacznij od `docker compose ps` i `logs` w katalogu `deploy`, sprawdź, czy poprzedni obraz jest lokalnie (`docker image ls`), i przywróć stan ręcznie według README, wariant A; gdy dane są uszkodzone, wariant B.
+5. **Powtórka po kodzie 11/12.** Ponowne `deploy` tej samej wersji nigdy nie cofa się do poprzedniej: bez świeżego `.env.prev` z tego przebiegu rollback jest zabroniony, a porażka znowu kończy się kodem 11 z dowodami i trybem serwisowym.
+   Stary `.env.prev` po kodzie 11/12 jest przenoszony na `.env.prev.<id>` (zostaje do oględzin, 0600, trzy ostatnie).
+6. **Kod 11 z `edge=red` (sama krawędź).** Wersja działa lokalnie. Odczekaj (na świeżym hoście Caddy potrzebuje chwili na certyfikat; przy pierwszym wdrożeniu skrypt sam ponawia `--public` z `--wait 120`), potem na hoście `cd /opt/daas-engine/deploy && ./smoke.sh --public https://<domena> --wait 120`.
+   Jeśli jest zielony, uruchom ponownie **to samo** wydanie (job `deploy` w Actions albo `deploy.sh deploy …` z tymi samymi argumentami): ta sama wersja i te same digesty dają `noop` po zielonym smoke, bo stan wdrożenia został zapisany. Jeśli zostaje czerwony: DNS (rekord A/AAAA), porty 80/443 u dostawcy, `docker compose logs caddy`.
+7. Kod 12 (rollback nieudany): zacznij od `docker compose ps` i `logs` w katalogu `deploy`, sprawdź, czy poprzedni obraz jest lokalnie (`docker image ls`), i przywróć stan ręcznie według README, wariant A; gdy dane są uszkodzone, wariant B.
 
 ## Kopia poza serwerem
 
 `deploy.sh` (przed wdrożeniem) i `deploy/cd/nightly-backup.sh` (cron 03:15 UTC z `bootstrap.sh`) wywołują, jeśli istnieje i jest wykonywalny, `deploy/cd/offsite-backup.hook` z jednym argumentem: ścieżką świeżo zrobionego archiwum.
 Hak jest lokalny dla hosta (ignorowany przez git); wzór z kolejnością `restic backup` → `forget --prune` → `sha256sum -c` → `backup-marker.sh offsite` → heartbeat to `deploy/cd/offsite-backup.hook.example`.
 Znacznik `backup-marker.sh offsite` (SLO-4) zapisuje się dopiero po całym łańcuchu sukcesu. Przy `allow_schema_change=1` brak haka albo jego błąd przerywa wdrożenie kodem 2.
+Hak ma twardy limit **20 min**, a `backup.sh` **15 min** (w `deploy.sh` i w `nightly-backup.sh`): zawieszona wysyłka nie może trzymać blokady wszystkich wdrożeń. Po limicie proces jest przerywany, w dzienniku pada czytelny komunikat, a `deploy.sh` kończy kodem 2 (po przerwanej kopii dodatkowo upewnia się, że `api` działa).
 
 ## Staging: co dowodzi, a czego nie
 
 `cd-staging.yml` (przy zmianach w `deploy/`, `Dockerfile`, `alembic/` i w workflowach oraz w każdym wydaniu) uruchamia na runnerze ten sam `deploy.sh`, którego używa produkcja, przeciwko pełnemu stosowi z danymi syntetycznymi.
-Dowodzi: kolejności kroków, kodów 0/2/10/11, bramy schematu (symulowanej), kopii i sumy, smoke przez Caddy z lokalnym CA. **Nie dowodzi:** zachowania prawdziwego hosta (DNS, zapora dostawcy, Let's Encrypt, SMTP),
+Dowodzi: kolejności kroków, kodów 0/2/10/11, bramy schematu (symulowanej), kopii i sumy, smoke przez Caddy z lokalnym CA, a ponadto: współbieżności (drugi `deploy` w trakcie pierwszego → kod 2),
+`allow_schema_change=1` bez haka (kod 2), downgrade'u (kod 2) i powtórki po kodzie 11 (kod 11, `.env` bez cofnięcia, tryb serwisowy włączony). **Nie dowodzi:** zachowania prawdziwego hosta (DNS, zapora dostawcy, Let's Encrypt, SMTP),
 migracji na danych klienta ani rollbacku po rzeczywistej migracji (dlatego zmiana schematu jest świadomą decyzją i ma kopię poza serwerem).
 
 ## Ograniczenia, o których warto wiedzieć
 
+- **„N-1” w stagingu to ten sam kod z podmienioną wersją w metadanych**, a zmiana schematu jest symulowana (`DAAS_CD_FAKE_NEW_HEAD`). Prawdziwa migracja N-1 → N na danych będzie sprawdzona dopiero wtedy, gdy w GHCR będzie wydanie N-1 (staging pobierze je po digeście).
 - `deploy.sh` na hoście jest w wersji poprzedniego wydania w chwili wdrożenia (checkout następuje w trakcie); zmiany samego procesu wchodzą w życie od następnego wydania.
 - Jedna instancja `api` i jeden VPS: wdrożenie to krótka przerwa (⚠ 20–90 s), nie blue-green. To decyzja architektoniczna, nie brak.
 - Kopia zimna zatrzymuje `api` na kilka sekund przy każdym wdrożeniu i rollbacku.
