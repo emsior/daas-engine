@@ -12,10 +12,17 @@
 #   2. deploy.sh deploy N: transport lokalny, smoke lokalny i przez Caddy (profil edge, localhost, lokalne CA Caddy)
 #   3. kopia backup.sh + sha256sum -c
 #   4. tryb serwisowy on/off na zdrowym stosie
-#   5. wstrzykniete uszkodzenie (obraz-pulapka konczy sie bledem): kod 10 i powrot do N
+#   5. wstrzykniete uszkodzenie (obraz-pulapka konczy sie bledem): kod 10 i powrot do N; w trakcie drugi `deploy` o innych
+#      argumentach dostaje kod 2 (blocked) - wspolbieznosc prawdziwych procesow, nie atrapa blokady
+#   5b. allow_schema_change=1 bez haka kopii poza serwerem: kod 2, nic nie zmienione
+#   5c. downgrade (DAAS_CD_FAKE_NEW_HEAD mniejszy niz rewizja bazy): kod 2, nic nie zmienione
 #   6. symulacja zmiany schematu (DAAS_CD_FAKE_NEW_HEAD, tylko DAAS_CD_STAGING=1) + awaria kokpitu przy zdrowym api:
 #      kod 11, bez rollbacku, tryb serwisowy wlaczony i potwierdzony w /api/v1/health, /ready = 200, dowody w katalogu incydentu
+#   6b. powtorka po kodzie 11: ponowne `deploy` tej samej wersji przy zatrzymanym api i podrzuconym przestarzalym .env.prev:
+#      kod 11 (nie 10 ani 12), .env nadal na tej wersji, tryb serwisowy wlaczony, .env.prev przeniesiony (P1-1)
 #   7. smoke selfhost na tym samym obrazie api (jak job `docker` w ci.yml)
+# Ograniczenie: "N-1" to ten sam kod z podmieniona wersja w metadanych, a zmiana schematu jest symulowana (DAAS_CD_FAKE_NEW_HEAD);
+# prawdziwa migracja N-1 -> N z danymi bedzie sprawdzona dopiero, gdy w GHCR bedzie wydanie N-1 (patrz deploy/CD.md).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -58,7 +65,7 @@ cleanup() {
   fi
   docker rm -f daas-selfhost >/dev/null 2>&1 || true
   (cd "$DEPLOY" && docker compose --profile edge --profile tools down -v --remove-orphans >/dev/null 2>&1) || true
-  rm -rf "$WORK" "$DEPLOY/.env" "$DEPLOY/.env.prev" "$DEPLOY/.env.tmp."* "$DEPLOY/cd/offsite-backup.hook" \
+  rm -rf "$WORK" "$DEPLOY/.env" "$DEPLOY/.env.prev" "$DEPLOY"/.env.prev.* "$DEPLOY/.env.tmp."* "$DEPLOY/cd/offsite-backup.hook" \
     "$DEPLOY/cd/state" "$DEPLOY/cd/log" "$DEPLOY/backups"
   exit "$rc"
 }
@@ -160,6 +167,7 @@ expect "kod wyjscia" "$RC" 0
 expect "result" "$(field result)" ok
 expect "previous" "$(field previous)" "$PREV_VERSION"
 expect "schema" "$(field schema)" same
+expect "edge" "$(field edge)" ok
 (cd "$DEPLOY" && ./smoke.sh --wait 30 --expect-version "$VERSION" --public https://localhost >/dev/null)
 echo "ok    smoke lokalny i przez Caddy (https://localhost, CURL_CA_BUNDLE)"
 run_deploy deploy "$VERSION" "$API_DIGEST" "$WEB_DIGEST" "$(git -C "$ROOT" rev-parse HEAD)" 0
@@ -185,32 +193,82 @@ OUT="$("$DEPLOY/cd/deploy.sh" maintenance off)"
 expect "maintenance off" "$OUT" "DAAS_MAINTENANCE result=ok code=0 maintenance=off"
 expect "health.maintenance=false" "$(curl -fsS http://127.0.0.1:8000/api/v1/health | sed -n 's/.*"maintenance" *: *\(true\|false\).*/\1/p')" false
 
-# ---------------------------------------------------------------- 5. awaria -> rollback (kod 10)
+# ---------------------------------------------------------------- 5. awaria -> rollback (kod 10) + wspolbieznosc
 
-step "5. Wstrzykniete uszkodzenie: obraz-pulapka $FAIL_VERSION -> kod 10, powrot do $VERSION"
-run_deploy deploy "$FAIL_VERSION" local local 0000000000000000000000000000000000000000 0
-expect "kod wyjscia" "$RC" 10
+lock_held() { (exec 8>"$DEPLOY/cd/state/deploy.lock" && ! flock -n 8) 2>/dev/null; }
+last_log() { { ls -1 "$DEPLOY"/cd/log/2*.log 2>/dev/null || true; } | sort | tail -n 1; }
+ZERO_SHA=0000000000000000000000000000000000000000
+
+step "5. Wstrzykniete uszkodzenie: obraz-pulapka $FAIL_VERSION -> kod 10, powrot do $VERSION (+ drugi deploy w trakcie -> kod 2)"
+A_RC=0
+"$DEPLOY/cd/deploy.sh" deploy "$FAIL_VERSION" local local "$ZERO_SHA" 0 >"$WORK/deploy_a.out" 2>&1 &
+A_PID=$!
+for _ in $(seq 1 60); do
+  if lock_held; then break; fi
+  sleep 1
+done
+lock_held || fail "pierwszy deploy nie przejal blokady"
+run_deploy deploy "$WEB_FAIL_VERSION" local local "$ZERO_SHA" 0
+expect "drugi deploy w trakcie pierwszego: kod" "$RC" 2
+expect "drugi deploy w trakcie pierwszego: result" "$(field result)" blocked
+wait "$A_PID" || A_RC=$?
+cat "$WORK/deploy_a.out"
+OUT="$(cat "$WORK/deploy_a.out")"
+expect "kod wyjscia" "$A_RC" 10
 expect "result" "$(field result)" rollback
 expect "wersja po rollbacku" "$(curl -fsS http://127.0.0.1:8000/api/v1/health | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p')" "$VERSION"
 expect ".env po rollbacku" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$VERSION"
 
+step "5b. allow_schema_change=1 bez haka kopii poza serwerem -> kod 2"
+mv "$DEPLOY/cd/offsite-backup.hook" "$WORK/offsite-backup.hook"
+DAAS_CD_FAKE_NEW_HEAD=9999 run_deploy deploy "$WEB_FAIL_VERSION" local local "$ZERO_SHA" 1
+mv "$WORK/offsite-backup.hook" "$DEPLOY/cd/offsite-backup.hook"
+expect "bez haka: kod" "$RC" 2
+expect "bez haka: result" "$(field result)" blocked
+grep -q 'allow_schema_change=1 wymaga haka' "$(last_log)" || fail "dziennik nie wskazuje brakujacego haka kopii poza serwerem"
+expect "bez haka: .env bez zmian" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$VERSION"
+
+step "5c. Downgrade (wydanie ze starszym schematem niz baza) -> kod 2"
+DAAS_CD_FAKE_NEW_HEAD=0001 run_deploy deploy "$WEB_FAIL_VERSION" local local "$ZERO_SHA" 0
+expect "downgrade: kod" "$RC" 2
+expect "downgrade: result" "$(field result)" blocked
+grep -q 'downgrade' "$(last_log)" || fail "dziennik nie wskazuje downgrade'u schematu"
+expect "downgrade: .env bez zmian" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$VERSION"
+
 # ---------------------------------------------------------------- 6. zmiana schematu + awaria -> kod 11
 
 step "6. Symulacja zmiany schematu + awaria kokpitu -> kod 11 (bez rollbacku, tryb serwisowy)"
-DAAS_CD_FAKE_NEW_HEAD=9999 run_deploy deploy "$WEB_FAIL_VERSION" local local 0000000000000000000000000000000000000000 0
+DAAS_CD_FAKE_NEW_HEAD=9999 run_deploy deploy "$WEB_FAIL_VERSION" local local "$ZERO_SHA" 0
 expect "bez allow_schema_change: kod" "$RC" 2
 expect "bez allow_schema_change: result" "$(field result)" blocked
 expect "wersja bez zmian" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$VERSION"
-DAAS_CD_FAKE_NEW_HEAD=9999 run_deploy deploy "$WEB_FAIL_VERSION" local local 0000000000000000000000000000000000000000 1
+DAAS_CD_FAKE_NEW_HEAD=9999 run_deploy deploy "$WEB_FAIL_VERSION" local local "$ZERO_SHA" 1
 expect "z allow_schema_change: kod" "$RC" 11
 expect "z allow_schema_change: result" "$(field result)" failed
 expect "schema" "$(field schema)" changed
 expect "brak rollbacku (.env zostaje na wersji N+)" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$WEB_FAIL_VERSION"
 expect "podsumowanie: maintenance" "$(field maintenance)" on
+expect "podsumowanie: edge" "$(field edge)" ok
 expect "health.maintenance=true" "$(curl -fsS http://127.0.0.1:8000/api/v1/health | sed -n 's/.*"maintenance" *: *\(true\|false\).*/\1/p')" true
 expect "/ready = 200 w trybie serwisowym" "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/ready)" 200
 ls "$DEPLOY"/cd/log/*-incident/logs.txt "$DEPLOY"/cd/log/*-incident/ps.txt >/dev/null 2>&1 || fail "brak plikow w katalogu incydentu"
 echo "ok    katalog incydentu zawiera logs.txt i ps.txt"
+[ ! -e "$DEPLOY/.env.prev" ] || fail ".env.prev przezyl kod 11 (powinien byc przeniesiony na .env.prev.<id>)"
+ls "$DEPLOY"/.env.prev.2* >/dev/null 2>&1 || fail "brak .env.prev.<id> po kodzie 11"
+echo "ok    .env.prev przeniesiony na .env.prev.<id>"
+
+step "6b. Powtorka po kodzie 11: ponowne deploy tej samej wersji przy zatrzymanym api i przestarzalym .env.prev -> kod 11"
+(umask 077 && cp -p "$DEPLOY/.env" "$DEPLOY/.env.prev")
+env_set_many "$DEPLOY/.env.prev" "DAAS_VERSION=$VERSION" # podrzucony stan N: stary kod cofnalby sie na niego (P1-1)
+(cd "$DEPLOY" && docker compose --profile edge stop api >/dev/null 2>&1)
+run_deploy deploy "$WEB_FAIL_VERSION" local local "$ZERO_SHA" 0
+expect "powtorka: kod (nie 10 ani 12)" "$RC" 11
+expect "powtorka: result" "$(field result)" failed
+expect "powtorka: .env nadal na wersji N+" "$(env_get "$DEPLOY/.env" DAAS_VERSION)" "$WEB_FAIL_VERSION"
+expect "powtorka: maintenance" "$(field maintenance)" on
+expect "powtorka: health.maintenance=true" "$(curl -fsS http://127.0.0.1:8000/api/v1/health | sed -n 's/.*"maintenance" *: *\(true\|false\).*/\1/p')" true
+[ ! -e "$DEPLOY/.env.prev" ] || fail ".env.prev przezyl powtorke po kodzie 11"
+echo "ok    po powtorce .env.prev przeniesiony"
 OUT="$("$DEPLOY/cd/deploy.sh" maintenance off)"
 expect "maintenance off po incydencie" "$OUT" "DAAS_MAINTENANCE result=ok code=0 maintenance=off"
 

@@ -11,21 +11,25 @@
 # deploy/cd/state/<id>.json. Zerwanie SSH niczego nie przerywa; ponowne `deploy` z tymi samymi argumentami dolacza
 # do trwajacej operacji albo (gdy wersja juz stoi i smoke jest zielony) konczy sie bez zmian (noop).
 # Pelny dziennik zostaje na hoscie (deploy/cd/log/<id>.log). Na stdout wraca WYLACZNIE jedna linia:
-#   DAAS_DEPLOY result=<ok|noop|rollback|blocked|failed> code=<n> version=<X.Y.Z> previous=<X.Y.Z|none> schema=<same|changed|unknown> duration=<s> maintenance=<on|off|unverified>
-# (maintenance=on: przy kodzie 11 lokalny smoke byl czerwony, wiec skrypt wlaczyl tryb serwisowy i potwierdzil to w /api/v1/health;
-#  unverified: .env ustawiono, ale /health nie potwierdzil; off: tryb nie byl wlaczany przez ten przebieg)
+#   DAAS_DEPLOY result=<ok|noop|rollback|blocked|failed> code=<n> version=<X.Y.Z> previous=<X.Y.Z|none> schema=<same|changed|unknown> duration=<s> maintenance=<on|off|unverified> edge=<ok|red>
+# (maintenance=on: tryb serwisowy wlaczony (przez ten przebieg albo juz wczesniej w .env); unverified: .env ustawiono, ale /health nie
+#  potwierdzil albo nie bylo jak sprawdzic; off: tryb wylaczony. edge=red: lokalny smoke zielony, a czerwony tylko --public
+#  (Caddy/DNS/TLS): wersja jest wdrozona, kod 11, bez rollbacku i bez trybu serwisowego)
 # (stdout jest czytany w publicznym logu GitHub Actions: zero sekretow, zero adresow).
 #
 # Kody wyjscia (kontrakt dla SRE i obserwowalnosci):
 #   0   wdrozone i smoke zielony (albo noop)           -> stan: wersja N
 #   2   preflight lub brama nie przeszly               -> stan: bez zmian (wersja N-1)
 #   10  smoke N nie przeszedl, rollback do N-1 udany   -> stan: wersja N-1
-#   11  smoke N nie przeszedl, rollback zabroniony     -> INCYDENT (RUNBOOK §9, README wariant B); zmiana schematu albo pierwsze wdrozenie.
+#   11  smoke N nie przeszedl, rollback zabroniony     -> INCYDENT (RUNBOOK §9, README wariant B); zmiana schematu, pierwsze wdrozenie albo
+#                                                         powtorka wdrozenia tej samej wersji (nie ma swiezego .env.prev: PREV_SAVED=0), albo schemat
+#                                                         bazy rozny od schematu poprzedniej wersji (zywy odczyt tuz przed rollbackiem).
 #                                                         Czerwony LOKALNY smoke: zapis logow do deploy/cd/log/<id>-incident/ + tryb serwisowy
-#                                                         wlaczony automatycznie. Czerwony tylko --public (Caddy/DNS/TLS): tylko kod 11, tryb bez zmian.
-#                                                         Powrot z trybu serwisowego wylacznie recznie: `deploy.sh maintenance off`.
-#   12  rollback podjety i nieudany                    -> INCYDENT P1, stan nieokreslony
-#   3   (tylko `status`) operacja trwa;  4  (tylko `status`) brak stanu
+#                                                         wlaczony automatycznie, a .env.prev przenoszony na .env.prev.<id> (nie do uzycia w kolejnym
+#                                                         przebiegu). Czerwony tylko --public (edge=red): wersja wdrozona, kod 11, bez rollbacku,
+#                                                         tryb bez zmian. Powrot z trybu serwisowego wylacznie recznie: `deploy.sh maintenance off`.
+#   12  rollback podjety i nieudany                    -> INCYDENT P1, stan nieokreslony (dowody zapisane; tryb serwisowy tylko gdy api odpowiada)
+#   3   operacja trwa, wynik nieznany (`status`, a takze `deploy`, gdy minal limit czekania warstwy zewnetrznej); 4 (tylko `status`) brak stanu
 #
 # Zmienne srodowiska (domyslne wartosci produkcyjne; ssh-gate.sh czyści wszystkie DAAS_CD_* i CURL_CA_BUNDLE):
 #   DAAS_CD_STAGING=1          tryb stagingu: bez git fetch/checkout, digest `local` (obraz juz zbudowany lokalnie),
@@ -33,6 +37,8 @@
 #   DAAS_CD_API_REPO / DAAS_CD_WEB_REPO   repozytoria obrazow (domyslnie ghcr.io/emsior/daas-engine-api|web)
 #   DAAS_CD_PUBLIC_URL         adres do `smoke.sh --public` (domyslnie https://$DAAS_DOMAIN, gdy to nie localhost)
 #   DAAS_CD_DRAIN_TIMEOUT      limit drenazu zadan `running` w sekundach (domyslnie 600)
+#   DAAS_CD_OUTER_TIMEOUT / DAAS_CD_HOOK_TIMEOUT / DAAS_CD_BACKUP_TIMEOUT   limity czekania warstwy zewnetrznej (3000),
+#                              haka kopii poza serwerem (1200) i backup.sh (900), w sekundach
 # Hak kopii poza serwerem: wykonywalny plik deploy/cd/offsite-backup.hook (wolany z jednym argumentem: sciezka archiwum).
 set -euo pipefail
 
@@ -55,7 +61,10 @@ API_REPO="${DAAS_CD_API_REPO:-ghcr.io/emsior/daas-engine-api}"
 WEB_REPO="${DAAS_CD_WEB_REPO:-ghcr.io/emsior/daas-engine-web}"
 DRAIN_TIMEOUT="${DAAS_CD_DRAIN_TIMEOUT:-600}"
 MIN_FREE_KB=$((3 * 1024 * 1024)) # 3 GB wolnego miejsca na obrazy i kopie
-OUTER_TIMEOUT=$((50 * 60))       # jak dlugo `deploy` czeka na wynik operacji odlaczonej
+# Limity czasu (sekundy). Nadpisywalne wylacznie przez DAAS_CD_* (ssh-gate.sh czysci je z sesji SSH), na uzytek stagingu i testow.
+OUTER_TIMEOUT="${DAAS_CD_OUTER_TIMEOUT:-3000}"  # jak dlugo `deploy` czeka na wynik operacji odlaczonej (50 min; potem kod 3)
+HOOK_TIMEOUT="${DAAS_CD_HOOK_TIMEOUT:-1200}"    # twardy limit haka kopii poza serwerem (20 min)
+BACKUP_TIMEOUT="${DAAS_CD_BACKUP_TIMEOUT:-900}" # twardy limit backup.sh (15 min)
 
 # Stan biezacej operacji (zapisywany do pliku stanu przez state_write)
 ACTION="" RUN_ID="" REQUEST="" VERSION="-" PREV_VERSION="none" PHASE="start"
@@ -66,7 +75,7 @@ PROFILE_ARGS=()
 PUBLIC_URL=""
 DB_REV="" NEW_HEAD="" PREV_COMMIT="" BACKUP_ARCHIVE=""
 ENV_SWAPPED=0 CHECKED_OUT=0 PREV_SAVED=0 FIRST_DEPLOY=0 FINALIZED=0
-RUNNING_VERSION="" KNOWN_REVS_FILE="" MAINT_STATE="off"
+RUNNING_VERSION="" KNOWN_REVS_FILE="" MAINT_STATE="off" EDGE="ok"
 
 # ---------------------------------------------------------------- stan i podsumowanie
 
@@ -83,6 +92,7 @@ state_write() { # state_write 0|1  (1 = operacja zakonczona)
     printf '  "phase": "%s",\n' "$PHASE"
     printf '  "schema": "%s",\n' "$SCHEMA"
     printf '  "maintenance": "%s",\n' "$MAINT_STATE"
+    printf '  "edge": "%s",\n' "$EDGE"
     printf '  "result": "%s",\n' "$RESULT"
     printf '  "code": "%s",\n' "$CODE"
     printf '  "started": "%s",\n' "$START_EPOCH"
@@ -102,9 +112,13 @@ set_phase() {
   log "faza: $PHASE"
 }
 
-summary_line() { # result code version previous schema duration [maintenance]
-  printf 'DAAS_DEPLOY result=%s code=%s version=%s previous=%s schema=%s duration=%s maintenance=%s\n' "$1" "$2" "$3" "$4" "$5" "$6" "${7:-off}"
+summary_line() { # result code version previous schema duration [maintenance] [edge]
+  printf 'DAAS_DEPLOY result=%s code=%s version=%s previous=%s schema=%s duration=%s maintenance=%s edge=%s\n' \
+    "$1" "$2" "$3" "$4" "$5" "$6" "${7:-off}" "${8:-ok}"
 }
+
+# Stan trybu serwisowego z .env (flaga DAAS_MAINTENANCE_MODE): podsumowanie nie moze twierdzic "off", gdy tryb jest wlaczony.
+maint_from_env() { if [ "$(env_get "$ENV_FILE" DAAS_MAINTENANCE_MODE)" = "true" ]; then MAINT_STATE="on"; else MAINT_STATE="off"; fi; }
 
 # last_state -> sciezka najnowszego pliku stanu (nazwa = czas UTC, wiec sortowanie leksykograficzne)
 last_state() { { find "$STATE_DIR" -maxdepth 1 -type f -name '2*.json' 2>/dev/null || true; } | sort | tail -n 1; }
@@ -138,8 +152,8 @@ load_env_settings() {
   return 0
 }
 
-run_smoke() { # run_smoke X.Y.Z  -> kod smoke.sh (lokalnie, a przy PUBLIC_URL takze przez proxy)
-  local -a args=(--api "http://127.0.0.1:${API_PORT}" --web "http://127.0.0.1:${WEB_PORT}" --wait 90 --expect-version "$1")
+run_smoke() { # run_smoke X.Y.Z [wait_s] -> kod smoke.sh (lokalnie, a przy PUBLIC_URL takze przez proxy)
+  local -a args=(--api "http://127.0.0.1:${API_PORT}" --web "http://127.0.0.1:${WEB_PORT}" --wait "${2:-90}" --expect-version "$1")
   [ -z "$PUBLIC_URL" ] || args+=(--public "$PUBLIC_URL")
   (cd "$DEPLOY_DIR" && ./smoke.sh "${args[@]}")
 }
@@ -170,16 +184,21 @@ do_maintenance() { # do_maintenance on|off
   return 1
 }
 
+live_maintenance() { # true|false z /api/v1/health; pusty, gdy api nie odpowiada albo brak pola
+  curl -fsS --max-time 5 "http://127.0.0.1:${API_PORT}/api/v1/health" 2>/dev/null |
+    sed -n 's/.*"maintenance" *: *\(true\|false\).*/\1/p' | head -n 1 || true
+}
+
 # Dowody incydentu do katalogu 0700 na hoscie (logi kontenerow moga zawierac adresy klientow: nigdy do GitHub).
 capture_incident() {
   local dir="$LOG_DIR/${RUN_ID}-incident"
   mkdir -p "$dir" && chmod 700 "$dir" || return 1
   if [ "${#PROFILE_ARGS[@]}" -gt 0 ]; then
-    compose logs --no-color --timestamps api web caddy >"$dir/logs.txt" 2>&1 || true
+    (cd "$DEPLOY_DIR" && timeout 120 docker compose "${PROFILE_ARGS[@]}" logs --no-color --timestamps api web caddy) >"$dir/logs.txt" 2>&1 || true
   else
-    compose logs --no-color --timestamps api web >"$dir/logs.txt" 2>&1 || true
+    (cd "$DEPLOY_DIR" && timeout 120 docker compose "${PROFILE_ARGS[@]}" logs --no-color --timestamps api web) >"$dir/logs.txt" 2>&1 || true
   fi
-  compose ps >"$dir/ps.txt" 2>&1 || true
+  (cd "$DEPLOY_DIR" && timeout 60 docker compose "${PROFILE_ARGS[@]}" ps) >"$dir/ps.txt" 2>&1 || true
   chmod 600 "$dir"/* 2>/dev/null || true
   log "zapisano dowody incydentu: $dir"
 }
@@ -328,13 +347,15 @@ pf_overlay() {
       missing=1
     fi
   done
+  # Konfiguracja Alertmanagera jest wymagana ZAWSZE, gdy nakladka jest wlaczona: domyslnie wyrenderowany plik
+  # observability/local/alertmanager.yml (DAAS_ALERTMANAGER_CONFIG tylko nadpisuje sciezke). Nakladka montuje go bez tworzenia
+  # sciezki, wiec brak pliku to blad `up`, a w najgorszym razie Alertmanager bez zadnej trasy powiadomien.
   cfg="$(env_get "$ENV_FILE" DAAS_ALERTMANAGER_CONFIG)"
-  if [ -n "$cfg" ]; then
-    [[ "$cfg" == /* ]] || cfg="$DEPLOY_DIR/$cfg"
-    if [ ! -s "$cfg" ]; then
-      log "BRAK pliku konfiguracji Alertmanagera wskazanego w DAAS_ALERTMANAGER_CONFIG (uruchom observability/render-alertmanager.sh)"
-      missing=1
-    fi
+  [ -n "$cfg" ] || cfg="observability/local/alertmanager.yml"
+  [[ "$cfg" == /* ]] || cfg="$DEPLOY_DIR/$cfg"
+  if [ ! -s "$cfg" ]; then
+    log "BRAK konfiguracji Alertmanagera ($(basename "$cfg")): uruchom observability/render-alertmanager.sh (deploy/observability/README.md)"
+    missing=1
   fi
   [ "$missing" = "0" ]
 }
@@ -381,8 +402,13 @@ drain_jobs() {
   [ -n "$RUNNING_VERSION" ] || return 0 # API nie dziala: nie ma zadan w locie
   # Tryb serwisowy wlaczony (np. po kodzie 11): executor nie startuje, a zadania `running` sprzed odtworzenia kontenera
   # zostaja "zombie" do zwyklego restartu, wiec czekanie na running = 0 nie ma sensu (latka naprzod nie moze blokowac).
-  if [ "$(env_get "$ENV_FILE" DAAS_MAINTENANCE_MODE)" = "true" ]; then
-    log "drenaz pominiety: DAAS_MAINTENANCE_MODE=true w .env"
+  # Decyduje ZYWY stan (health.maintenance): flaga w .env bez odtworzonego api nie wylacza executora. Gdy health nie podaje pola,
+  # a api odpowiada, wracamy do .env.
+  local live
+  live="$(live_maintenance)"
+  [ -n "$live" ] || live="$(env_get "$ENV_FILE" DAAS_MAINTENANCE_MODE)"
+  if [ "$live" = "true" ]; then
+    log "drenaz pominiety: tryb serwisowy wlaczony (health.maintenance / .env)"
     return 0
   fi
   local token hdr deadline body running
@@ -433,7 +459,22 @@ do_backup() { # kopia zimna + opcjonalny hak poza serwerem; wymagany przy allow_
     BACKUP_ARCHIVE=""
     return 0
   fi
-  out="$(cd "$DEPLOY_DIR" && ./backup.sh 2>&1)" || { log "backup.sh nie powiodl sie"; printf '%s\n' "$out"; return 1; }
+  local rc=0
+  out="$(cd "$DEPLOY_DIR" && timeout -k 30 "$BACKUP_TIMEOUT" ./backup.sh 2>&1)" || rc=$?
+  if [ "$rc" != "0" ]; then
+    printf '%s\n' "$out"
+    if [ "$rc" = "124" ] || [ "$rc" = "137" ]; then
+      log "backup.sh przekroczyl limit czasu ${BACKUP_TIMEOUT}s i zostal przerwany (kopia niepelna; stara wersja bez zmian)"
+      # backup.sh zatrzymuje api na czas kopii: przy przerwaniu upewnij sie, ze stara wersja dziala dalej.
+      if [ -n "$RUNNING_VERSION" ]; then
+        (cd "$DEPLOY_DIR" && timeout 300 docker compose "${PROFILE_ARGS[@]}" up -d --no-build --pull never api) >/dev/null 2>&1 ||
+          log "UWAGA: nie udalo sie ponownie uruchomic api po przerwanej kopii (docker compose ps)"
+      fi
+    else
+      log "backup.sh nie powiodl sie (kod $rc)"
+    fi
+    return 1
+  fi
   BACKUP_ARCHIVE="$(printf '%s\n' "$out" | sed -n 's/^BACKUP_ARCHIVE=//p' | tail -n 1)"
   [ -f "$BACKUP_ARCHIVE" ] || { log "backup.sh nie zwrocil archiwum"; return 1; }
   (cd "$(dirname "$BACKUP_ARCHIVE")" && sha256sum -c --status "$(basename "$BACKUP_ARCHIVE").sha256") || { log "suma SHA-256 kopii nie zgadza sie"; return 1; }
@@ -443,8 +484,17 @@ do_backup() { # kopia zimna + opcjonalny hak poza serwerem; wymagany przy allow_
 run_offsite_hook() {
   if [ -x "$OFFSITE_HOOK" ]; then
     if [ -z "$BACKUP_ARCHIVE" ]; then return 0; fi
-    log "hak kopii poza serwerem: uruchamiam"
-    "$OFFSITE_HOOK" "$BACKUP_ARCHIVE" || { log "hak kopii poza serwerem zakonczyl sie bledem"; return 1; }
+    log "hak kopii poza serwerem: uruchamiam (limit ${HOOK_TIMEOUT}s)"
+    local rc=0
+    timeout -k 30 "$HOOK_TIMEOUT" "$OFFSITE_HOOK" "$BACKUP_ARCHIVE" || rc=$?
+    if [ "$rc" != "0" ]; then
+      if [ "$rc" = "124" ] || [ "$rc" = "137" ]; then
+        log "hak kopii poza serwerem przekroczyl limit czasu ${HOOK_TIMEOUT}s i zostal przerwany (zawieszona wysylka? blokada wdrozen zwolniona)"
+      else
+        log "hak kopii poza serwerem zakonczyl sie bledem (kod $rc)"
+      fi
+      return 1
+    fi
     log "hak kopii poza serwerem: OK"
   elif [ "$ALLOW" = "1" ] && [ "$FIRST_DEPLOY" != "1" ]; then
     log "BLOKADA: allow_schema_change=1 wymaga haka deploy/cd/offsite-backup.hook (kopia poza serwerem)"
@@ -493,11 +543,13 @@ compose_up() { (cd "$DEPLOY_DIR" && timeout 600 docker compose "${PROFILE_ARGS[@
 
 # Rollback wariant A: .env.prev + kod poprzedniego commitu + ponowny smoke z wersja poprzednia. 0 = udany.
 rollback_image() { # rollback_image <commit-poprzedni|"">
-  local target_commit="$1" prev_ver
+  local target_commit="$1" prev_ver cur_maint
   [ -f "$ENV_PREV" ] || { log "brak .env.prev: nie ma do czego wracac"; return 1; }
   prev_ver="$(env_get "$ENV_PREV" DAAS_VERSION)"
   valid_version "$prev_ver" || { log ".env.prev nie zawiera poprawnej wersji"; return 1; }
+  cur_maint="$(env_get "$ENV_FILE" DAAS_MAINTENANCE_MODE)" # tryb serwisowy nie jest czescia wersji: rollback go nie zeruje
   (umask 077 && cp -p "$ENV_PREV" "$ENV_FILE.tmp") && chmod 600 "$ENV_FILE.tmp" && mv -f "$ENV_FILE.tmp" "$ENV_FILE" || return 1
+  if [ -n "$cur_maint" ]; then env_set_many "$ENV_FILE" "DAAS_MAINTENANCE_MODE=$cur_maint" || return 1; fi
   if [ "$STAGING" != "1" ] && [ -n "$target_commit" ]; then
     git -C "$REPO_DIR" checkout --quiet --detach "$target_commit" || return 1
   fi
@@ -526,6 +578,7 @@ prune_logs() { # zostaw 30 ostatnich dziennikow i plikow stanu
   for f in $(find "$LOG_DIR" -maxdepth 1 -type f -name '2*.log' | sort | head -n -30); do rm -f "$f"; done
   for f in $(find "$STATE_DIR" -maxdepth 1 -type f -name '2*.json' | sort | head -n -30); do rm -f "$f"; done
   for f in $(find "$LOG_DIR" -maxdepth 1 -type d -name '2*-incident' | sort | head -n -10); do rm -rf "$f"; done
+  for f in $(find "$DEPLOY_DIR" -maxdepth 1 -type f -name '.env.prev.2*' | sort | head -n -3); do rm -f "$f"; done
 }
 
 # ---------------------------------------------------------------- przebieg: deploy
@@ -549,12 +602,55 @@ abort_pre() { # abort_pre blocked|failed "komunikat"  -> kod 2, nic nie zmienion
   log "KONIEC ($PHASE): $2"
 }
 
+# .env.prev nie moze przezyc kodu 11/12: po takiej porazce baza mogla pojsc naprzod, a kolejny przebieg (np. powtorka tego samego
+# wydania) nie zapisuje nowego .env.prev i wskazalby przestarzaly stan. Plik zostaje na dysku pod nazwa przebiegu (do ogledzin).
+retire_env_prev() {
+  [ -f "$ENV_PREV" ] || return 0
+  mv -f "$ENV_PREV" "$ENV_PREV.$RUN_ID" && log ".env.prev przeniesiony na .env.prev.$RUN_ID (nie do uzycia w kolejnym przebiegu)" ||
+    log "UWAGA: nie udalo sie przeniesc .env.prev"
+}
+
+# Tuz przed rollbackiem obrazu: baza musi miec dokladnie ten schemat, ktory miala przed tym przebiegiem (DB_REV z bramy) oraz
+# schemat poprzedniej wersji zapisany w current.json (gdy current.json opisuje te wersje, do ktorej wracamy).
+rollback_schema_ok() {
+  local live cur_json="$STATE_DIR/current.json" cur_ver cur_head prev_env_ver
+  live="$(read_db_rev)"
+  if ! [[ "$live" =~ ^[0-9]+$ ]] || ! [[ "$DB_REV" =~ ^[0-9]+$ ]]; then
+    log "zywy odczyt rewizji bazy przed rollbackiem nieudany (live=$live, brama=$DB_REV)"
+    return 1
+  fi
+  if ((10#$live != 10#$DB_REV)); then
+    log "rewizja bazy zmienila sie w tym przebiegu ($DB_REV -> $live)"
+    return 1
+  fi
+  cur_ver="$(state_get_flat "$cur_json" version 2>/dev/null || true)"
+  cur_head="$(state_get_flat "$cur_json" schema_head 2>/dev/null || true)"
+  prev_env_ver="$(env_get "$ENV_PREV" DAAS_VERSION)"
+  if [ "$cur_ver" = "$prev_env_ver" ] && [[ "$cur_head" =~ ^[0-9]+$ ]] && ((10#$live != 10#$cur_head)); then
+    log "rewizja bazy ($live) rozni sie od schematu poprzedniej wersji ($cur_head)"
+    return 1
+  fi
+}
+
+# Kod 12: dowody zawsze, tryb serwisowy tylko gdy api odpowiada (inaczej nie ma czego przelaczac: unverified).
+incident_12() {
+  capture_incident || log "UWAGA: nie zapisano dowodow incydentu"
+  if [ -n "$(current_version)" ]; then
+    if do_maintenance on; then MAINT_STATE="on"; else MAINT_STATE="unverified"; fi
+  else
+    MAINT_STATE="unverified"
+    log "api nie odpowiada: tryb serwisowy nie wlaczony (po naprawie: deploy.sh maintenance on)"
+  fi
+  retire_env_prev
+}
+
 run_deploy() {
   local cur_json="$STATE_DIR/current.json" cur_ver cur_api cur_web cur_sha
 
   set_phase preflight
   pf_env || { abort_pre failed "preflight .env"; return 0; }
   load_env_settings
+  maint_from_env
   pf_disk || { abort_pre failed "preflight dysk"; return 0; }
   pf_overlay || { abort_pre failed "preflight nakladka obserwowalnosci (brak plikow sekretow)"; return 0; }
   RUNNING_VERSION="$(current_version)"
@@ -596,6 +692,9 @@ run_deploy() {
   drain_jobs || { abort_pre blocked "drenaz zadan (uzyj --force tylko swiadomie)"; return 0; }
 
   set_phase backup
+  # Wyscig: zadanie moglo wystartowac po drenazu, a backup.sh zatrzymuje api: ponowny odczyt tuz przed kopia.
+  log "ponowny odczyt zadan w toku tuz przed kopia"
+  drain_jobs || { abort_pre blocked "ponowny odczyt zadan w toku przed kopia (uzyj --force tylko swiadomie)"; return 0; }
   do_backup || { abort_pre failed "kopia zapasowa"; return 0; }
   run_offsite_hook || { abort_pre blocked "kopia poza serwerem"; return 0; }
 
@@ -611,7 +710,13 @@ run_deploy() {
   if compose_up; then up_ok=1; else log "docker compose up nie powiodl sie"; fi
   if [ "$up_ok" = "1" ]; then
     set_phase smoke
-    if run_smoke "$VERSION"; then smoke_ok=1; fi
+    if run_smoke "$VERSION"; then
+      smoke_ok=1
+    elif [ "$FIRST_DEPLOY" = "1" ] && [ -n "$PUBLIC_URL" ]; then
+      # Swiezy host: Caddy potrzebuje chwili na certyfikat (ACME), wiec sama krawedz bywa czerwona tuz po starcie.
+      log "pierwsze wdrozenie: ponawiam smoke z --public i --wait 120 (certyfikat Caddy moze byc jeszcze wystawiany)"
+      if run_smoke "$VERSION" 120; then smoke_ok=1; fi
+    fi
   fi
 
   if [ "$smoke_ok" = "1" ]; then
@@ -625,19 +730,42 @@ run_deploy() {
 
   # --- porazka wersji N ---
   log "wersja $VERSION nie przeszla smoke"
-  if [ "$SCHEMA" = "changed" ]; then
+  local local_green=0 reason=""
+  if run_smoke_local; then local_green=1; fi
+
+  # Awaria samej krawedzi (Caddy/DNS/TLS): aplikacja dziala, wiec rollback jej nie naprawi, a mogl sie nie udac (fikcyjny kod 12).
+  # Wersja zostaje, kod 11 z edge=red, bez trybu serwisowego; stan zapisany, zeby ponowienie tej samej wersji dalo noop po zielonym smoke.
+  if [ "$local_green" = "1" ] && [ -n "$PUBLIC_URL" ]; then
     RESULT="failed"
     CODE=11
-    log "INCYDENT: rollback obrazu zabroniony (schemat zmieniony lub pierwsze wdrozenie). RUNBOOK §9, README wariant B."
-    # Q10: czerwony LOKALNY smoke = awaria aplikacji -> dowody + tryb serwisowy; czerwony tylko --public = awaria krawedzi -> bez trybu.
-    if run_smoke_local; then
-      log "lokalny smoke zielony: awaria dotyczy krawedzi (--public), tryb serwisowy bez zmian"
+    EDGE="red"
+    log "lokalny smoke zielony, czerwony tylko --public: awaria krawedzi (Caddy/DNS/TLS); wersja $VERSION wdrozona, bez rollbacku i bez trybu serwisowego"
+    record_success
+    return 0
+  fi
+
+  if [ "$SCHEMA" = "changed" ]; then
+    reason="schemat zmieniony lub pierwsze wdrozenie: rollback obrazu zabroniony"
+  elif [ "$PREV_SAVED" != "1" ]; then
+    reason="powtorka wdrozenia tej samej wersji (w tym przebiegu nie zapisano .env.prev): rollback obrazu zabroniony"
+  elif ! rollback_schema_ok; then
+    reason="schemat bazy rozny od schematu poprzedniej wersji (zywy odczyt tuz przed rollbackiem): rollback obrazu zabroniony"
+  fi
+  if [ -n "$reason" ]; then
+    RESULT="failed"
+    CODE=11
+    log "INCYDENT: $reason. RUNBOOK §9, README wariant B."
+    # Q10: czerwony LOKALNY smoke = awaria aplikacji -> dowody + tryb serwisowy.
+    if [ "$local_green" = "1" ]; then
+      log "lokalny smoke zielony przy ponowieniu (brak adresu --public): tryb serwisowy bez zmian"
     else
       capture_incident || log "UWAGA: nie zapisano dowodow incydentu"
       if do_maintenance on; then MAINT_STATE="on"; else MAINT_STATE="unverified"; fi
+      retire_env_prev
     fi
     return 0
   fi
+
   set_phase rollback
   if rollback_image "$PREV_COMMIT"; then
     RESULT="rollback"
@@ -648,6 +776,7 @@ run_deploy() {
     RESULT="failed"
     CODE=12
     log "INCYDENT P1: rollback nieudany"
+    incident_12
   fi
   return 0
 }
@@ -662,6 +791,7 @@ run_rollback() {
   set_phase preflight
   pf_env || { abort_pre failed "preflight .env"; return 0; }
   load_env_settings
+  maint_from_env
   pf_disk || { abort_pre failed "preflight dysk"; return 0; }
   RUNNING_VERSION="$(current_version)"
   [ -z "$RUNNING_VERSION" ] || PREV_VERSION="$RUNNING_VERSION"
@@ -708,6 +838,7 @@ run_rollback() {
     RESULT="failed"
     CODE=12
     log "INCYDENT P1: rollback reczny nieudany"
+    incident_12
   fi
 }
 
@@ -722,6 +853,8 @@ worker_exit() {
     *) CODE=12 ;;
   esac
   log "NIEOCZEKIWANE zakonczenie w fazie $PHASE"
+  # Po apply stan jest nieokreslony: zabezpiecz dowody zanim kolejne `up` skasuje dziennik kontenerow.
+  [ "$CODE" != "12" ] || capture_incident || true
   state_write 1 || true
 }
 
@@ -766,7 +899,8 @@ launch_detached() { # launch_detached RUN_ID akcja [argumenty...]
   local run_id="$1" var
   shift
   local -a setenv=()
-  for var in DAAS_CD_STAGING DAAS_CD_FAKE_NEW_HEAD DAAS_CD_API_REPO DAAS_CD_WEB_REPO DAAS_CD_PUBLIC_URL DAAS_CD_DRAIN_TIMEOUT CURL_CA_BUNDLE; do
+  for var in DAAS_CD_STAGING DAAS_CD_FAKE_NEW_HEAD DAAS_CD_API_REPO DAAS_CD_WEB_REPO DAAS_CD_PUBLIC_URL DAAS_CD_DRAIN_TIMEOUT \
+    DAAS_CD_HOOK_TIMEOUT DAAS_CD_BACKUP_TIMEOUT CURL_CA_BUNDLE; do
     [ -z "${!var:-}" ] || setenv+=("--setenv=$var=${!var}")
   done
   if command -v systemd-run >/dev/null 2>&1 &&
@@ -776,7 +910,27 @@ launch_detached() { # launch_detached RUN_ID akcja [argumenty...]
   setsid nohup "$SELF" __worker "$@" "$run_id" >/dev/null 2>&1 </dev/null &
 }
 
-wait_for_run() { # wait_for_run RUN_ID  -> drukuje podsumowanie i zwraca jego kod
+# dead_summary PLIK [sekundy]: podsumowanie dla procesu roboczego, ktory zniknal bez zapisu wyniku (zabity, restart hosta, OOM).
+# Przed `apply` nic nie zmieniono (kod 2); od `apply` stan jest nieokreslony (kod 12). Zwraca ten kod.
+dead_summary() {
+  local f="$1" dur="${2:-0}" phase="start" ver="$VERSION" prev="$PREV_VERSION" sch="unknown" mt="off" ed="ok" v code
+  if [ -f "$f" ]; then
+    v="$(state_get "$f" phase)"; [ -z "$v" ] || phase="$v"
+    v="$(state_get "$f" version)"; [ -z "$v" ] || ver="$v"
+    v="$(state_get "$f" previous)"; [ -z "$v" ] || prev="$v"
+    v="$(state_get "$f" schema)"; [ -z "$v" ] || sch="$v"
+    v="$(state_get "$f" maintenance)"; [ -z "$v" ] || mt="$v"
+    v="$(state_get "$f" edge)"; [ -z "$v" ] || ed="$v"
+  fi
+  case "$phase" in
+    start | lock | preflight | gate | drain | backup) code=2 ;;
+    *) code=12 ;;
+  esac
+  summary_line failed "$code" "$ver" "$prev" "$sch" "$dur" "$mt" "$ed"
+  return "$code"
+}
+
+wait_for_run() { # wait_for_run RUN_ID  -> drukuje podsumowanie i zwraca jego kod (3 = limit czekania minal, operacja trwa dalej)
   local run_id="$1" file deadline=$((SECONDS + OUTER_TIMEOUT)) started=$SECONDS
   file="$STATE_DIR/$run_id.json"
   while [ "$SECONDS" -lt "$deadline" ]; do
@@ -786,24 +940,23 @@ wait_for_run() { # wait_for_run RUN_ID  -> drukuje podsumowanie i zwraca jego ko
     fi
     # proces roboczy zniknal bez zapisu wyniku (np. zabity): nie wiemy, co sie stalo
     if [ $((SECONDS - started)) -gt 15 ] && ! lock_is_held && { [ ! -f "$file" ] || [ "$(state_get "$file" "done")" != "1" ]; }; then
-      local phase="start"
-      [ ! -f "$file" ] || phase="$(state_get "$file" phase)"
-      case "$phase" in
-        start | lock | preflight | gate | drain | backup) summary_line failed 2 "$VERSION" "$PREV_VERSION" unknown $((SECONDS - started)); return 2 ;;
-        *) summary_line failed 12 "$VERSION" "$PREV_VERSION" unknown $((SECONDS - started)); return 12 ;;
-      esac
+      dead_summary "$file" $((SECONDS - started))
+      return $?
     fi
     sleep 3
   done
-  summary_line failed 12 "$VERSION" "$PREV_VERSION" unknown $((SECONDS - started))
-  return 12
+  # Limit czekania minal, ale proces roboczy zyje (trzyma blokade): wynik nieznany, NIE incydent. Warstwa zewnetrzna odpytuje `status`.
+  local phase="?"
+  [ ! -f "$file" ] || phase="$(state_get "$file" phase)"
+  printf 'DAAS_STATUS run=%s state=running action=deploy phase=%s\n' "$run_id" "$phase"
+  return 3
 }
 
 print_final() { # print_final PLIK_STANU -> podsumowanie + kod
   local f="$1" code
   code="$(state_get "$f" code)"
   summary_line "$(state_get "$f" result)" "$code" "$(state_get "$f" version)" "$(state_get "$f" previous)" \
-    "$(state_get "$f" schema)" "$(($(state_get "$f" updated) - $(state_get "$f" started)))" "$(state_get "$f" maintenance)"
+    "$(state_get "$f" schema)" "$(($(state_get "$f" updated) - $(state_get "$f" started)))" "$(state_get "$f" maintenance)" "$(state_get "$f" edge)"
   return "$code"
 }
 
@@ -828,7 +981,10 @@ cmd_deploy() {
   fi
   [[ "$sha" =~ $RE_SHA ]] || sha="0000000000000000000000000000000000000000"
   valid_repo "$API_REPO" && valid_repo "$WEB_REPO" || { summary_line failed 2 "$ver" none unknown 0; return 2; }
-  [[ "$DRAIN_TIMEOUT" =~ ^[0-9]+$ ]] || { summary_line failed 2 "$ver" none unknown 0; return 2; }
+  local t
+  for t in "$DRAIN_TIMEOUT" "$OUTER_TIMEOUT" "$HOOK_TIMEOUT" "$BACKUP_TIMEOUT"; do
+    [[ "$t" =~ ^[0-9]+$ ]] || { summary_line failed 2 "$ver" none unknown 0; return 2; }
+  done
   mkdir -p "$STATE_DIR" "$LOG_DIR"
   chmod 700 "$STATE_DIR" "$LOG_DIR" 2>/dev/null || true
   local request="$ver|$sha|$api|$web" last run_id
@@ -895,6 +1051,14 @@ cmd_status() {
   if [ "$(state_get "$last" "done")" = "1" ]; then
     printf 'DAAS_STATUS run=%s state=done action=%s\n' "$(state_get "$last" run)" "$(state_get "$last" action)"
     print_final "$last"
+    return $?
+  fi
+  # Proces roboczy martwy (restart hosta, OOM, SIGKILL): blokada wolna, a stan nie rusza sie od > 15 s. Ta sama regula co w wait_for_run.
+  local upd
+  upd="$(state_get "$last" updated)"
+  if [[ "$upd" =~ ^[0-9]+$ ]] && [ $(($(now_epoch) - upd)) -gt 15 ] && ! lock_is_held; then
+    printf 'DAAS_STATUS run=%s state=done action=%s\n' "$(state_get "$last" run)" "$(state_get "$last" action)"
+    dead_summary "$last" "$((upd - $(state_get "$last" started)))"
     return $?
   fi
   printf 'DAAS_STATUS run=%s state=running action=%s phase=%s\n' "$(state_get "$last" run)" "$(state_get "$last" action)" "$(state_get "$last" phase)"

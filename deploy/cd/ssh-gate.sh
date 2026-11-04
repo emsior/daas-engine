@@ -24,7 +24,7 @@ here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cmd="${SSH_ORIGINAL_COMMAND:-}"
 
 refuse() {
-  printf 'DAAS_DEPLOY result=failed code=2 version=- previous=none schema=unknown duration=0 maintenance=off\n'
+  printf 'DAAS_DEPLOY result=failed code=2 version=- previous=none schema=unknown duration=0 maintenance=off edge=ok\n'
   exit 2
 }
 
