@@ -1,0 +1,92 @@
+name: CD staging
+
+# Staging efemeryczny na runnerze GitHub: pelny stos compose, deploy.sh N-1 -> N, smoke lokalny i przez Caddy,
+# wstrzykniete uszkodzenie (kod 10), symulacja zmiany schematu (kod 11), kopia, tryb serwisowy, smoke selfhost.
+# Bez sekretow i bez dostepu do produkcji. Skrypt: deploy/cd/staging.sh (opis scenariuszy w naglowku).
+#
+# Tryby:
+#   - workflow_call z release.yml: N pobrany z GHCR po digestach (job staging-registry, packages: read)
+#   - pull_request (zmiany w deploy/, Dockerfile, alembic/ i w tych workflowach) oraz workflow_dispatch:
+#     N budowany lokalnie z checkoutu (job staging-local, bez dostepu do rejestru)
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: "Wersja wydania X.Y.Z (puste = budowa lokalna)"
+        type: string
+        required: false
+        default: ""
+      api_digest:
+        description: "Digest obrazu api (puste = budowa lokalna)"
+        type: string
+        required: false
+        default: ""
+      web_digest:
+        description: "Digest obrazu web"
+        type: string
+        required: false
+        default: ""
+      ref:
+        description: "Ref do checkoutu (puste = domyslny ref wywolania)"
+        type: string
+        required: false
+        default: ""
+  pull_request: # nigdy pull_request_target: kod z forka nie dostaje sekretow ani zapisu
+    paths:
+      - "deploy/**"
+      - "Dockerfile"
+      - "web/Dockerfile"
+      - "alembic/**"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/cd-staging.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: cd-staging-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  staging-local:
+    if: ${{ inputs.api_digest == '' || inputs.api_digest == null }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # cel ⚠ <= 15 min
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Staging (obrazy budowane z checkoutu)
+        run: bash deploy/cd/staging.sh
+
+  staging-registry:
+    if: ${{ inputs.api_digest != '' && inputs.api_digest != null }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: read # pobranie obrazow wydania po digestach
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - name: Logowanie do GHCR (token przez stdin)
+        env:
+          GH_TOKEN_VALUE: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GH_TOKEN_VALUE" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: Staging (obrazy wydania po digestach)
+        env:
+          STAGING_VERSION: ${{ inputs.version }}
+          STAGING_API_DIGEST: ${{ inputs.api_digest }}
+          STAGING_WEB_DIGEST: ${{ inputs.web_digest }}
+        run: bash deploy/cd/staging.sh
+
+  # Miejsce na osobny job `observability` (promtool/amtool + asercja scrape'u api): doda go Inzynier Obserwowalnosci.
+  # Nie zmieniaj jobow staging-local / staging-registry; nowy job moze miec `needs:` na nie i wlasne `permissions`.
