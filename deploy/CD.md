@@ -29,7 +29,7 @@ Tag nie może wskazywać commitu spoza historii `main`, a tag wersji w rejestrze
 (ponowne uruchomienie tego samego wydania używa istniejących obrazów, o ile pochodzą z tego samego commitu).
 
 **Wydanie, które zmienia schemat bazy.** Gdy wydanie dodaje migrację Alembica, host odmówi wdrożenia (kod 2), dopóki nie uruchomisz
-`Release` ręcznie (`Run workflow`, pole `tag` = istniejący tag) z zaznaczonym `allow_schema_change`. Takie wydanie wymaga kopii poza
+`Release` ręcznie (`Run workflow` uruchomiony z tego tagu — „Use workflow from: vX.Y.Z”, pole `tag` = ten sam tag) z zaznaczonym `allow_schema_change`. Takie wydanie wymaga kopii poza
 serwerem (hak `deploy/cd/offsite-backup.hook`, sekcja „Kopia poza serwerem”) i **nie ma automatycznego wycofania**: po awarii zostaje
 wariant B z README. To świadoma decyzja właściciela przy każdym takim wydaniu.
 

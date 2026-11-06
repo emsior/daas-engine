@@ -27,11 +27,6 @@ on:
         type: string
         required: false
         default: ""
-      ref:
-        description: "Ref do checkoutu (puste = domyslny ref wywolania)"
-        type: string
-        required: false
-        default: ""
   pull_request: # nigdy pull_request_target: kod z forka nie dostaje sekretow ani zapisu
     paths:
       - "deploy/**"
@@ -59,7 +54,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
       - name: Staging (obrazy budowane z checkoutu)
         run: bash deploy/cd/staging.sh
@@ -74,7 +68,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
       - name: Logowanie do GHCR (token przez stdin)
         env:
@@ -102,7 +95,6 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ inputs.ref }}
           persist-credentials: false
       - name: Kontrole statyczne (promtool, amtool, dashboard)
         run: bash deploy/observability/check.sh
