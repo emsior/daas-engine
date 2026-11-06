@@ -152,7 +152,7 @@ jobs:
         run: npm run build
 
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Playwright 1.56.1 nie obsluguje Ubuntu 26.04 (ubuntu-latest po migracji runnerow)
     timeout-minutes: 25
     env:
       NEXT_TELEMETRY_DISABLED: "1"
@@ -216,7 +216,7 @@ jobs:
   # biegnie po https: stack.sh z E2E_TLS=1 generuje jednorazowy certyfikat self-signed, a Playwright dostaje
   # ignoreHTTPSErrors tylko dla adresu https. Firefox przyjmuje te ciasteczka po http na 127.0.0.1.
   e2e-browsers:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Playwright 1.56.1 nie obsluguje Ubuntu 26.04 (ubuntu-latest po migracji runnerow)
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -293,7 +293,7 @@ jobs:
   # Brama G3: Lighthouse (mobile) dla tras publicznych /login i /dpa na stosie z web/e2e/stack.sh.
   # Progi w web/lighthouserc.json: wydajnosc >= 0.9, dostepnosc >= 0.95, dobre praktyki >= 0.9.
   lighthouse:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04 # Playwright 1.56.1 nie obsluguje Ubuntu 26.04 (ubuntu-latest po migracji runnerow)
     timeout-minutes: 20
     needs: e2e
     env:
