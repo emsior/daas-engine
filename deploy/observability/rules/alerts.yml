@@ -151,11 +151,12 @@ groups:
       # plik nie byl odswiezony od 15 min (cron co 5 min = 3 cykle; node_exporter etykietuje `file` nazwa pliku,
       # tu daas_mail_failures.prom, jak zapisuje textfile/mail-failures.sh) albo pliku nie ma wcale (cron nigdy nie
       # zainstalowany). Ticket, bo to awaria monitoringu, nie klienta. Usunac razem z regulami interim po wdrozeniu L-4.
+      # max() wokol absent(): absent() przenosi etykiete `file` z selektora, a alert ma miec ten sam zestaw etykiet w kazdej galezi.
       - alert: MailSendFailing
         expr: |
           max(daas_textfile_collect_success{collector="mail_failures"}) == 0
           or max(time() - node_textfile_mtime_seconds{file="daas_mail_failures.prom"}) > 900
-          or absent(node_textfile_mtime_seconds{file="daas_mail_failures.prom"})
+          or max(absent(node_textfile_mtime_seconds{file="daas_mail_failures.prom"}))
         for: 15m
         labels:
           severity: ticket
