@@ -81,6 +81,12 @@ if [ "$wait_sec" -gt 0 ]; then
     fi
     sleep 2
   done
+  # kokpit startuje dopiero po zdrowym api (depends_on), wiec czekamy na /login w tym samym limicie; po limicie
+  # kontrola nizej zglosi FAIL z kodem HTTP (kokpit swiadomie wylaczony, np. scenariusz kodu 11, tez konczy sie FAIL)
+  echo "Czekam do $((end - SECONDS > 0 ? end - SECONDS : 0))s na $web/login ..."
+  until [ "$(curl -s --max-time 5 -o /dev/null -w '%{http_code}' "$web/login" || true)" = "200" ] || [ "$SECONDS" -ge "$end" ]; do
+    sleep 2
+  done
 fi
 
 check "api /health" "$api/health" 200 '"status" *: *"ok"'
