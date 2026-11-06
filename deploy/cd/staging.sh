@@ -106,11 +106,13 @@ else
 fi
 
 # N-1: ten sam kod, ale /health ma raportowac inna wersje (health czyta metadane pakietu, nie tag obrazu),
-# wiec cienka warstwa podmienia pole Version w METADATA zainstalowanego pakietu. ⚠ nieprzetestowane bez demona.
+# wiec cienka warstwa podmienia pole Version w METADATA zainstalowanego pakietu. `pip install --no-build-isolation .`
+# zostawia w /srv/app katalog daas_engine.egg-info (PKG-INFO, bez METADATA); python -c i uvicorn (app-dir .) widza go
+# przed site-packages, wiec warstwa usuwa go i podmienia METADATA w trybie -I (bez cwd w sys.path).
 docker build -q -t "$API_REPO:$PREV_VERSION" - >/dev/null <<EOF
 FROM $IMG_API
 USER root
-RUN python -c "import importlib.metadata as m, pathlib, re; p = pathlib.Path(m.distribution('daas-engine')._path) / 'METADATA'; p.write_text(re.sub(r'(?m)^Version: .*', 'Version: $PREV_VERSION', p.read_text(), count=1))"
+RUN rm -rf /srv/app/*.egg-info && python -I -c "import importlib.metadata as m, pathlib, re; p = pathlib.Path(m.distribution('daas-engine')._path) / 'METADATA'; p.write_text(re.sub(r'(?m)^Version: .*', 'Version: $PREV_VERSION', p.read_text(), count=1))"
 USER daas
 EOF
 docker tag "$WEB_REPO:$VERSION" "$WEB_REPO:$PREV_VERSION"
