@@ -42,3 +42,10 @@ updates:
       # Node trzymamy na LTS 22 (to samo co w CI); wyzsze wersje glowne wymagaja swiadomej decyzji
       - dependency-name: "node"
         versions: [">=23"]
+  # Obrazy wskazane w deploy/ (np. caddy w compose.yml). ⚠ Nazwa ekosystemu `docker-compose` wg dokumentacji GitHub (2024);
+  # offline nie da sie zweryfikowac: jesli Dependabot odrzuci konfiguracje, sprawdz zakladke Insights -> Dependency graph -> Dependabot.
+  - package-ecosystem: "docker-compose"
+    directory: "/deploy"
+    schedule: { interval: "weekly", day: "monday" }
+    # nowe wydania czekaja 7 dni (ochrona przed zlosliwymi, szybko wycofanymi wersjami)
+    cooldown: { default-days: 7 }

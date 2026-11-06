@@ -70,6 +70,8 @@ Właściciel organizacji loguje się linkiem z e-maila (`https://raporty.example
 
 Aktualizacja to małe, częste kroki: kopia, nowy tag, `up -d`, test dymny.
 
+Zautomatyzowana ścieżka (tag → obrazy w GHCR → staging → wdrożenie z kopią, smoke i automatycznym wycofaniem obrazu) jest opisana w [`CD.md`](CD.md); poniżej wersja ręczna, która zostaje jako awaryjna.
+
 ```bash
 cd /opt/daas-engine/deploy
 ./backup.sh                                          # 1. kopia zimna (api stoi kilka sekund)
@@ -89,6 +91,8 @@ Zasady:
 ## Przywracanie poprzedniej wersji
 
 Wybierz ścieżkę na podstawie wpisów o migracjach w `CHANGELOG.md`. Przygotuj potrzebne obrazy lokalnie przed oknem serwisowym.
+
+Ręczne wycofanie obrazu z bramą schematu (`deploy/cd/deploy.sh rollback`), kody wyjścia wdrożenia i postępowanie przy kodach 11 i 12: [`CD.md`](CD.md#c-rollback-ręczny).
 
 **A. Tylko obraz, przy zgodnym bieżącym schemacie bazy**
 

@@ -1,0 +1,62 @@
+#cloud-config
+# Pierwszy start hosta DaaS Engine Cloud (Ubuntu 24.04 lub Debian 12, 2 vCPU / 4 GB). Neutralne wobec dostawcy:
+# wklej CALOSC do pola "user data / cloud-init" w panelu dostawcy przy tworzeniu serwera.
+#
+# ZERO SEKRETOW w tym pliku. User-data jest czytelny z poziomu hosta (metadane instancji) i bywa widoczny w panelu,
+# dlatego wpisujesz tu wylacznie KLUCZE PUBLICZNE. Sekrety aplikacji (.env) generuje potem deploy/gen-env.sh na hoscie.
+#
+# Przed uzyciem zastap trzy placeholdery (bez cudzyslowow):
+#   <<OPERATOR_SSH_PUBLIC_KEY>>  jedna linia klucza publicznego ed25519: twoj klucz do logowania administracyjnego (konto `operator`)
+#   <<DEPLOY_SSH_PUBLIC_KEY>>    jedna linia klucza publicznego ed25519 pary, ktorej klucz PRYWATNY trafia do sekretu GitHub DEPLOY_SSH_KEY
+#   <<RELEASE_REF>>              tag OSTATNIEGO wydania (vX.Y.Z) albo pelny SHA commitu (40 znakow hex); przed pierwszym tagiem
+#                                wpisz pelny SHA commitu, ktory zataguesz. Host NIE klonuje ruchomej galezi `main`.
+# Skrypt bootstrap.sh odmowi pracy, jesli placeholder zostanie w tresci albo ref nie ma poprawnego formatu. Cala konfiguracja hosta jest w deploy/host/bootstrap.sh
+# (idempotentnym): ten plik tylko go uruchamia, a ten sam efekt daje reczne `sudo bash bootstrap.sh` na istniejacym serwerze.
+#
+# bootstrap.sh tworzy tez /var/lib/node_exporter/textfile (root:deploy 0775) i wpis cron licznika L-4 dla nakladki obserwowalnosci
+# (nic nie robi, dopoki COMPOSE_FILE w deploy/.env nie zawiera compose.observability.yml). Zadnych adresow ani sekretow.
+#
+# Dziennik wykonania: /var/log/cloud-init-output.log (bez sekretow).
+
+ssh_pwauth: false
+disable_root: true
+package_update: true
+packages:
+  - git
+  - ca-certificates
+  - curl
+
+write_files:
+  - path: /root/.daas-bootstrap/operator.pub
+    permissions: "0600"
+    owner: root:root
+    content: |
+      <<OPERATOR_SSH_PUBLIC_KEY>>
+  - path: /root/.daas-bootstrap/deploy.pub
+    permissions: "0600"
+    owner: root:root
+    content: |
+      <<DEPLOY_SSH_PUBLIC_KEY>>
+  - path: /root/.daas-bootstrap/release_ref
+    permissions: "0600"
+    owner: root:root
+    content: |
+      <<RELEASE_REF>>
+
+runcmd:
+  # Plytkie pobranie PRZYPIETEGO refa (tag albo pelny SHA) tylko po to, by uruchomic bootstrap.sh; wlasciwy klon w /opt/daas-engine
+  # tworzy bootstrap.sh (ten sam ref). Katalog z kluczami publicznymi jest usuwany tylko po sukcesie (przy bledzie zostaje do diagnozy).
+  - |
+    set -e
+    ref="$(tr -d '[:space:]' < /root/.daas-bootstrap/release_ref)"
+    printf '%s' "$ref" | grep -Eq '^(v[0-9]+\.[0-9]+\.[0-9]+|[0-9a-f]{40})$' || { echo "RELEASE_REF: oczekiwano tagu vX.Y.Z albo pelnego SHA"; exit 1; }
+    mkdir -p /root/.daas-bootstrap/src
+    git -C /root/.daas-bootstrap/src init --quiet
+    git -C /root/.daas-bootstrap/src remote add origin https://github.com/emsior/daas-engine.git
+    git -C /root/.daas-bootstrap/src fetch --quiet --depth 1 origin "$ref"
+    git -C /root/.daas-bootstrap/src checkout --quiet FETCH_HEAD
+    DAAS_REPO_REF="$ref" \
+      OPERATOR_SSH_PUBLIC_KEY_FILE=/root/.daas-bootstrap/operator.pub \
+      DEPLOY_SSH_PUBLIC_KEY_FILE=/root/.daas-bootstrap/deploy.pub \
+      bash /root/.daas-bootstrap/src/deploy/host/bootstrap.sh
+    rm -rf /root/.daas-bootstrap

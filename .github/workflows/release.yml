@@ -1,0 +1,371 @@
+name: Release
+
+# Wydanie: tag vX.Y.Z (albo reczne uruchomienie) -> weryfikacja -> testy -> obrazy w GHCR (po digestach) -> staging na runnerze
+# -> (opcjonalnie) wdrozenie na produkcje przez SSH -> GitHub Release z digestami.
+# Opis procesu i checklista wlacznika produkcji: deploy/CD.md.
+#
+# Zasady (jak w ci.yml): akcje przypiete do SHA, uprawnienia minimalne per job, persist-credentials: false,
+# zero ${{ }} w `run` (wszystko przez env:), zero cache, zero pull_request_target / workflow_run, zero zaleznosci od ci.yml
+# (release ma wlasne bramy: ruff + pytest, gitleaks na drzewie, skaner opsec, staging).
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Istniejacy tag wydania (vX.Y.Z)"
+        required: true
+        type: string
+      allow_schema_change:
+        description: "Zgoda na wydanie zmieniajace schemat bazy (brak automatycznego rollbacku; wymaga kopii poza serwerem)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      sha: ${{ steps.meta.outputs.sha }}
+      short: ${{ steps.meta.outputs.short }}
+      new_head: ${{ steps.meta.outputs.new_head }}
+      prev_head: ${{ steps.meta.outputs.prev_head }}
+      prev_tag: ${{ steps.meta.outputs.prev_tag }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', inputs.tag) }}
+          fetch-depth: 0 # potrzebne: przodek origin/main, poprzedni tag, historia do gitleaks
+          persist-credentials: false
+      - name: Tag, wersje, przodek main, schemat
+        id: meta
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF_NAME: ${{ github.ref_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "push" ]; then tag="$REF_NAME"; else tag="$INPUT_TAG"; fi
+          [[ "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]] || { echo "::error::Niepoprawny format tagu (oczekiwano vX.Y.Z)"; exit 1; }
+          # staging (cd-staging.yml) robi checkout ref wywolania, wiec reczne wydanie musi byc uruchomione z tego samego tagu
+          if [ "$EVENT_NAME" != "push" ] && [ "$GITHUB_REF" != "refs/tags/${tag}" ]; then
+            echo "::error::Uruchom Release z tagu ${tag} (Run workflow -> Use workflow from: ${tag}), nie z galezi"; exit 1
+          fi
+          version="${BASH_REMATCH[1]}"
+          sha="$(git rev-parse --verify "refs/tags/${tag}^{commit}")"
+          # wersja w trzech miejscach musi zgadzac sie z tagiem
+          py="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)"
+          cfg="$(sed -n 's/^ *app_version: str = "\(.*\)"/\1/p' app/core/config.py | head -n 1)"
+          web="$(sed -n 's/^  "version": "\(.*\)",/\1/p' web/package.json | head -n 1)"
+          for pair in "pyproject.toml:$py" "app/core/config.py:$cfg" "web/package.json:$web"; do
+            if [ "${pair#*:}" != "$version" ]; then
+              echo "::error::Wersja w ${pair%%:*} nie zgadza sie z tagiem $tag"
+              exit 1
+            fi
+          done
+          # commit tagu musi byc przodkiem main (wydania tylko z kodu, ktory przeszedl review)
+          git merge-base --is-ancestor "$sha" origin/main || { echo "::error::Commit tagu nie jest przodkiem origin/main"; exit 1; }
+          # head Alembica tagu i poprzedniego wydania (do linii `schema:` w notatkach); parser z deploy/cd/lib.sh
+          . deploy/cd/lib.sh
+          head_of() {
+            local rev="$1" pairs="" f
+            while IFS= read -r f; do
+              [[ "$f" == alembic/versions/*.py ]] || continue
+              pairs+="$(git show "$rev:$f" | rev_pairs_from_text)"$'\n'
+            done < <(git ls-tree -r --name-only "$rev" -- alembic/versions)
+            printf '%s' "$pairs" | alembic_head_from_pairs
+          }
+          new_head="$(head_of "$sha")"
+          prev_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' "${sha}^" 2>/dev/null || true)"
+          if [ -n "$prev_tag" ]; then prev_head="$(head_of "$prev_tag")"; else prev_head="none"; fi
+          {
+            echo "tag=$tag"
+            echo "version=$version"
+            echo "sha=$sha"
+            echo "short=${sha:0:12}"
+            echo "new_head=$new_head"
+            echo "prev_head=$prev_head"
+            echo "prev_tag=${prev_tag:-none}"
+          } >> "$GITHUB_OUTPUT"
+      - name: Sekrety w drzewie (gitleaks)
+        run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f dir /repo --redact --no-banner
+      - name: OPSEC (drzewo)
+        run: bash tools/opsec_scan.sh --tree
+
+  test:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 30 # pelny pytest trwa 8-10 min
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', inputs.tag) }}
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12" # wersja obrazu (Dockerfile: python:3.12-slim); bez cache w wydaniu
+      - name: Install
+        run: pip install --require-hashes -r requirements-dev.lock && pip install --no-deps -e .
+      - name: Lint (ruff)
+        run: ruff check --output-format=github .
+      - name: Tests
+        run: pytest -v -p no:cacheprovider
+      - name: Znane podatnosci zaleznosci (pip-audit, tylko informacyjnie)
+        continue-on-error: true
+        run: |
+          pip install "pip-audit==2.10.1"
+          pip-audit -r requirements.lock -r requirements-postgres.lock --require-hashes --disable-pip --progress-spinner off
+
+  images:
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write # jedyny job z zapisem do rejestru
+    outputs:
+      api_digest: ${{ steps.publish.outputs.api_digest }}
+      web_digest: ${{ steps.publish.outputs.web_digest }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event_name == 'push' && github.ref || format('refs/tags/{0}', inputs.tag) }}
+          persist-credentials: false
+      - name: Logowanie do GHCR (token przez stdin)
+        env:
+          GH_TOKEN_VALUE: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: printf '%s' "$GH_TOKEN_VALUE" | docker login ghcr.io -u "$ACTOR" --password-stdin
+      - name: Budowa, publikacja (bez latest, bez nadpisywania tagu wersji)
+        id: publish
+        env:
+          VERSION: ${{ needs.verify.outputs.version }}
+          SHA: ${{ needs.verify.outputs.sha }}
+          SHORT: ${{ needs.verify.outputs.short }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_FULL: ${{ github.repository }}
+          SERVER_URL: ${{ github.server_url }}
+        run: |
+          set -euo pipefail
+          owner="${OWNER,,}"
+          source_url="$SERVER_URL/$REPO_FULL"
+          publish_one() { # publish_one NAZWA KONTEKST [argumenty budowy...]
+            local name="$1" context="$2" repo out digest existing label
+            shift 2
+            repo="ghcr.io/$owner/daas-engine-$name"
+            # Tag wersji jest niezmienny. Istnieje juz? Wolno go uzyc ponownie TYLKO gdy etykieta revision zgadza sie z commitem
+            # (ponowne uruchomienie tego samego wydania, np. z allow_schema_change); w kazdym innym przypadku odmowa.
+            if existing="$(docker manifest inspect "$repo:$VERSION" 2>&1)"; then
+              docker pull -q "$repo:$VERSION" >/dev/null
+              label="$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$repo:$VERSION")"
+              if [ "$label" != "$SHA" ]; then
+                echo "::error::Tag $repo:$VERSION juz istnieje i pochodzi z innego commitu: odmowa nadpisania"
+                return 1
+              fi
+              digest="$(docker image inspect --format '{{range .RepoDigests}}{{println .}}{{end}}' "$repo:$VERSION" | sed -n "s#^$repo@##p" | head -n 1)"
+              echo "Obraz $name juz opublikowany z tego commitu: uzywam istniejacego digestu."
+            else
+              case "$existing" in
+                *"no such manifest"* | *"manifest unknown"* | *"name unknown"* | *"not found"*) ;;
+                *) echo "::error::Nie da sie ustalic, czy tag wersji istnieje (docker manifest inspect)"; return 1 ;;
+              esac
+              docker build \
+                --label "org.opencontainers.image.source=$source_url" \
+                --label "org.opencontainers.image.revision=$SHA" \
+                --label "org.opencontainers.image.version=$VERSION" \
+                -t "$repo:$VERSION" -t "$repo:sha-$SHORT" "$@" "$context"
+              out="$(docker push "$repo:$VERSION")"
+              digest="$(printf '%s\n' "$out" | sed -n 's/.*digest: \(sha256:[0-9a-f]\{64\}\).*/\1/p' | tail -n 1)"
+              docker push -q "$repo:sha-$SHORT" >/dev/null
+            fi
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::Nie ustalono digestu obrazu $name"; return 1; }
+            echo "$name=$digest" >> "$RUNNER_TEMP/digests"
+          }
+          : > "$RUNNER_TEMP/digests"
+          publish_one api .
+          publish_one web web --build-arg NEXT_PUBLIC_API_ORIGIN=
+          {
+            echo "api_digest=$(sed -n 's/^api=//p' "$RUNNER_TEMP/digests")"
+            echo "web_digest=$(sed -n 's/^web=//p' "$RUNNER_TEMP/digests")"
+          } >> "$GITHUB_OUTPUT"
+
+  staging:
+    needs: [verify, images]
+    permissions:
+      contents: read
+      packages: read
+    uses: ./.github/workflows/cd-staging.yml
+    with:
+      version: ${{ needs.verify.outputs.version }}
+      api_digest: ${{ needs.images.outputs.api_digest }}
+      web_digest: ${{ needs.images.outputs.web_digest }}
+
+  deploy:
+    needs: [verify, images, staging]
+    if: vars.DAAS_CD_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    environment: production # wymagany recenzent + regula tagow v* (ustawia wlasciciel, deploy/CD.md)
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    permissions: {}
+    steps:
+      - name: Wdrozenie przez SSH (wymuszona komenda na hoscie)
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ vars.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ vars.DEPLOY_USER }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          SHA: ${{ needs.verify.outputs.sha }}
+          API_DIGEST: ${{ needs.images.outputs.api_digest }}
+          WEB_DIGEST: ${{ needs.images.outputs.web_digest }}
+          ALLOW: ${{ inputs.allow_schema_change && '1' || '0' }}
+        run: |
+          set -euo pipefail
+          umask 077
+          key="$RUNNER_TEMP/deploy_key"
+          kh="$RUNNER_TEMP/known_hosts"
+          printf '%s\n' "$SSH_KEY" > "$key"
+          printf '%s\n' "$KNOWN_HOSTS" > "$kh"
+          [[ "$DEPLOY_HOST" =~ ^[A-Za-z0-9]([A-Za-z0-9.:-]*[A-Za-z0-9])?$ ]] || { echo "::error::DEPLOY_HOST niepoprawny"; exit 1; }
+          [[ "$DEPLOY_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || { echo "::error::DEPLOY_USER niepoprawny"; exit 1; }
+          remote() { # tylko komendy z whitelisty ssh-gate.sh; stderr SSH ukryty (zawiera adres hosta)
+            ssh -q -i "$key" -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$kh" \
+              -o ConnectTimeout=20 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 "$DEPLOY_USER@$DEPLOY_HOST" "$1" 2>/dev/null
+          }
+          # Bezwzgledny termin odpytywania: ~62 min od startu kroku (job ma timeout-minutes: 70, host czeka na wynik maks. 50 min).
+          deadline=$((SECONDS + 3720))
+          rc=0
+          out="$(remote "deploy $VERSION $API_DIGEST $WEB_DIGEST $SHA $ALLOW")" || rc=$?
+          if [ "$rc" = "255" ] || [ "$rc" = "3" ]; then
+            # 255: zerwane polaczenie SSH. 3: host przestal czekac (limit 50 min), a operacja nadal trwa. W obu przypadkach praca
+            # biegnie odlaczona od sesji, wiec odpytujemy `status` do wyniku albo do terminu.
+            echo "Polaczenie SSH zerwane albo operacja trwa dluzej niz limit czekania hosta; odpytuje stan operacji na hoscie."
+            while [ "$SECONDS" -lt "$deadline" ]; do
+              sleep 30
+              rc=0
+              out="$(remote status)" || rc=$?
+              if [ "$rc" != "255" ] && [ "$rc" != "3" ]; then break; fi
+            done
+            if [ "$rc" = "255" ] || [ "$rc" = "3" ]; then
+              echo "::error::Operacja trwa na hoscie, wynik nieznany po terminie odpytywania; sprawdz na hoscie: deploy.sh status (deploy/CD.md). To nie jest potwierdzony incydent."
+              exit 1
+            fi
+          fi
+          # Do publicznego logu trafia wylacznie linia o scislym formacie (host nie moze wstrzyknac polecen workflow);
+          # wersja w linii musi byc wersja tego wydania (nie przejdzie stara linia z cudzego przebiegu).
+          ver_re="${VERSION//./\\.}"
+          line="$(printf '%s\n' "$out" | grep -E "^DAAS_DEPLOY result=(ok|noop|rollback|blocked|failed) code=[0-9]{1,2} version=${ver_re} previous=[0-9.a-z]+ schema=(same|changed|unknown) duration=[0-9]+ maintenance=(on|off|unverified) edge=(ok|red)$" | tail -n 1 || true)"
+          if [ -z "$line" ]; then
+            echo "::error::Brak poprawnego podsumowania z hosta (kod SSH $rc)"
+            exit 1
+          fi
+          echo "$line"
+          { echo "### Wdrozenie produkcyjne"; echo; echo '```'; echo "$line"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          code="$(printf '%s\n' "$line" | sed -n 's/.* code=\([0-9]*\) .*/\1/p')"
+          edge="$(printf '%s\n' "$line" | sed -n 's/.* edge=\([a-z]*\)$/\1/p')"
+          case "$code" in
+            0) ;;
+            2) echo "::error::Kod 2: preflight lub brama nie przeszly, nic nie zmieniono (deploy/CD.md)"; exit 1 ;;
+            10) echo "::error::Kod 10: smoke nie przeszedl, rollback do poprzedniej wersji udany"; exit 1 ;;
+            11)
+              if [ "$edge" = "red" ]; then
+                echo "::error::Kod 11, edge=red: krawedz (Caddy/DNS/TLS) - wersja wdrozona, lokalny smoke zielony; sprawdz recznie smoke --public (deploy/CD.md)"
+              else
+                echo "::error::Kod 11: INCYDENT, rollback zabroniony (schemat, pierwsze wdrozenie albo powtorka); deploy/CD.md i RUNBOOK sekcja 9"
+              fi
+              exit 1 ;;
+            12) echo "::error::Kod 12: INCYDENT P1, rollback nieudany; deploy/CD.md i RUNBOOK sekcja 9"; exit 1 ;;
+            *) echo "::error::Nieoczekiwany kod wyjscia"; exit 1 ;;
+          esac
+      - name: Kontrola z zewnatrz (DNS, TLS, wersja)
+        env:
+          PUBLIC_URL: ${{ vars.DAAS_PUBLIC_URL }}
+          VERSION: ${{ needs.verify.outputs.version }}
+        run: |
+          set -euo pipefail
+          [[ "$PUBLIC_URL" =~ ^https://[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || { echo "::error::DAAS_PUBLIC_URL niepoprawny"; exit 1; }
+          for _ in $(seq 1 10); do
+            got="$(curl -fsS --max-time 15 "$PUBLIC_URL/api/v1/health" 2>/dev/null | sed -n 's/.*"version" *: *"\([^"]*\)".*/\1/p' | head -n 1 || true)"
+            [ "$got" = "$VERSION" ] && { echo "Z zewnatrz widac wersje $VERSION."; exit 0; }
+            sleep 15
+          done
+          echo "::error::Z zewnatrz nie widac wersji $VERSION (DNS, TLS albo proxy)"
+          exit 1
+      - name: Sprzatanie klucza
+        if: always()
+        run: rm -f "$RUNNER_TEMP/deploy_key" "$RUNNER_TEMP/known_hosts"
+
+  release-notes:
+    needs: [verify, images, staging, deploy]
+    # deploy: success albo skipped (wlacznik CD wylaczony) pozwala wydac Release; failure (kod 10/11/12) wstrzymuje publikacje
+    if: ${{ !cancelled() && needs.staging.result == 'success' && needs.deploy.result != 'failure' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write # jedyny job z zapisem do repozytorium (GitHub Release)
+    steps:
+      - name: GitHub Release z digestami
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+          VERSION: ${{ needs.verify.outputs.version }}
+          SHA: ${{ needs.verify.outputs.sha }}
+          NEW_HEAD: ${{ needs.verify.outputs.new_head }}
+          PREV_HEAD: ${{ needs.verify.outputs.prev_head }}
+          PREV_TAG: ${{ needs.verify.outputs.prev_tag }}
+          API_DIGEST: ${{ needs.images.outputs.api_digest }}
+          WEB_DIGEST: ${{ needs.images.outputs.web_digest }}
+          DEPLOY_RESULT: ${{ needs.deploy.result }}
+          OWNER: ${{ github.repository_owner }}
+          REPO_FULL: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          owner="${OWNER,,}"
+          if gh release view "$TAG" --repo "$REPO_FULL" >/dev/null 2>&1; then
+            echo "Release $TAG juz istnieje: nic nie zmieniam."
+            exit 0
+          fi
+          notes="$RUNNER_TEMP/notes.md"
+          {
+            echo "## DaaS Engine $VERSION"
+            echo
+            echo "Commit: \`$SHA\`"
+            echo
+            echo "schema: $PREV_HEAD -> $NEW_HEAD (poprzednie wydanie: $PREV_TAG)"
+            echo
+            echo "deploy: $DEPLOY_RESULT"
+            echo
+            echo "(success = wdrozone na produkcje w tym przebiegu; skipped = wlacznik CD wylaczony, wydanie tylko opublikowane)."
+            echo
+            echo "### Obrazy (GHCR, tag niezmienny, bez latest)"
+            echo
+            echo "| Obraz | Digest |"
+            echo "|---|---|"
+            echo "| \`ghcr.io/$owner/daas-engine-api:$VERSION\` | \`$API_DIGEST\` |"
+            echo "| \`ghcr.io/$owner/daas-engine-web:$VERSION\` | \`$WEB_DIGEST\` |"
+            echo
+            echo "### Selfhost (ten sam obraz api, tryb \`DAAS_MODE=selfhost\`)"
+            echo
+            echo '```'
+            echo "docker pull ghcr.io/$owner/daas-engine-api:$VERSION@$API_DIGEST"
+            echo '```'
+            echo
+            echo "Pobieraj po digescie i porownaj go z tabela powyzej. Uruchomienie: korzeniowy \`docker-compose.yml\` i README."
+            echo
+            echo "Zmiany: sekcja tego wydania w \`CHANGELOG.md\`."
+          } > "$notes"
+          gh release create "$TAG" --repo "$REPO_FULL" --verify-tag --title "$TAG" --notes-file "$notes"

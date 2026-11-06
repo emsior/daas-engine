@@ -1,0 +1,71 @@
+# Testy promtool (promtool test rules). Uruchamiane w CI przez kontener obrazu prometheus:
+#   docker run --rm -v "$PWD/deploy/observability:/work:ro" -w /work/tests --entrypoint promtool <obraz prometheus> test rules <plik>
+# Plik jest WYGENEROWANY z rules/alerts.yml (adnotacje i etykiety musza zgadzac sie co do znaku): zmieniasz regule ->
+# zmien test. Odstep probek 1 min; liczby probek w "axN" to N+1 wartosci. Scenariusze (a)-(j): deploy/ALERTS.md / raport SRE S2.
+# (a) up=0 przez 6-8 min -> FastBurn; 2 min -> nie. SlowBurn: 14 min przerwy -> tak, 5 min -> nie.
+rule_files:
+- ../rules/recording.yml
+- ../rules/alerts.yml
+evaluation_interval: 1m
+tests:
+- interval: 1m
+  input_series:
+  - series: up{job="api",instance="api:8000"}
+    values: 1x119 0x7
+  alert_rule_test:
+  - eval_time: 100m
+    alertname: SloAvailabilityFastBurn
+    exp_alerts: []
+  - eval_time: 126m
+    alertname: SloAvailabilityFastBurn
+    exp_alerts:
+    - exp_labels:
+        severity: page
+        service: api
+      exp_annotations:
+        summary: Budzet SLO-1 (dostepnosc) spala sie 14 razy szybciej niz rownomiernie
+        description: Co najmniej 7,2 % bledow dostepnosci w ostatniej godzinie i w ostatnich 5 minutach (up lub 5xx z /ready). Gdy monitor zewnetrzny jest zielony, sprawdz token scrape (401), nie usluge.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#sloavailabilityfastburn
+- interval: 1m
+  input_series:
+  - series: up{job="api",instance="api:8000"}
+    values: 1x119 0 0 1x20
+  alert_rule_test:
+  - eval_time: 121m
+    alertname: SloAvailabilityFastBurn
+    exp_alerts: []
+  - eval_time: 125m
+    alertname: SloAvailabilityFastBurn
+    exp_alerts: []
+  - eval_time: 135m
+    alertname: SloAvailabilityFastBurn
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: up{job="api",instance="api:8000"}
+    values: 1x399 0x13
+  alert_rule_test:
+  - eval_time: 300m
+    alertname: SloAvailabilitySlowBurn
+    exp_alerts: []
+  - eval_time: 412m
+    alertname: SloAvailabilitySlowBurn
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: api
+      exp_annotations:
+        summary: Budzet SLO-1 (dostepnosc) spala sie 6 razy szybciej niz rownomiernie
+        description: Co najmniej 3 % bledow dostepnosci w ostatnich 6 godzinach i w ostatnich 30 minutach. Szukaj wzorca czasowego (kopia zimna, restarty).
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#sloavailabilityslowburn
+- interval: 1m
+  input_series:
+  - series: up{job="api",instance="api:8000"}
+    values: 1x399 0x4 1x30
+  alert_rule_test:
+  - eval_time: 410m
+    alertname: SloAvailabilitySlowBurn
+    exp_alerts: []
+  - eval_time: 425m
+    alertname: SloAvailabilitySlowBurn
+    exp_alerts: []

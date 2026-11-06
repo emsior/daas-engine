@@ -1,0 +1,142 @@
+# Testy promtool (promtool test rules). Uruchamiane w CI przez kontener obrazu prometheus:
+#   docker run --rm -v "$PWD/deploy/observability:/work:ro" -w /work/tests --entrypoint promtool <obraz prometheus> test rules <plik>
+# Plik jest WYGENEROWANY z rules/alerts.yml (adnotacje i etykiety musza zgadzac sie co do znaku): zmieniasz regule ->
+# zmien test. Odstep probek 1 min; liczby probek w "axN" to N+1 wartosci. Scenariusze (a)-(j): deploy/ALERTS.md / raport SRE S2.
+# (h) DiskSpaceLow (prog 81 %, brak alertu przy 75 %, prognoza); (i) ApiMemoryPressure (OOM, pamiec hosta, L-7).
+rule_files:
+- ../rules/recording.yml
+- ../rules/alerts.yml
+evaluation_interval: 1m
+tests:
+- interval: 1m
+  input_series:
+  - series: node_filesystem_size_bytes{mountpoint="/",fstype="ext4",device="/dev/sda1"}
+    values: 10000x40
+  - series: node_filesystem_avail_bytes{mountpoint="/",fstype="ext4",device="/dev/sda1"}
+    values: 1900x40
+  alert_rule_test:
+  - eval_time: 10m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 16m
+    alertname: DiskSpaceLow
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: host
+        reason: used
+      exp_annotations:
+        summary: Partycja / jest zajeta w ponad 80 %
+        description: Zajetosc partycji / przekracza 80 % od 15 minut. Pelny dysk zatrzyma api, kopie i wdrozenia.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#diskspacelow
+- interval: 1m
+  input_series:
+  - series: node_filesystem_size_bytes{mountpoint="/",fstype="ext4",device="/dev/sda1"}
+    values: 10000x40
+  - series: node_filesystem_avail_bytes{mountpoint="/",fstype="ext4",device="/dev/sda1"}
+    values: 2500x40
+  alert_rule_test:
+  - eval_time: 30m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: node_filesystem_size_bytes{mountpoint="/",fstype="ext4",device="/dev/sda1"}
+    values: 10000x299
+  - series: node_filesystem_avail_bytes{mountpoint="/",fstype="ext4",device="/dev/sda1"}
+    values: 5000-5x299
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: DiskSpaceLow
+    exp_alerts: []
+  - eval_time: 100m
+    alertname: DiskSpaceLow
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: host
+        reason: forecast
+      exp_annotations:
+        summary: Partycja / zapelni sie w ciagu doby wg trendu z 6 godzin
+        description: Prognoza liniowa z 6 godzin wskazuje brak wolnego miejsca na / w ciagu 24 godzin.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#diskspacelow
+- interval: 1m
+  input_series:
+  - series: node_vmstat_oom_kill
+    values: 0x9 1x20
+  alert_rule_test:
+  - eval_time: 8m
+    alertname: ApiMemoryPressure
+    exp_alerts: []
+  - eval_time: 12m
+    alertname: ApiMemoryPressure
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: api
+        source: interim
+        reason: oom_kill
+      exp_annotations:
+        summary: Jadro zabilo proces z powodu braku pamieci (OOM)
+        description: Licznik oom_kill hosta wzrosl w ostatnich 15 minutach (zwykle api przy duzym imporcie XLSX albo brak pamieci hosta).
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#apimemorypressure
+- interval: 1m
+  input_series:
+  - series: node_vmstat_oom_kill
+    values: 3x30
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: ApiMemoryPressure
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: node_memory_MemTotal_bytes
+    values: 4000000000x30
+  - series: node_memory_MemAvailable_bytes
+    values: 300000000x30
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ApiMemoryPressure
+    exp_alerts: []
+  - eval_time: 11m
+    alertname: ApiMemoryPressure
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: api
+        source: interim
+        reason: host_low_memory
+      exp_annotations:
+        summary: Hostowi zostalo mniej niz 10 % dostepnej pamieci
+        description: MemAvailable jest ponizej 10 % pamieci hosta od 10 minut.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#apimemorypressure
+- interval: 1m
+  input_series:
+  - series: node_memory_MemTotal_bytes
+    values: 4000000000x30
+  - series: node_memory_MemAvailable_bytes
+    values: 800000000x30
+  alert_rule_test:
+  - eval_time: 20m
+    alertname: ApiMemoryPressure
+    exp_alerts: []
+- interval: 1m
+  input_series:
+  - series: process_resident_memory_bytes{job="api"}
+    values: 1500000000x30
+  alert_rule_test:
+  - eval_time: 5m
+    alertname: ApiMemoryPressure
+    exp_alerts: []
+  - eval_time: 11m
+    alertname: ApiMemoryPressure
+    exp_alerts:
+    - exp_labels:
+        severity: ticket
+        service: api
+        source: l7
+        reason: rss
+      exp_annotations:
+        summary: Proces api uzywa ponad 85 % limitu pamieci
+        description: RSS procesu api przekracza 1,31 GiB (limit kontenera 1,5 GiB) od 10 minut.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#apimemorypressure

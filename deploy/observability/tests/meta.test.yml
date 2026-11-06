@@ -1,0 +1,35 @@
+# Testy promtool (promtool test rules). Uruchamiane w CI przez kontener obrazu prometheus:
+#   docker run --rm -v "$PWD/deploy/observability:/work:ro" -w /work/tests --entrypoint promtool <obraz prometheus> test rules <plik>
+# Plik jest WYGENEROWANY z rules/alerts.yml (adnotacje i etykiety musza zgadzac sie co do znaku): zmieniasz regule ->
+# zmien test. Odstep probek 1 min; liczby probek w "axN" to N+1 wartosci. Scenariusze (a)-(j): deploy/ALERTS.md / raport SRE S2.
+# (j) Watchdog plonie zawsze, bez zadnych danych wejsciowych.
+rule_files:
+- ../rules/recording.yml
+- ../rules/alerts.yml
+evaluation_interval: 1m
+tests:
+- interval: 1m
+  input_series:
+  - series: up{job="api",instance="api:8000"}
+    values: 1x10
+  alert_rule_test:
+  - eval_time: 0m
+    alertname: Watchdog
+    exp_alerts:
+    - exp_labels:
+        severity: none
+        service: meta
+      exp_annotations:
+        summary: 'Watchdog: stos alertow dziala (alert ma plonac zawsze)'
+        description: Regula meta, wysylana na heartbeat. Cisza po stronie uslugi heartbeat oznacza awarie hosta, Prometheusa lub Alertmanagera.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#watchdog
+  - eval_time: 5m
+    alertname: Watchdog
+    exp_alerts:
+    - exp_labels:
+        severity: none
+        service: meta
+      exp_annotations:
+        summary: 'Watchdog: stos alertow dziala (alert ma plonac zawsze)'
+        description: Regula meta, wysylana na heartbeat. Cisza po stronie uslugi heartbeat oznacza awarie hosta, Prometheusa lub Alertmanagera.
+        runbook_url: https://github.com/emsior/daas-engine/blob/main/deploy/ALERTS.md#watchdog

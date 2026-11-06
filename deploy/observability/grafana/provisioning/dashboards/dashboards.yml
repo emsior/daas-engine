@@ -1,0 +1,14 @@
+# Dostawca dashboardow: pliki JSON z /etc/grafana/dashboards (montowane :ro z observability/grafana/dashboards).
+# Zmiany w interfejsie nie sa zapisywane: edytuj plik JSON w repozytorium.
+apiVersion: 1
+providers:
+  - name: daas
+    orgId: 1
+    folder: DaaS Engine
+    type: file
+    disableDeletion: true
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/dashboards
+      foldersFromFilesStructure: false
