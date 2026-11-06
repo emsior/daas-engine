@@ -47,6 +47,10 @@ WORK="$(mktemp -d)"
 STACK_UP=0
 
 step() { printf '\n== %s\n' "$*"; }
+smoke_staging() { # smoke_staging ARGUMENTY_SMOKE... — przy porazce wypisuje caly wynik smoke.sh (FAIL z kodem HTTP)
+  local out
+  if ! out="$(cd "$DEPLOY" && ./smoke.sh "$@" 2>&1)"; then printf '%s\n' "$out" >&2; return 1; fi
+}
 fail() {
   printf 'STAGING FAIL: %s\n' "$*" >&2
   exit 1
@@ -141,7 +145,7 @@ printf '#!/usr/bin/env bash\ntest -s "$1"\n' >"$DEPLOY/cd/offsite-backup.hook" #
 chmod +x "$DEPLOY/cd/offsite-backup.hook"
 STACK_UP=1
 (cd "$DEPLOY" && docker compose --profile edge up -d --no-build --pull never)
-(cd "$DEPLOY" && ./smoke.sh --wait 120 --expect-version "$PREV_VERSION" >/dev/null)
+smoke_staging --wait 120 --expect-version "$PREV_VERSION"
 echo "ok    N-1 stoi i smoke lokalny zielony"
 (cd "$DEPLOY" && docker compose exec -T api python -m app.cli create-org --name "Staging Org" --owner-email owner@example.test >/dev/null)
 echo "ok    create-org (dane syntetyczne; klucz API nie jest wypisywany)"
@@ -170,7 +174,7 @@ expect "result" "$(field result)" ok
 expect "previous" "$(field previous)" "$PREV_VERSION"
 expect "schema" "$(field schema)" same
 expect "edge" "$(field edge)" ok
-(cd "$DEPLOY" && ./smoke.sh --wait 30 --expect-version "$VERSION" --public https://localhost >/dev/null)
+smoke_staging --wait 30 --expect-version "$VERSION" --public https://localhost
 echo "ok    smoke lokalny i przez Caddy (https://localhost, CURL_CA_BUNDLE)"
 run_deploy deploy "$VERSION" "$API_DIGEST" "$WEB_DIGEST" "$(git -C "$ROOT" rev-parse HEAD)" 0
 expect "idempotencja: result" "$(field result)" noop
@@ -182,7 +186,7 @@ BACKUP_OUT="$(cd "$DEPLOY" && ./backup.sh)"
 ARCHIVE="$(printf '%s\n' "$BACKUP_OUT" | sed -n 's/^BACKUP_ARCHIVE=//p' | tail -n 1)"
 [ -s "$ARCHIVE" ] || fail "backup.sh nie utworzyl archiwum"
 (cd "$(dirname "$ARCHIVE")" && sha256sum -c "$(basename "$ARCHIVE").sha256")
-(cd "$DEPLOY" && ./smoke.sh --wait 90 --expect-version "$VERSION" >/dev/null)
+smoke_staging --wait 90 --expect-version "$VERSION"
 echo "ok    kopia zimna, suma SHA-256 zgodna, api wstalo ponownie"
 
 # ---------------------------------------------------------------- 4. tryb serwisowy
