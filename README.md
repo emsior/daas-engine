@@ -1,7 +1,5 @@
 # DaaS Engine — automated weekly reports from any client dataset
 
-Live: https://prochpc.pl
-
 Source-agnostic **Data-as-a-Service** engine. A client sends a CSV or XLSX export; the engine detects the column mapping, loads it into DuckDB, computes KPIs and anomalies, and returns a ready-to-send HTML report with week-over-week deltas and a plain-language summary.
 
 **Version 2.0** adds a hosted mode with a web cockpit next to the self-hosted one. **Stack:** Python 3.11+ (CI: 3.11, 3.12, 3.13) · FastAPI · DuckDB · Next.js · Docker
