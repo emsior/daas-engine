@@ -1,0 +1,13 @@
+# Zrodlo danych Grafany: Prometheus z tej samej sieci compose (dostep tylko przez proxy Grafany, bez CORS z przegladarki).
+apiVersion: 1
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+    jsonData:
+      httpMethod: POST
+      timeInterval: 30s

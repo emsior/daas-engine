@@ -3,3 +3,11 @@
 .env.*
 !.env.example
 backups/
+
+# CD (deploy/cd): stan i dzienniki wdrozen oraz hak kopii poza serwerem sa lokalne dla hosta
+cd/state/
+cd/log/
+cd/offsite-backup.hook
+
+# Obserwowalnosc: sekrety (poza *.example, patrz observability/secrets/.gitignore) i lokalna konfiguracja Alertmanagera
+observability/local/

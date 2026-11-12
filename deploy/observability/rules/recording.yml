@@ -1,0 +1,75 @@
+# Reguly nagrywajace: SLO-1 (przyblizenie dostepnosci z Prometheusa) i wskazniki do dashboardu.
+# Wyrazenie dostepnosci wg deploy/ALERTS.md (A1): wiekszy z dwoch bledow w oknie W
+#   - 1 - avg(up{job="api"}): scrape /metrics nie dziala,
+#   - udzial odpowiedzi 5xx wsrod zapytan do /ready lub /api/v1/ready.
+# Etykiete `src` dodajemy tylko po to, by operator `or` nie odrzucil drugiej galezi (obie maja pusty zestaw etykiet).
+# Zrodlem prawdy dla SLO-1 jest monitor zewnetrzny (deploy/SLO.md); to przyblizenie sluzy alertom i kokpitowi.
+groups:
+  - name: daas_slo1
+    interval: 30s
+    rules:
+      - record: daas:slo1_error_ratio:5m
+        expr: |
+          max(
+              label_replace(1 - avg(avg_over_time(up{job="api"}[5m])), "src", "up", "", "")
+            or
+              label_replace(
+                  (sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready",status=~"5.."}[5m])) or vector(0))
+                / sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready"}[5m])),
+                "src", "ready", "", "")
+          )
+      - record: daas:slo1_error_ratio:30m
+        expr: |
+          max(
+              label_replace(1 - avg(avg_over_time(up{job="api"}[30m])), "src", "up", "", "")
+            or
+              label_replace(
+                  (sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready",status=~"5.."}[30m])) or vector(0))
+                / sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready"}[30m])),
+                "src", "ready", "", "")
+          )
+      - record: daas:slo1_error_ratio:1h
+        expr: |
+          max(
+              label_replace(1 - avg(avg_over_time(up{job="api"}[1h])), "src", "up", "", "")
+            or
+              label_replace(
+                  (sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready",status=~"5.."}[1h])) or vector(0))
+                / sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready"}[1h])),
+                "src", "ready", "", "")
+          )
+      - record: daas:slo1_error_ratio:6h
+        expr: |
+          max(
+              label_replace(1 - avg(avg_over_time(up{job="api"}[6h])), "src", "up", "", "")
+            or
+              label_replace(
+                  (sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready",status=~"5.."}[6h])) or vector(0))
+                / sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready"}[6h])),
+                "src", "ready", "", "")
+          )
+
+  # Okno 30 dni (dostepnosc i pozostaly budzet na kokpicie): rzadziej, bo okno jest dlugie. Wymaga retencji >= 35 dni.
+  # W pierwszych 30 dniach po wlaczeniu liczy sie z tego, co jest w bazie (krotsze okno).
+  - name: daas_slo1_30d
+    interval: 5m
+    rules:
+      - record: daas:slo1_error_ratio:30d
+        expr: |
+          max(
+              label_replace(1 - avg(avg_over_time(up{job="api"}[30d])), "src", "up", "", "")
+            or
+              label_replace(
+                  (sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready",status=~"5.."}[30d])) or vector(0))
+                / sum(increase(daas_http_requests_total{route=~"(/api/v1)?/ready"}[30d])),
+                "src", "ready", "", "")
+          )
+
+  # Zlote sygnaly API do dashboardu. Etykieta `route` to szablon trasy (niska kardynalnosc, bez identyfikatorow).
+  - name: daas_http
+    interval: 30s
+    rules:
+      - record: daas:http_requests:rate5m
+        expr: sum by (route) (rate(daas_http_requests_total[5m]))
+      - record: daas:http_request_duration_seconds:p95_5m
+        expr: histogram_quantile(0.95, sum by (route, le) (rate(daas_http_request_duration_seconds_bucket[5m])))

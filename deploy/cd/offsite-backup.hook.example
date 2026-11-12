@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+# PRZYKLAD haka kopii poza serwerem. Skopiuj jako deploy/cd/offsite-backup.hook (ignorowany przez git, lokalny dla hosta),
+# nadaj chmod 700 i dostosuj do swojego magazynu. Wolany przez deploy.sh (przed wdrozeniem) i nightly-backup.sh (noca)
+# z JEDNYM argumentem: sciezka swiezo zrobionego archiwum .tar.gz. Kod != 0 = kopia nieudana (przy allow_schema_change=1
+# przerywa wdrozenie kodem 2).
+#
+# Kolejnosc sukcesu (RUNBOOK §4.3), znacznik i heartbeat DOPIERO na koncu lancucha:
+#   restic backup -> restic forget --prune -> sha256sum -c -> backup-marker.sh offsite -> heartbeat
+#
+# Zero adresow i hasel w tym pliku: dane magazynu (RESTIC_REPOSITORY, RESTIC_PASSWORD_FILE, dane dostepowe) trzymasz w
+# pliku srodowiska 0600 poza repozytorium, a adres heartbeat kopii w osobnym pliku 0600 (DAAS_HEARTBEAT_URL_FILE).
+set -euo pipefail
+
+archive="${1:?uzycie: $0 SCIEZKA_ARCHIWUM}"
+deploy_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# shellcheck source=/dev/null
+. "$HOME/.config/daas-restic.env" # RESTIC_REPOSITORY, RESTIC_PASSWORD_FILE, ... (plik 0600, poza repo)
+
+restic backup --quiet "$archive" "${archive}.sha256"
+restic forget --quiet --prune --keep-daily 14 --keep-weekly 8 --keep-monthly 6 # dopasuj do okresu z umowy (RUNBOOK §0)
+
+# Suma kontrolna archiwum (to, co zostalo wyslane, ma byc tym, co zrobil backup.sh)
+(cd "$(dirname "$archive")" && sha256sum -c --status "$(basename "$archive").sha256")
+
+# Znacznik L-8 dla SLO-4: tylko gdy dziala nakladka obserwowalnosci i dopiero po calym lancuchu sukcesu.
+marker="$deploy_dir/observability/textfile/backup-marker.sh"
+if grep -qs '^COMPOSE_FILE=.*compose\.observability\.yml' "$deploy_dir/.env" && [ -x "$marker" ]; then
+  "$marker" offsite
+fi
+
+# Heartbeat (dead man's switch) kopii: adres z pliku uzytkownika deploy (observability/secrets/heartbeat_url nalezy do UID
+# Alertmanagera i jest dla deploy nieczytelny). Plik MUSI miec prawa 0600 i nalezec do biezacego uzytkownika, a adres musi byc
+# prostym https://... (bez cudzyslowow, spacji i znakow specjalnych). Adres trafia do curla przez stdin (`-K -`), wiec nie
+# widac go w argumentach procesow, i bez cudzyslowow w pliku konfiguracyjnym curla, wiec nic nie da sie w nim wstrzyknac.
+hb="${DAAS_HEARTBEAT_URL_FILE:-$HOME/.config/daas-heartbeat-url}"
+if [ -e "$hb" ]; then
+  if [ "$(stat -c %a "$hb")" != "600" ] || [ "$(stat -c %u "$hb")" != "$(id -u)" ]; then
+    echo "plik z adresem heartbeat musi miec prawa 600 i nalezec do biezacego uzytkownika: $hb" >&2
+    exit 1
+  fi
+  hb_url="$(head -n 1 "$hb")"
+  if ! [[ "$hb_url" =~ ^https://[A-Za-z0-9._/-]+$ ]]; then
+    echo "adres heartbeat w pliku ma niepoprawny format (oczekiwano https://[A-Za-z0-9._/-]+)" >&2
+    exit 1
+  fi
+  printf 'url = %s\n' "$hb_url" | curl -fsS -m 10 -o /dev/null -K -
+fi
