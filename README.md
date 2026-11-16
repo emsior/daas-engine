@@ -1,8 +1,18 @@
-# DaaS Engine — automated weekly reports from any client dataset
+# DaaS Engine — automated weekly reports from a sales export
 
-Source-agnostic **Data-as-a-Service** engine. A client sends a CSV or XLSX export; the engine detects the column mapping, loads it into DuckDB, computes KPIs and anomalies, and returns a ready-to-send HTML report with week-over-week deltas and a plain-language summary.
+[![CI](https://github.com/emsior/daas-engine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/emsior/daas-engine/actions/workflows/ci.yml)
+[![OPSEC](https://github.com/emsior/daas-engine/actions/workflows/opsec.yml/badge.svg?branch=main)](https://github.com/emsior/daas-engine/actions/workflows/opsec.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Version 2.0** adds a hosted mode with a web cockpit next to the self-hosted one. **Stack:** Python 3.11+ (CI: 3.11, 3.12, 3.13) · FastAPI · DuckDB · Next.js · Docker
+Weekly KPI reports from CSV/XLSX sales exports. FastAPI + DuckDB engine, Next.js cockpit, REST API and built-in MCP server (OAuth 2.1) for AI assistants.
+
+A client sends a CSV or XLSX export; the engine maps the columns of a sales export, loads it into DuckDB, computes KPIs and anomalies, and returns a ready-to-send HTML report with week-over-week deltas and a plain-language summary.
+
+**Status:** v2.0 on main, release pending (the only tag is v1.0.0). Hosted mode (v2.0 on main): web cockpit, REST API, e-mail magic-link sign-in, organization roles, weekly export reminders with auto-run on upload, built-in MCP server with OAuth 2.1. The cockpit, sign-in, roles, reminders and OAuth need `DAAS_MODE=cloud`; the default mode is `selfhost`. **Stack:** Python 3.11+ (CI: 3.11, 3.12, 3.13) · FastAPI · DuckDB · Next.js · Docker
+
+Built and maintained by Proch PC with AI coding agents · [MIT](LICENSE)
+
+▶ [Demo video](docs/daas_demo.mp4) (v0.3 flow, 50 s, no sound).
 
 *[Polski README →](README.pl.md)*
 
@@ -12,9 +22,10 @@ Source-agnostic **Data-as-a-Service** engine. A client sends a CSV or XLSX expor
 
 ## What you get
 
-- **A weekly report from your own file.** Revenue, cost, profit, margin, average order value, loss-making orders, anomalies, week-over-week deltas and a "practical takeaways" section. Numbers come only from your file. Output: HTML (print to PDF), Markdown and JSON.
+- **A weekly report from your own file.** Revenue, cost, profit, margin, average order value, loss-making orders, anomalies, week-over-week deltas and a "practical takeaways" section. Numbers come only from your file. Output: HTML (print to PDF), Markdown and JSON. Report language: for an organization with locale `en` only the report title is in English and data tables show raw field names (`week_start`, `margin_pct`) as column headers; the section headings, the verdict, the summary-metrics table, the "practical takeaways", the template summary and the HTML header and footer stay in Polish. The `uksc_evidence` report is Polish only.
 - **A cockpit** (cloud mode). Sign in with a link sent by e-mail (no passwords), drop a file, watch the progress, open the report, keep an archive. A "check yourself" box computes the SHA-256 of a downloaded report in your browser; the file is not uploaded.
 - **An API** with a key per organization, scopes, live progress (Server-Sent Events) and signed webhooks. Examples: [`docs/API.md`](docs/API.md).
+- **Agent access (MCP).** MCP clients such as Claude and ChatGPT can connect via OAuth 2.1 (cloud mode) or with an API key and query the reports. See [Agent access (MCP)](#agent-access-mcp).
 - **A collector of artifacts and a status report.** A read-only PowerShell collector (`tools/uksc-collector.ps1`) gathers technical settings of a Windows workstation into a hashed JSON package; the report lists control, requirement (UKSC/NIS2), status and artifact hash.
 - **Your data stays yours.** Each organization has its own data directory and its own DuckDB file; uploads expire after a retention period you set; nothing is sent to an AI provider unless you opt in.
 
@@ -26,13 +37,13 @@ Source-agnostic **Data-as-a-Service** engine. A client sends a CSV or XLSX expor
 | Organizations | one (`default`) | many, with members and roles |
 | Sign-in | one instance key (`X-API-Key`) | e-mail link for people, API keys for machines |
 | Run | `POST /run` (synchronous) or API v1 jobs | API v1 jobs (asynchronous, SSE progress) |
-| Cockpit | optional | included (`web/`) |
+| Cockpit | none (the cockpit needs `cloud`) | included (`web/`) |
 | Start | `docker compose up` at the repository root, or `pip` | `deploy/compose.yml` on a VPS |
 
 Design constraints that shaped it:
 
 - **A missing API key is not an error.** Every external source degrades to a fixture instead of failing. The pipeline always produces a report; the reason for any degradation is returned in `source_detail`.
-- **Source-agnostic ingestion.** Column names are detected, not configured: `Wartość brutto`, `gross_value` and `Revenue` all map to `revenue`.
+- **Column mapping for sales exports.** The mapper maps the columns of a sales export to one order schema using Polish and English header aliases, so headers are detected, not configured: `Wartość brutto`, `Kwota` and `Revenue` all map to `revenue`.
 - **The report is the product.** Output is a self-contained HTML file a client can open, not a dashboard they have to learn.
 
 ---
@@ -48,9 +59,20 @@ docker compose exec api python -m app.cli create-org --name "My Company" --owner
 ./smoke.sh --public https://reports.example.com --wait 90
 ```
 
-Sign in at `https://reports.example.com/login` with the e-mail link (set `DAAS_EMAIL_BACKEND=smtp` in `.env`; with the default `console` the link appears in `docker compose logs api`). Install, update, rollback, backups and sharing the VPS with another application: [`deploy/README.md`](deploy/README.md).
+Sign in at `https://reports.example.com/login` with the e-mail link (set `DAAS_EMAIL_BACKEND=smtp` in `.env`; with the generated `console` backend the link is written only to a file in `runtime/outbox/` inside the `runtime` volume, not to the log). Install, update, rollback, backups and sharing the VPS with another application: [`deploy/README.md`](deploy/README.md).
 
-Local trial without a domain or TLS: put these lines in `deploy/.env`, then `docker compose up -d --build` and open http://127.0.0.1:3000:
+### Try cloud mode locally
+
+Without `--domain`, `gen-env.sh` writes `deploy/.env` for `localhost` (console mail, same origin through Caddy). Ports 80 and 443 must be free.
+
+```bash
+cd deploy && ./gen-env.sh && docker compose --profile edge up -d --build
+docker compose exec api python -m app.cli create-org --name "Demo" --owner-email owner@example.com
+```
+
+Open https://localhost/login (the certificate comes from Caddy's local CA, so the browser shows a warning) and request a link for the owner e-mail. The link is in a JSON file in the outbox: `docker compose exec api sh -c 'cat /data/runtime/outbox/*.json'` (field `link`). `create-org` also prints a one-time API key for the API and MCP.
+
+Without Caddy and TLS: after `./gen-env.sh`, set these lines in `deploy/.env` (change the two that exist, add the third), run `docker compose up -d --build` (no `edge` profile) and open http://127.0.0.1:3000:
 
 ```
 NEXT_PUBLIC_API_ORIGIN=http://127.0.0.1:8000
@@ -143,7 +165,7 @@ curl -s -H "X-API-Key: $DAAS_API_KEY" "localhost:8000/reports/run/<run_id>?fmt=h
 
 ## Agent access (MCP)
 
-AI assistants (Claude, ChatGPT, Codex, Gemini) can use DaaS Engine as a tool: the API has a built-in MCP server at `POST /mcp` (Streamable HTTP, stateless, JSON). Connect it with an organization API key in `Authorization: Bearer <key>` and ask for the flow in plain language; 13 tools cover upload (CSV text or an XLSX file), runs (optionally for a chosen period), reports, hash verification, artifact status and usage, always inside the key's organization; reports are also available as MCP resources, and ChatGPT or Claude can connect with OAuth 2.1 instead of a key.
+MCP clients (for example Claude, ChatGPT, Codex or Gemini) can use DaaS Engine as a tool: the API has a built-in MCP server at `POST /mcp` (Streamable HTTP, stateless, JSON). Connect it with an organization API key in `Authorization: Bearer <key>` and ask for the flow in plain language; 13 tools cover upload (CSV text or an XLSX file), runs (optionally for a chosen period), reports, hash verification, artifact status and usage, always inside the key's organization; reports are also available as MCP resources, and in cloud mode MCP clients such as Claude and ChatGPT can connect via OAuth 2.1 instead of a key.
 
 ```bash
 claude mcp add --transport http daas https://reports.example.com/mcp --header "Authorization: Bearer $KEY"
@@ -222,7 +244,9 @@ Network failures (timeouts, `401`, upstream schema changes) trigger the same fal
 | [`docs/SECURITY.md`](docs/SECURITY.md) | threat model, controls, known limitations, how to report |
 | [`docs/DPA_v1_PL.md`](docs/DPA_v1_PL.md) | data processing agreement, version 1 (draft awaiting legal review) |
 | [`docs/pilot/`](docs/pilot) | pilot offer, input requirements, onboarding, demo script (Polish) |
-| [`CHANGELOG.md`](CHANGELOG.md), [`VALIDATION.md`](VALIDATION.md) | history, manual validation checklist |
+| [`CHANGELOG.md`](CHANGELOG.md) | history of changes |
+| [`docs/PROCESS.md`](docs/PROCESS.md) | how the project is built with AI coding agents |
+| [`docs/history/VALIDATION.md`](docs/history/VALIDATION.md) | historical manual validation checklist from v0.x (September 2026, Polish) |
 
 ---
 
@@ -233,7 +257,7 @@ pytest                                  # backend, offline
 cd web && npm test && npm run e2e       # cockpit: unit tests; e2e needs the API in cloud mode (see web/README.md)
 ```
 
-CI runs on every push (`.github/workflows/ci.yml`): backend tests on Python 3.11, 3.12 and 3.13, control-plane tests on a real PostgreSQL (row locks, migrations), security scans (gitleaks, semgrep, zizmor, pip-audit), cockpit lint/typecheck/tests/build, Playwright end-to-end tests in Chromium, Firefox and WebKit, a Lighthouse gate and Docker image builds with a container smoke test.
+CI runs on every pull request and every push to main ([Actions](https://github.com/emsior/daas-engine/actions)): Python 3.11–3.13, PostgreSQL, Playwright in three engines (Chromium, Firefox, WebKit), Docker build and security scans. In detail (`.github/workflows/ci.yml`): backend tests on Python 3.11, 3.12 and 3.13, control-plane tests on a real PostgreSQL (row locks, migrations), security scans (gitleaks, semgrep, zizmor, pip-audit), cockpit lint/typecheck/tests/build, Playwright end-to-end tests in Chromium, Firefox and WebKit, a Lighthouse gate and Docker image builds with a container smoke test. Optional pre-commit hooks (gitleaks, `.pre-commit-config.yaml`) and CI checks (gitleaks in the `security` job, the `OPSEC` workflow) block leaks of secrets and personal data.
 
 ---
 
