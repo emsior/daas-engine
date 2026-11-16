@@ -257,7 +257,7 @@ pytest                                  # backend, offline
 cd web && npm test && npm run e2e       # cockpit: unit tests; e2e needs the API in cloud mode (see web/README.md)
 ```
 
-CI runs on every pull request and every push to main ([Actions](https://github.com/emsior/daas-engine/actions)): Python 3.11–3.13, PostgreSQL, Playwright in three engines (Chromium, Firefox, WebKit), Docker build and security scans. In detail (`.github/workflows/ci.yml`): backend tests on Python 3.11, 3.12 and 3.13, control-plane tests on a real PostgreSQL (row locks, migrations), security scans (gitleaks, semgrep, zizmor, pip-audit), cockpit lint/typecheck/tests/build, Playwright end-to-end tests in Chromium, Firefox and WebKit, a Lighthouse gate and Docker image builds with a container smoke test. Optional pre-commit hooks (gitleaks, `.pre-commit-config.yaml`) and CI checks (gitleaks in the `security` job, the `OPSEC` workflow) block leaks of secrets and personal data.
+CI runs on every pull request and every push to main ([Actions](https://github.com/emsior/daas-engine/actions)): 2,600+ Python tests on Python 3.11–3.13, PostgreSQL, Playwright in three engines (Chromium, Firefox, WebKit), Docker build and security scans. In detail (`.github/workflows/ci.yml`): backend tests on Python 3.11, 3.12 and 3.13, control-plane tests on a real PostgreSQL (row locks, migrations), security scans (gitleaks, semgrep, zizmor, pip-audit), cockpit lint/typecheck/tests/build, Playwright end-to-end tests in Chromium, Firefox and WebKit, a Lighthouse gate and Docker image builds with a container smoke test. Optional pre-commit hooks (gitleaks, `.pre-commit-config.yaml`) and CI checks (gitleaks in the `security` job, the `OPSEC` workflow) block leaks of secrets and personal data.
 
 ---
 
