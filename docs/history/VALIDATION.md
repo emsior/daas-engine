@@ -1,3 +1,5 @@
+*Historyczna lista kontrolna (v0.2–v0.3, wrzesień 2026). Zachowana dla historii; nie opisuje bieżącego stanu.*
+
 # VALIDATION — lista kontrolna
 
 Legenda: ✅ zweryfikowane w tym repo (uruchomione) · ⚠ zaimplementowane, wymaga środowiska użytkownika (Docker / klucz API) · ❌ poza zakresem
