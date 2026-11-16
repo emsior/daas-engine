@@ -33,7 +33,34 @@ jobs:
       - name: Lint (ruff)
         run: ruff check --output-format=github .
       - name: Tests (mock mode — no secrets)
-        run: pytest -v -p no:cacheprovider
+        run: pytest -v -p no:cacheprovider --junitxml="$RUNNER_TEMP/pytest-junit.xml"
+      # Wynik pytest (passed/failed/errors/skipped) w zakladce Summary. Krok nie zmienia wyniku joba:
+      # czerwone testy zostaja czerwone w kroku wyzej, a blad parsowania raportu tylko ostrzega (|| echo ::warning).
+      - name: Test summary (GITHUB_STEP_SUMMARY)
+        if: always()
+        env:
+          PYTHON_MATRIX: ${{ matrix.python-version }}
+        run: |
+          python - <<'PY' || echo "::warning::pytest summary unavailable"
+          import os
+          import platform
+          import xml.etree.ElementTree as ET
+
+          report = os.path.join(os.environ["RUNNER_TEMP"], "pytest-junit.xml")
+          version = f"{os.environ.get('PYTHON_MATRIX', '?')} ({platform.python_version()})"
+          header = "| Python | passed | failed | errors | skipped | time [s] |\n|---|---|---|---|---|---|\n"
+          if os.path.isfile(report):
+              root = ET.parse(report).getroot()
+              suites = [root] if root.tag == "testsuite" else root.findall("testsuite")
+              total = {key: sum(int(s.get(key, 0)) for s in suites) for key in ("tests", "failures", "errors", "skipped")}
+              seconds = sum(float(s.get("time", 0)) for s in suites)
+              passed = total["tests"] - total["failures"] - total["errors"] - total["skipped"]
+              row = f"| {version} | {passed} | {total['failures']} | {total['errors']} | {total['skipped']} | {seconds:.0f} |\n"
+          else:
+              row = f"| {version} | — | — | — | — | no JUnit report (pytest did not run) |\n"
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
+              summary.write("### pytest\n\n" + header + row + "\n")
+          PY
       - name: Smoke API
         run: |
           export DAAS_API_KEY="$(openssl rand -hex 24)"
