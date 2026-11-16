@@ -6,8 +6,8 @@ Kontekst projektu (stack, stan, pułapki środowiska) jest w `CLAUDE.md`.
 ## Twarde zasady — obowiązują zawsze
 
 1. **Słownictwo.** Projekt dotyczy analityki danych. Tematyka CS2 występuje wyłącznie
-   jako *esports statistics*. Słownictwo z domeny hazardowej jest zakazane
-   w kodzie, komentarzach, commitach, README i dokumentacji (ze względów prawnych).
+   jako *esports statistics*. Słownictwo spoza domeny analityki danych, wskazane na liście
+   zakazanych fraz projektu, jest zakazane w kodzie, komentarzach, commitach, README i dokumentacji.
    Pełna lista zakazanych fraz jest w agencie `opsec-guard`,
    trzymanym lokalnie poza repozytorium.
 2. **Zero danych osobowych właściciela.** Żadnego nazwiska, żadnego prywatnego adresu
@@ -22,8 +22,8 @@ Kontekst projektu (stack, stan, pułapki środowiska) jest w `CLAUDE.md`.
    nazwisk, e-maili, NIP-ów, telefonów.
 6. Żadnych lokalnych ścieżek dyskowych (`C:\Users\...`, `D:\...`) w plikach repo.
 7. Kwoty w formacie polskim (`7 255,95`) — nie zamieniać na format US.
-8. **CODE FREEZE od v1.0.0 (28.09.2026) — uchylony poleceniem właściciela 09.10.2026.** Prace nad wersją 2.0.0
-   idą na gałęzi `claude/saas-2026-10`; zmiany w `app/`, `tests/`, `web/`, `deploy/` i `alembic/` są dozwolone w zakresie
+8. **CODE FREEZE od v1.0.0 (28.09.2026) — uchylony poleceniem właściciela 09.10.2026.** Kod 2.0.0 jest na `main`
+   (gałąź `claude/saas-2026-10` scalona 18.10.2026), bieżące prace idą przez gałęzie robocze i PR; zmiany w `app/`, `tests/`, `web/`, `deploy/` i `alembic/` są dozwolone w zakresie
    zadania. Pozostałe zasady z tej listy obowiązują bez zmian. Dokumentacja nigdy nie podlegała zamrożeniu.
 9. **`web/` bez zewnętrznych CDN.** Kokpit nie ładuje fontów, skryptów, stylów ani obrazów z cudzych domen: fonty
    systemowe, zasoby z własnego originu, CSP z nonce bez `unsafe-inline`. Nowe zależności npm tylko jako
@@ -61,9 +61,9 @@ Kolejność w cyklu tygodniowym: test-runner -> opsec-guard -> report-builder.
 
 Przed każdym commitem: `/opsec`.
 
-## Tryb wykonania: EAGER — twarda zasada operacyjna
+## Operacje nieodwracalne i sieciowe — twarda zasada operacyjna
 
-Auto-wykonanie jest w trybie eager, sandbox wyłączony, dostęp do plików ALLOW.
+Agenci mogą działać z automatycznym wykonywaniem komend.
 Dlatego każda operacja nieodwracalna albo sieciowa wymaga jawnej zgody właściciela
 w osobnej wiadomości:
 
@@ -74,21 +74,20 @@ w osobnej wiadomości:
   scp, rsync, rclone, kopiowanie na UNC),
 - robocopy /MIR i /PURGE.
 
-Blokada techniczna to hook PreToolUse deny (~/.gemini/config/hooks.json +
-hooks/deny-push.ps1), nie ten zapis. Jeśli hook jest wyłączony (enabled: false)
-albo nie wiesz, czy działa — nie wykonuj takich operacji wcale, tylko wypisz
-komendę do ręcznego uruchomienia.
+Blokada techniczna to hook blokujący takie komendy, skonfigurowany na maszynie właściciela
+poza repozytorium, nie ten zapis. Jeśli blokada jest wyłączona albo nie wiesz, czy działa —
+nie wykonuj takich operacji wcale, tylko wypisz komendę do ręcznego uruchomienia.
 
 ## Zasady PPC dla Codexa (15.10.2026, rejestr STACK v3)
 
-Codex CLI jest tu **wykonawcą domyślnym** (`codex exec` ze spec-pliku); zmiany Codexa recenzuje Claude, zmiany Claude'a recenzuje Codex (reviewer ≠ autor). Pełne reguły: globalny `~/.codex/AGENTS.md` v3 oraz `STACK.md` w warsztacie. Skrót obowiązujący w tym repo bez wyjątków:
+Codex CLI jest tu **wykonawcą domyślnym** (`codex exec` ze spec-pliku); zmiany Codexa recenzuje Claude, zmiany Claude'a recenzuje Codex (reviewer ≠ autor). Pełne reguły: globalne zasady Codexa v3 (poza repozytorium) oraz `STACK.md` w warsztacie. Publiczny opis procesu: [`docs/PROCESS.md`](docs/PROCESS.md). Skrót obowiązujący w tym repo bez wyjątków:
 
 1. **Zero nazwiska właściciela** w plikach, commitach, logach i promptach. Marka Proch PC / PPC, jedyny kontakt `prochpc@gmail.com`; stary adres z konta konektorów nie istnieje w treściach.
-2. **Słownictwo hazardowe zakazane** (art. 110a k.k.s.) w kodzie, commitach, docs i nazwach plików. Publicznie: „aplikacja analityczna z modelem EV” / *esports statistics*. Wzorce sprawdza skill `ppc-wyciek`; lista zostaje poza repozytorium.
+2. **Zakazane słownictwo** (lista zakazanych fraz projektu, jak w zasadzie 1 wyżej) w kodzie, commitach, docs i nazwach plików. Publicznie: „aplikacja analityczna z modelem EV” / *esports statistics*. Wzorce sprawdza skill `ppc-wyciek`; lista zostaje poza repozytorium.
 3. **Git tylko po ścieżkach:** `git add <plik>`, nigdy `-A` ani `.`; nigdy `--no-verify`; nie zmieniaj `core.hooksPath`; nie przepisuj historii. Tożsamość: `user.name = PPC`, `user.email = 267137654+emsior@users.noreply.github.com`. Commit tylko gdy spec na to pozwala, na gałęzi roboczej, komunikat bez nazwiska i zakazanych fraz.
 4. **Zero pusha, publikacji i zmian `main`** — bez wyjątków; push robi właściciel osobnym krokiem.
 5. **Zero `.env`, `.secrets/`, kluczy, tokenów i danych klienta** — nie czytaj, nie cytuj, nie commituj. Dane testowe wyłącznie syntetyczne.
-6. **Sandbox:** `workspace-write`, sieć wyłączona (`.codex/config.toml`). Instalacje (`pip`/`npm`/`composer`), Docker, sieć i kasowanie tylko gdy spec jawnie na to pozwala. Poza katalogiem repo nie piszesz.
+6. **Sandbox:** `workspace-write`, sieć wyłączona (konfiguracja Codexa poza repozytorium). Instalacje (`pip`/`npm`/`composer`), Docker, sieć i kasowanie tylko gdy spec jawnie na to pozwala. Poza katalogiem repo nie piszesz.
 7. **Testy przed oddaniem:** komendy z `CLAUDE.md` tego repo; wynik liczbą z datą; wynik poniżej bazowego = regresja. Nie możesz uruchomić → 🚫 + powód, nigdy „zielone” bez dowodu.
 8. **Wzorzec zadania:** ŹRÓDŁO (co czytasz) · OPERACJA (co wolno zmienić) · ZAKAZ (czego nie robisz) · DOWÓD (co pokazujesz: test, diff, plik). Brak pola → pytasz w bloku, nie zgadujesz. Zmiany poza zakresem to błąd, nie bonus; znalezione obok = obserwacja, nie poprawka.
 9. **Wynik = blok dla Claude**, dopisany na końcu `DO_CLAUDE.md` w kanale `.handoff` warsztatu (append-only, UTF-8, nic nie kasuj):
