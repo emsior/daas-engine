@@ -12,14 +12,28 @@ from tests.conftest import PROJECT_ROOT
 from tests.support import minimal_subprocess_env
 
 SCRIPT = PROJECT_ROOT / "tools" / "opsec_scan.sh"
+# Synthetic stand-ins for the private list (CI: secret OPSEC_PATTERNS). The rule names match those
+# of the real list; the values identify nobody. A bracketed character keeps the list from matching
+# its own text; \xHH escapes reach the scanner as text and are decoded there.
+PRIVATE_PATTERNS = (
+    "# TEST-synthetic private rules\n"
+    "email=zzsynthetic-owner-12[3]\n"
+    "project=qqfakepro[j]x\n"
+    "name/c=[Qq][Qq][Ff][Aa][Kk][Aa]([nN]|\\xc5\\x84|\\xc5\\x83|D\\x01|C\\x01|\\x01D|\\x01C)\n"
+)
+NOTICE = (
+    "OPSEC: private pattern list not loaded (set OPSEC_PATTERNS or OPSEC_PATTERNS_FILE); "
+    "scanning with public rules only"
+)
 RULE_CASES = [
-    ("email", "mcq08" + "9"),
-    ("vocab-a", "bukmache" + "r"),
-    ("vocab-b", "bettin" + "g"),
-    ("project", "CS2Op" + "s"),
-    ("name", "Micha" + "l"),
-    ("name", "Micha" + "ł"),
+    ("email", "zzsynthetic-owner-12" + "3"),  # private (synthetic)
+    ("vocab-a", "bukmache" + "r"),  # public
+    ("vocab-b", "bettin" + "g"),  # public
+    ("project", "qqfakeproj" + "x"),  # private (synthetic)
+    ("name", "Qqfaka" + "n"),  # private (synthetic), case-sensitive with byte forms
+    ("name", "Qqfaka" + chr(0x144)),
 ]
+NAME_STEM = "Qqfaka"
 
 
 class Repo:
@@ -109,7 +123,9 @@ def repo(tmp_path):
         pytest.skip("OPSEC scanner requires Git and Bash")
     path = tmp_path / "repo"
     path.mkdir()
-    env = minimal_subprocess_env(tmp_path, TMPDIR=tmp_path.as_posix(), GIT_CONFIG_NOSYSTEM="1")
+    env = minimal_subprocess_env(
+        tmp_path, TMPDIR=tmp_path.as_posix(), GIT_CONFIG_NOSYSTEM="1", OPSEC_PATTERNS=PRIVATE_PATTERNS,
+    )
     result = Repo(path, git, bash, env)
     result.git("init", "--initial-branch=fixture")
     result.commit()
@@ -139,7 +155,7 @@ def test_tree_excludes_media(repo):
 def test_utf8_rule_does_not_match_unrelated_character(repo, mode):
     repo.env["LC_ALL"] = "C"
     base = repo.git("rev-parse", "HEAD")
-    repo.commit("Micha" + chr(0x144) + "\n")
+    repo.commit(NAME_STEM + chr(0x146) + "\n")
     args = ("--tree",) if mode == "tree" else ("--range", f"{base}..HEAD")
     result = repo.scan(*args)
     assert result.returncode == 0, result.stderr
@@ -621,13 +637,13 @@ def test_matching_uses_byte_locale_under_utf8_caller(repo, tmp_path, mode):
 
 @pytest.mark.parametrize("mode", ["tree", "range"])
 @pytest.mark.parametrize("encoding,bom", [("utf-16-le", b"\xff\xfe"), ("utf-16-be", b"\xfe\xff")])
-@pytest.mark.parametrize("codepoint", [0x161, 0x162])
+@pytest.mark.parametrize("codepoint", [0x163, 0x164])
 @pytest.mark.parametrize("with_bom", [False, True], ids=["no-bom", "bom"])
 def test_utf16_name_does_not_fold_unrelated_character_bytes(
     repo, mode, encoding, bom, codepoint, with_bom,
 ):
     base = repo.git("rev-parse", "HEAD")
-    repo.commit_bytes((bom if with_bom else b"") + ("Micha" + chr(codepoint) + "\n").encode(encoding))
+    repo.commit_bytes((bom if with_bom else b"") + (NAME_STEM + chr(codepoint) + "\n").encode(encoding))
     args = ("--tree",) if mode == "tree" else ("--range", f"{base}..HEAD")
     result = repo.scan(*args)
     assert result.returncode == 0, result.stderr
@@ -806,6 +822,13 @@ def test_workflow_edited_is_unconditional_and_bootstrap_is_explicit():
     assert "types: [opened, synchronize, reopened, edited]" in workflow
     assert "    if:" not in workflow
     assert "OPSEC_BOOTSTRAP_POLICY: ${{ vars.OPSEC_BOOTSTRAP_POLICY }}" in workflow
+
+
+def test_workflow_passes_private_list_only_through_step_env():
+    workflow = (PROJECT_ROOT / ".github/workflows/opsec.yml").read_text(encoding="utf-8")
+    assert "          OPSEC_PATTERNS: ${{ secrets.OPSEC_PATTERNS }}\n" in workflow
+    script = workflow.split("      - name: OPSEC checks (approved policy)\n", 1)[1].split("        run: |\n", 1)[1]
+    assert "${{" not in script
 
 
 @pytest.mark.parametrize("command", ["ls-tree", "show", "hash-object", "status"])
@@ -1300,3 +1323,114 @@ def test_merge_name_present_as_directory_in_base(repo, allowed):
     if not allowed:
         expected.add(f"{origin}:{identifier}:email")
     assert set(result.stdout.splitlines()) == expected
+
+
+# ---------------------------------------------------------------- private pattern list
+@pytest.mark.parametrize("unset", [True, False], ids=["unset", "empty"])
+def test_without_private_list_one_notice_and_public_rules_only(repo, unset):
+    if unset:
+        repo.env.pop("OPSEC_PATTERNS")
+    else:
+        repo.env["OPSEC_PATTERNS"] = ""  # an absent secret expands to an empty value
+    result = repo.scan("--tree")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.splitlines() == [NOTICE]
+    (repo.path / "sample.txt").write_text(RULE_CASES[0][1] + "\n", encoding="utf-8")
+    result = repo.scan("--tree")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.splitlines() == [NOTICE]
+    (repo.path / "sample.txt").write_text(RULE_CASES[1][1] + "\n", encoding="utf-8")
+    result = repo.scan("--tree")
+    assert result.returncode == 1, result.stderr
+    assert result.stdout.splitlines() == ["sample.txt:vocab-a"]
+    assert result.stderr.splitlines() == [NOTICE]
+
+
+def test_without_private_list_allowlist_keeps_private_rule_names(repo):
+    repo.env.pop("OPSEC_PATTERNS")
+    base = repo.git("rev-parse", "HEAD")
+    hit = repo.commit("TEST-next\n")
+    (repo.path / "allow.txt").write_text(f"{hit}:sample.txt:email\n", encoding="utf-8")
+    result = repo.scan("--range", f"{base}..HEAD", "--allowlist", "allow.txt")
+    assert result.returncode == 0, result.stderr
+    assert result.stderr.splitlines() == [NOTICE]
+
+
+@pytest.mark.parametrize("source", ["env", "file"])
+@pytest.mark.parametrize("mode", ["tree", "range"])
+@pytest.mark.parametrize("rule,value", [RULE_CASES[0], RULE_CASES[3], RULE_CASES[5]], ids=["email", "project", "name"])
+def test_private_list_from_env_or_file_catches_private_rule(repo, tmp_path, source, mode, rule, value):
+    if source == "file":
+        listing = tmp_path / "TEST-private-patterns.txt"
+        listing.write_text(repo.env.pop("OPSEC_PATTERNS"), encoding="utf-8", newline="\r\n")
+        repo.env["OPSEC_PATTERNS_FILE"] = listing.as_posix()
+    base = repo.git("rev-parse", "HEAD")
+    hit = repo.commit(value + "\n")
+    if mode == "range":
+        repo.commit()
+    args = ("--tree",) if mode == "tree" else ("--range", f"{base}..HEAD")
+    result = repo.scan(*args)
+    assert result.returncode == 1, result.stderr
+    expected = f"sample.txt:{rule}" if mode == "tree" else f"{hit}:sample.txt:{rule}"
+    assert result.stdout.splitlines() == [expected]
+    assert result.stderr == ""
+    assert value not in result.stdout + result.stderr
+
+
+MALFORMED_PRIVATE_LISTS = [
+    "TEST-no-separator",
+    "Bad=TEST[x]",
+    "dup=TEST-a[b]\ndup=TEST-c[d]",
+    "vocab-a=TEST[x]",
+    "bad=TEST(",
+    "bad=a*",
+    "bad=TEST\\x00",
+    "bad=TEST\\x0a",
+    "bad=TEST\\xZZ",
+    "# TEST-comment only\n\n",
+]
+
+
+@pytest.mark.parametrize("source", ["env", "file"])
+@pytest.mark.parametrize("listing", MALFORMED_PRIVATE_LISTS)
+def test_malformed_private_list_fails_closed(repo, tmp_path, source, listing):
+    if source == "file":
+        path = tmp_path / "TEST-private-patterns.txt"
+        path.write_text(listing, encoding="utf-8")
+        repo.env.pop("OPSEC_PATTERNS")
+        repo.env["OPSEC_PATTERNS_FILE"] = path.as_posix()
+    else:
+        repo.env["OPSEC_PATTERNS"] = listing
+    result = repo.scan("--tree")
+    assert result.returncode == 2, result.stderr
+    assert result.stdout == ""
+    assert "TEST" not in result.stderr  # errors name the line, never the pattern
+
+
+@pytest.mark.parametrize("case", ["both", "missing-file"])
+def test_ambiguous_or_unreadable_private_list_fails_closed(repo, tmp_path, case):
+    if case == "both":
+        path = tmp_path / "TEST-private-patterns.txt"
+        path.write_text(PRIVATE_PATTERNS, encoding="utf-8")
+    else:
+        repo.env.pop("OPSEC_PATTERNS")
+        path = tmp_path / "TEST-missing.txt"
+    repo.env["OPSEC_PATTERNS_FILE"] = path.as_posix()
+    result = repo.scan("--tree")
+    assert result.returncode == 2, result.stderr
+    assert result.stdout == ""
+
+
+@pytest.mark.parametrize("loaded", [True, False])
+def test_workflow_reports_private_list_state(repo, tmp_path, loaded):
+    base = _install_opsec_policy(repo)
+    head = repo.commit("TEST-next\n")
+    if not loaded:
+        repo.env.pop("OPSEC_PATTERNS")
+    result, summary = _run_opsec_workflow(repo, tmp_path, base, head)
+    assert result.returncode == 0, result.stderr
+    warning = "::warning::OPSEC private pattern list not loaded: public rules only"
+    assert (warning in result.stdout) is not loaded
+    state = "loaded" if loaded else "not loaded (public rules only)"
+    assert f"- Private pattern list: {state}\n" in summary
+    assert (NOTICE in result.stderr) is not loaded

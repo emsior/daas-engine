@@ -27,6 +27,9 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           TESTED_SHA: ${{ github.sha }}
           OPSEC_BOOTSTRAP_POLICY: ${{ vars.OPSEC_BOOTSTRAP_POLICY }}
+          # Private rules (person, private project) live only in this secret; format in tools/opsec_scan.sh.
+          # Pull requests without access to secrets get an empty value: public rules only, with a warning.
+          OPSEC_PATTERNS: ${{ secrets.OPSEC_PATTERNS }}
         run: |
           set -euo pipefail
           case "$EVENT_NAME" in
@@ -77,6 +80,12 @@ jobs:
             esac
             printf '::warning::OPSEC policy changed: %s\n' "$identifier"
           done < "$policy_dir/changed-policy"
+          if [[ -n "${OPSEC_PATTERNS-}" ]]; then
+            private_list="loaded"
+          else
+            private_list="not loaded (public rules only)"
+            printf '%s\n' '::warning::OPSEC private pattern list not loaded: public rules only'
+          fi
           {
             printf '### OPSEC policy\n\n'
             printf -- '- Base SHA: `%s`\n' "$START"
@@ -85,6 +94,7 @@ jobs:
             printf -- '- Policy: %s\n' "$policy_version"
             printf -- '- Scanner blob: `%s`\n' "$scanner_blob"
             printf -- '- Allowlist blob: `%s`\n' "$allow_blob"
+            printf -- '- Private pattern list: %s\n' "$private_list"
           } >> "$GITHUB_STEP_SUMMARY" || exit 2
           tree_status=0
           bash "$policy_dir/opsec_scan.sh" --tree || tree_status=$?

@@ -13,12 +13,98 @@ fail() {
   exit 2
 }
 
-# Keep the five existing rules. Spell multibyte letters as exact bytes, not
-# a character class: after removing NUL, UTF-16 letters retain their 01 byte.
-rules=(email vocab-a vocab-b project name)
-patterns=('mcq08[9]' 'bukmache[r]' 'bettin[g]' 'CS2Op[s]'
-  $'[Mm][Ii][Cc][Hh][Aa]([lL]|\xc5\x82|\xc5\x81|B\x01|A\x01|\x01B|\x01A)')
-combined=$(IFS='|'; printf '%s' "${patterns[*]}")
+# Public rules: banned vocabulary only. Rules that identify a person or a
+# private project never live in this repository: they come from a private
+# list in OPSEC_PATTERNS (the list itself; in CI the repository secret of the
+# same name) or in the file named by OPSEC_PATTERNS_FILE. Setting both is an
+# error. With neither (or an empty value, as for pull requests without access
+# to secrets) the scan uses public rules only and says so once on stderr. A
+# list that is set but malformed fails closed (exit 2); errors cite only the
+# line number, never the pattern.
+#
+# Private list format, one rule per line (LF or CRLF):
+#   NAME=ERE     case-insensitive rule
+#   NAME/c=ERE   case-sensitive rule
+# - Blank lines and lines starting with '#' are ignored; nothing is trimmed.
+# - NAME: [a-z][a-z0-9-]{0,31}, unique across public and private rules. Names
+#   are public (findings and .opsec-history-allow cite them): keep the names
+#   used by existing allowlist entries and never put a value in a name.
+# - ERE: grep -E syntax, matched byte-wise (LC_ALL=C) after NUL bytes are
+#   removed. Raw UTF-8 letters are accepted as their bytes; for control
+#   bytes use '\xHH' (01-ff except 0a), which stands for one raw byte; any other
+#   backslash reaches grep unchanged. A rule must not match an empty line.
+#   Bracket one character (abc[d]) so a list never matches its own text.
+# - Non-ASCII letters: write the UTF-8 bytes and, to catch UTF-16 text, also
+#   the residue left after NUL removal, e.g. U+0144 as (\xc5\x84|D\x01|\x01D).
+#   Such a rule needs /c, because case folding would equate a residual 'D'
+#   with 'd'; spell ASCII case variants as classes ([Aa]). UTF-16 ASCII text
+#   needs nothing extra.
+rules=(vocab-a vocab-b)
+patterns=('bukmache[r]' 'bettin[g]')
+folds=(i i)
+public_rules=${#rules[@]}
+
+# Decode '\xHH' escapes into $decoded; reject NUL and newline bytes.
+decode_bytes() {
+  local rest=$1 hex byte
+  decoded=''
+  while [[ $rest == *'\x'* ]]; do
+    decoded+=${rest%%'\x'*}
+    rest=${rest#*'\x'}
+    hex=${rest:0:2}
+    [[ $hex =~ ^[0-9A-Fa-f]{2}$ && $hex != 00 && $hex != 0[aA] ]] || return 1
+    printf -v byte "\\x$hex"
+    decoded+=$byte
+    rest=${rest:2}
+  done
+  decoded+=$rest
+}
+
+load_private() {
+  local line number=0 name fold known status
+  while IFS= read -r line || [[ -n $line ]]; do
+    number=$((number + 1))
+    line=${line%$'\r'}
+    [[ -z $line || $line == \#* ]] && continue
+    [[ $line =~ ^([a-z][a-z0-9-]{0,31})(/c)?=(.+)$ ]] || fail "invalid private pattern list (line $number)"
+    name=${BASH_REMATCH[1]}
+    fold=i
+    [[ -z ${BASH_REMATCH[2]} ]] || fold=c
+    decode_bytes "${BASH_REMATCH[3]}" || fail "invalid byte escape in private pattern list (line $number)"
+    for known in "${rules[@]}"; do
+      [[ $known != "$name" ]] || fail "duplicate rule in private pattern list (line $number)"
+    done
+    if grep -a -i -E -- "$decoded" <<< '' > /dev/null 2>&1; then
+      fail "private pattern matches an empty line (line $number)"
+    else
+      status=$?
+      [[ $status == 1 ]] || fail "invalid private pattern (line $number)"
+    fi
+    rules+=("$name")
+    patterns+=("$decoded")
+    folds+=("$fold")
+  done
+  [[ ${#rules[@]} -gt $public_rules ]] || fail "private pattern list has no rules"
+}
+
+if [[ -n ${OPSEC_PATTERNS-} && -n ${OPSEC_PATTERNS_FILE-} ]]; then
+  fail "set only one of OPSEC_PATTERNS and OPSEC_PATTERNS_FILE"
+elif [[ -n ${OPSEC_PATTERNS-} ]]; then
+  load_private <<< "$OPSEC_PATTERNS"
+elif [[ -n ${OPSEC_PATTERNS_FILE-} ]]; then
+  [[ -f $OPSEC_PATTERNS_FILE && -r $OPSEC_PATTERNS_FILE ]] || fail "cannot read private pattern list"
+  load_private < "$OPSEC_PATTERNS_FILE"
+else
+  printf '%s\n' 'OPSEC: private pattern list not loaded (set OPSEC_PATTERNS or OPSEC_PATTERNS_FILE); scanning with public rules only' >&2
+fi
+# Git and every other child process never see the private list.
+unset OPSEC_PATTERNS OPSEC_PATTERNS_FILE
+private_loaded=0
+[[ ${#rules[@]} == "$public_rules" ]] || private_loaded=1
+combined=''
+for i in "${!patterns[@]}"; do
+  combined+="${combined:+|}(${patterns[$i]})"
+done
 
 mode=''
 allowlist=''
@@ -41,7 +127,17 @@ if [[ -n $allowlist ]]; then
   while IFS= read -r entry || [[ -n $entry ]]; do
     entry=${entry%$'\r'}
     [[ -z $entry || $entry == \#* ]] && continue
-    [[ $entry =~ ^[0-9a-f]{40}:.+:(email|vocab-a|vocab-b|project|name)$ && $entry != *$'\t'* ]] || fail "invalid allowlist entry"
+    [[ $entry =~ ^[0-9a-f]{40}:.+:([a-z][a-z0-9-]{0,31})$ && $entry != *$'\t'* ]] || fail "invalid allowlist entry"
+    entry_rule=${BASH_REMATCH[1]}
+    known=0
+    for i in "${!rules[@]}"; do
+      [[ ${rules[$i]} != "$entry_rule" ]] || known=1
+    done
+    if [[ $known == 0 ]]; then
+      # Without the private list its rule names cannot be checked; those rules are not scanned either.
+      [[ $private_loaded == 0 ]] || fail "invalid allowlist entry"
+      continue
+    fi
     allowed["$entry"]=1
   done < "$allowlist"
 fi
@@ -63,9 +159,9 @@ matches() {
   local status
   { tr -d '\000' < "$1" > "$tmp/normalized"; } 2> "$tmp/errors" || fail "normalization failed"
   if grep -a -i -E -- "$2" "$tmp/normalized" > /dev/null 2> "$tmp/errors"; then
-    # UTF-16 residual A/B bytes are code units, not ASCII letters to fold.
-    # The explicit ASCII classes retain case-insensitive semantics for the name.
-    if [[ $2 == "${patterns[4]}" ]]; then
+    # Case-sensitive rules (/c): UTF-16 residual bytes are code units, not
+    # ASCII letters to fold; explicit ASCII classes provide the case variants.
+    if [[ ${3-i} == c ]]; then
       if grep -a -E -- "$2" "$tmp/normalized" > /dev/null 2> "$tmp/errors"; then
         return 0
       else
@@ -83,12 +179,12 @@ matches() {
 }
 
 safe_path() {
-  local pattern
+  local i
   safe=$1
   validate_path "$safe"
   printf '%s' "$safe" > "$tmp/path"
-  for pattern in "${patterns[@]}"; do
-    if matches "$tmp/path" "$pattern"; then
+  for i in "${!patterns[@]}"; do
+    if matches "$tmp/path" "${patterns[$i]}" "${folds[$i]}"; then
       safe="/name/$(git hash-object --stdin < "$tmp/path" 2> "$tmp/errors")" || fail "cannot hash path"
       break
     fi
@@ -113,7 +209,7 @@ scan_blob() {
   local i
   if ! matches "$3" "$combined"; then return 0; fi
   for i in "${!rules[@]}"; do
-    if matches "$3" "${patterns[$i]}"; then
+    if matches "$3" "${patterns[$i]}" "${folds[$i]}"; then
       record "$1" "$2" "${rules[$i]}"
     fi
   done
@@ -150,7 +246,7 @@ scan_records() {
     tab=$'\t'
     expression="^[^${tab}]*${tab}[^${tab}]*${tab}[^${tab}]*${tab}.*(${patterns[$i]})"
     if grep -a -i -E -- "$expression" "$tmp/normalized-records" > "$tmp/matches" 2> "$tmp/errors"; then
-      if [[ ${rules[$i]} == name ]]; then
+      if [[ ${folds[$i]} == c ]]; then
         if grep -a -E -- "$expression" "$tmp/matches" > "$tmp/exact" 2> "$tmp/errors"; then
           awk '{ print }' "$tmp/exact" > "$tmp/matches"
         else
