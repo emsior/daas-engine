@@ -8,6 +8,12 @@ from datetime import datetime
 from app.reporting.narrative import source_label
 from app.reporting.safe import render_markdown
 
+#: Stopka raportu (wspolna dla ecommerce_demo, cs2_demo, uksc_evidence). Liczby licza transformacje
+#: w Pythonie (`app/transforms/`: pandas, uksc w czystym Pythonie) z rekordow zrodlowych; DuckDB
+#: przechowuje rekordy, metryki i historie runow (uksc czyta z niej poprzedni run do porownania).
+FOOTER = ("DaaS Engine · raport wygenerowany automatycznie · liczby policzone w Pythonie "
+          "z rekordów źródłowych; rekordy i historia runów zapisane w DuckDB")
+
 CSS = """
 :root { --bg:#f7f7f5; --card:#fff; --ink:#1c1c1a; --muted:#6b6b66; --line:#e6e6e2; --accent:#0f6b52; --warn:#b5541b; --bad:#a32d2d; }
 * { box-sizing:border-box; }
@@ -55,6 +61,6 @@ def render_html(md_text: str, *, title: str, data_status: str, narrative: str | 
         "<!doctype html><html lang=\"pl\"><head><meta charset=\"utf-8\">"
         f"<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>{html.escape(title)}</title>"
         f"<style>{CSS}</style></head><body><div class=\"wrap\"><div class=\"card\">{head}{summary_html}{body}</div>"
-        "<div class=\"foot\">DaaS Engine · raport wygenerowany automatycznie · liczby z DuckDB, narracja opisowa</div>"
+        f"<div class=\"foot\">{html.escape(FOOTER)}</div>"
         "</div></body></html>"
     )
