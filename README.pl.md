@@ -9,11 +9,11 @@
 **Wysyłasz eksport sprzedaży (zamówienia) w CSV/XLSX → dostajesz gotowy raport HTML.
 Co tydzień, automatycznie, bez ręcznego składania w Excelu.**
 
-**Stan:** v2.0 na main, wydanie w przygotowaniu (jedyny tag to v1.0.0). Tryb hostowany (v2.0 na main): kokpit www, REST API, logowanie linkiem z e-maila, role w organizacji, cotygodniowe przypomnienia o eksporcie z automatycznym uruchomieniem po wgraniu pliku, wbudowany serwer MCP z OAuth 2.1. Kokpit, logowanie, role, przypomnienia i OAuth wymagają `DAAS_MODE=cloud`; domyślny tryb to `selfhost`.
+**Stan:** v2.0 na main, wydanie w przygotowaniu (jedyny tag to v1.0.0). Tryb cloud (`DAAS_MODE=cloud`, wiele organizacji): kokpit www, REST API, logowanie linkiem z e-maila, role w organizacji, cotygodniowe przypomnienia o eksporcie z automatycznym uruchomieniem po wgraniu pliku, wbudowany serwer MCP z OAuth 2.1. Kokpit, logowanie, role, przypomnienia i OAuth wymagają `DAAS_MODE=cloud`; domyślny tryb to `selfhost`.
 
-Zbudował i rozwija Proch PC z pomocą agentów AI · [MIT](LICENSE)
+Zbudował i rozwija Proch PC z pomocą agentów AI ([jak](docs/PROCESS.md)) · [MIT](LICENSE)
 
-▶ **[Demo wideo — 50 s](docs/daas_demo.mp4)** (przepływ z v0.3, bez dźwięku)
+▶ **[Demo wideo — 50 s](docs/daas_demo.mp4)** (bez dźwięku; przepływ selfhost z n8n z v0.3, sprzed kokpitu)
 
 Co liczy: przychód, koszt, marża, średnia wartość zamówienia, zwroty, top produkty i kategorie,
 porównanie tydzień do tygodnia, zamówienia stratne i anomalie — plus sekcja **PRAKTYCZNE WNIOSKI**
@@ -74,7 +74,7 @@ Instalacja, aktualizacja, rollback, kopie zapasowe i dzielenie VPS z drugą apli
 
 ### Tryb cloud lokalnie
 
-Bez `--domain` skrypt `gen-env.sh` zapisuje `deploy/.env` dla `localhost` (poczta `console`, ten sam origin przez Caddy). Porty 80 i 443 muszą być wolne.
+Bez `--domain` skrypt `gen-env.sh` zapisuje `deploy/.env` dla `localhost` (poczta `console`, ten sam origin przez Caddy). Muszą być wolne porty 80 i 443 (Caddy) oraz 127.0.0.1:3000 i 127.0.0.1:8000 (web, api; zmienisz je przez `DAAS_WEB_PORT` / `DAAS_API_PORT` w `deploy/.env`).
 
 ```bash
 cd deploy && ./gen-env.sh && docker compose --profile edge up -d --build
@@ -307,7 +307,7 @@ pytest                                  # backend, offline
 cd web && npm test && npm run e2e       # kokpit: testy jednostkowe; e2e wymaga API w trybie cloud (web/README.md)
 ```
 
-CI działa przy każdym pull requeście i każdym pushu na main ([Actions](https://github.com/emsior/daas-engine/actions)): ponad 2 600 testów Pythona na Python 3.11–3.13, PostgreSQL, Playwright w trzech silnikach (Chromium, Firefox, WebKit), build Dockera i skanery bezpieczeństwa. Szczegółowo (`.github/workflows/ci.yml`): pytest na Python 3.11/3.12/3.13, testy control plane na prawdziwym PostgreSQL (blokady wierszy, migracje), smoke API przez curl, skanery (gitleaks, semgrep, zizmor, pip-audit), kokpit (eslint, tsc, vitest, build), testy end-to-end Playwright w Chromium, Firefoksie i WebKicie, Lighthouse (mobile), build obrazów Docker (API i kokpit) wraz ze smoke w kontenerze. Opcjonalne hooki pre-commit (gitleaks, `.pre-commit-config.yaml`) i kontrole w CI (gitleaks w jobie `security`, workflow `OPSEC`) blokują wycieki sekretów i danych osobowych.
+CI działa przy każdym pull requeście i każdym pushu na main ([Actions](https://github.com/emsior/daas-engine/actions)): ponad 2 600 testów Pythona na Python 3.11–3.13, PostgreSQL, Playwright w trzech silnikach (Chromium, Firefox, WebKit), build Dockera i skanery bezpieczeństwa. Szczegółowo (`.github/workflows/ci.yml`): pytest na Python 3.11/3.12/3.13, testy control plane na prawdziwym PostgreSQL (blokady wierszy, migracje), smoke API przez curl, skanery (gitleaks, semgrep, zizmor, pip-audit), kokpit (eslint, tsc, vitest, build), testy end-to-end Playwright w Chromium, Firefoksie i WebKicie, Lighthouse (mobile), build obrazów Docker (API i kokpit) wraz ze smoke w kontenerze. Opcjonalne hooki pre-commit (gitleaks, `.pre-commit-config.yaml`) i zadanie `security` (gitleaks) wykrywają wycieki sekretów; wymagany check `OPSEC` blokuje merge, gdy trafi reguła słownictwa albo prywatności.
 
 Historyczna, ręczna lista kontrolna z v0.x (wrzesień 2026): [docs/history/VALIDATION.md](docs/history/VALIDATION.md). Historia zmian: [CHANGELOG.md](CHANGELOG.md). Proces pracy z agentami AI: [docs/PROCESS.md](docs/PROCESS.md) (po angielsku).
 

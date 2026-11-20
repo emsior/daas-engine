@@ -8,11 +8,11 @@ Weekly KPI reports from CSV/XLSX sales exports. FastAPI + DuckDB engine, Next.js
 
 A client sends a CSV or XLSX export; the engine maps the columns of a sales export, loads it into DuckDB, computes KPIs and anomalies, and returns a ready-to-send HTML report with week-over-week deltas and a plain-language summary.
 
-**Status:** v2.0 on main, release pending (the only tag is v1.0.0). Hosted mode (v2.0 on main): web cockpit, REST API, e-mail magic-link sign-in, organization roles, weekly export reminders with auto-run on upload, built-in MCP server with OAuth 2.1. The cockpit, sign-in, roles, reminders and OAuth need `DAAS_MODE=cloud`; the default mode is `selfhost`. **Stack:** Python 3.11+ (CI: 3.11, 3.12, 3.13) · FastAPI · DuckDB · Next.js · Docker
+**Status:** v2.0 on main, release pending (the only tag is v1.0.0). Cloud mode (`DAAS_MODE=cloud`, multi-organization): web cockpit, REST API, e-mail magic-link sign-in, organization roles, weekly export reminders with auto-run on upload, built-in MCP server with OAuth 2.1. The cockpit, sign-in, roles, reminders and OAuth need `DAAS_MODE=cloud`; the default mode is `selfhost`. **Stack:** Python 3.11+ (CI: 3.11, 3.12, 3.13) · FastAPI · pandas · DuckDB · Next.js · Docker
 
-Built and maintained by Proch PC with AI coding agents · [MIT](LICENSE)
+Built and maintained by Proch PC with AI coding agents ([how](docs/PROCESS.md)) · [MIT](LICENSE)
 
-▶ [Demo video](docs/daas_demo.mp4) (v0.3 flow, 50 s, no sound).
+▶ [Demo video](docs/daas_demo.mp4) (50 s, no sound, Polish captions; the v0.3 self-hosted flow with n8n, recorded before the cockpit).
 
 *[Polski README →](README.pl.md)*
 
@@ -63,7 +63,7 @@ Sign in at `https://reports.example.com/login` with the e-mail link (set `DAAS_E
 
 ### Try cloud mode locally
 
-Without `--domain`, `gen-env.sh` writes `deploy/.env` for `localhost` (console mail, same origin through Caddy). Ports 80 and 443 must be free.
+Without `--domain`, `gen-env.sh` writes `deploy/.env` for `localhost` (console mail, same origin through Caddy). Ports 80 and 443 (Caddy) and 127.0.0.1:3000 and 127.0.0.1:8000 (web, api; change them with `DAAS_WEB_PORT` / `DAAS_API_PORT` in `deploy/.env`) must be free.
 
 ```bash
 cd deploy && ./gen-env.sh && docker compose --profile edge up -d --build
@@ -257,7 +257,7 @@ pytest                                  # backend, offline
 cd web && npm test && npm run e2e       # cockpit: unit tests; e2e needs the API in cloud mode (see web/README.md)
 ```
 
-CI runs on every pull request and every push to main ([Actions](https://github.com/emsior/daas-engine/actions)): 2,600+ Python tests on Python 3.11–3.13, PostgreSQL, Playwright in three engines (Chromium, Firefox, WebKit), Docker build and security scans. In detail (`.github/workflows/ci.yml`): backend tests on Python 3.11, 3.12 and 3.13, control-plane tests on a real PostgreSQL (row locks, migrations), security scans (gitleaks, semgrep, zizmor, pip-audit), cockpit lint/typecheck/tests/build, Playwright end-to-end tests in Chromium, Firefox and WebKit, a Lighthouse gate and Docker image builds with a container smoke test. Optional pre-commit hooks (gitleaks, `.pre-commit-config.yaml`) and CI checks (gitleaks in the `security` job, the `OPSEC` workflow) block leaks of secrets and personal data.
+CI runs on every pull request and every push to main ([Actions](https://github.com/emsior/daas-engine/actions)): 2,600+ Python tests on Python 3.11–3.13, PostgreSQL, Playwright in three engines (Chromium, Firefox, WebKit), Docker build and security scans. In detail (`.github/workflows/ci.yml`): backend tests on Python 3.11, 3.12 and 3.13, control-plane tests on a real PostgreSQL (row locks, migrations), security scans (gitleaks, semgrep, zizmor, pip-audit), cockpit lint/typecheck/tests/build, Playwright end-to-end tests in Chromium, Firefox and WebKit, a Lighthouse gate and Docker image builds with a container smoke test. Optional pre-commit hooks (gitleaks, `.pre-commit-config.yaml`) and the `security` job (gitleaks) detect leaked secrets; the required `OPSEC` check blocks a merge when its vocabulary or privacy rules match.
 
 ---
 
