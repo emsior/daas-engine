@@ -37,7 +37,7 @@ jobs:
       # Wynik pytest (passed/failed/errors/skipped) w zakladce Summary. Krok nie zmienia wyniku joba:
       # czerwone testy zostaja czerwone w kroku wyzej, a blad parsowania raportu tylko ostrzega (|| echo ::warning).
       - name: Test summary (GITHUB_STEP_SUMMARY)
-        if: always()
+        if: ${{ !cancelled() }}
         env:
           PYTHON_MATRIX: ${{ matrix.python-version }}
         run: |
@@ -57,7 +57,7 @@ jobs:
               passed = total["tests"] - total["failures"] - total["errors"] - total["skipped"]
               row = f"| {version} | {passed} | {total['failures']} | {total['errors']} | {total['skipped']} | {seconds:.0f} |\n"
           else:
-              row = f"| {version} | — | — | — | — | no JUnit report (pytest did not run) |\n"
+              row = f"| {version} | — | — | — | — | no JUnit report (pytest did not start or did not finish) |\n"
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
               summary.write("### pytest\n\n" + header + row + "\n")
           PY
