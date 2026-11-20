@@ -1,11 +1,19 @@
-# DaaS Engine — automatyczny raport tygodniowy z Twoich danych
+# DaaS Engine — automatyczny raport tygodniowy z eksportu sprzedaży
+
+[![CI](https://github.com/emsior/daas-engine/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/emsior/daas-engine/actions/workflows/ci.yml)
+[![OPSEC](https://github.com/emsior/daas-engine/actions/workflows/opsec.yml/badge.svg?branch=main)](https://github.com/emsior/daas-engine/actions/workflows/opsec.yml)
+[![Licencja: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 *[English README →](README.md)*
 
-**Wysyłasz eksport CSV/XLSX ze sklepu, CRM-a albo księgowości → dostajesz gotowy raport HTML.
+**Wysyłasz eksport sprzedaży (zamówienia) w CSV/XLSX → dostajesz gotowy raport HTML.
 Co tydzień, automatycznie, bez ręcznego składania w Excelu.**
 
-▶ **[Demo wideo — 50 s](docs/daas_demo.mp4)** (bez dźwięku, wystarczy obejrzeć)
+**Stan:** v2.0 na main, wydanie w przygotowaniu (jedyny tag to v1.0.0). Tryb cloud (`DAAS_MODE=cloud`, wiele organizacji): kokpit www, REST API, logowanie linkiem z e-maila, role w organizacji, cotygodniowe przypomnienia o eksporcie z automatycznym uruchomieniem po wgraniu pliku, wbudowany serwer MCP z OAuth 2.1. Kokpit, logowanie, role, przypomnienia i OAuth wymagają `DAAS_MODE=cloud`; domyślny tryb to `selfhost`.
+
+Zbudował i rozwija Proch PC z pomocą agentów AI ([jak](docs/PROCESS.md)) · [MIT](LICENSE)
+
+▶ **[Demo wideo — 50 s](docs/daas_demo.mp4)** (bez dźwięku; przepływ selfhost z n8n z v0.3, sprzed kokpitu)
 
 Co liczy: przychód, koszt, marża, średnia wartość zamówienia, zwroty, top produkty i kategorie,
 porównanie tydzień do tygodnia, zamówienia stratne i anomalie — plus sekcja **PRAKTYCZNE WNIOSKI**
@@ -16,12 +24,11 @@ statusy `Zrealizowane / Zwrot / Anulowane`, kodowanie `cp1250`, nagłówki po po
 
 ![Raport HTML wygenerowany z pliku klienta (client_export_pl.csv): KPI, marża, zamówienia stratne, anomalie, PRAKTYCZNE WNIOSKI](docs/demo_report.png)
 
-*Powyżej: raport z przykładowego eksportu sklepu (15 zamówień) — od uploadu pliku do gotowego HTML w < 1 s, bez ręcznej roboty.*
+*Powyżej: raport z przykładowego eksportu sklepu (15 zamówień), od uploadu pliku do gotowego HTML bez ręcznej roboty.*
 
 Kontakt: prochpc@gmail.com
 
-*In short (EN): send any messy sales export (CSV/XLSX) → get an automated weekly HTML report with
-KPIs, week-over-week deltas, loss-making orders and anomaly flags. FastAPI + DuckDB + Next.js cockpit, tests included.*
+*In short (EN): Weekly KPI reports from CSV/XLSX sales exports. FastAPI + DuckDB engine, Next.js cockpit, REST API and built-in MCP server (OAuth 2.1) for AI assistants.*
 
 ---
 
@@ -30,6 +37,7 @@ KPIs, week-over-week deltas, loss-making orders and anomaly flags. FastAPI + Duc
 - **Raport tygodniowy z Twojego pliku** — HTML (do wydruku do PDF), Markdown i JSON.
 - **Kokpit** (tryb `cloud`) — logujesz się linkiem z e-maila (bez haseł), wgrywasz plik, widzisz postęp na żywo, otwierasz raport i masz archiwum. Blok **Sprawdź sam** liczy skrót SHA-256 pobranego raportu w przeglądarce; plik nie jest wysyłany na serwer.
 - **API** — klucz per organizacja z zakresami, postęp na żywo (SSE), podpisane webhooki. Przykłady: [`docs/API.md`](docs/API.md).
+- **Dostęp dla agentów (MCP)** — klienci MCP, np. Claude i ChatGPT, mogą połączyć się przez OAuth 2.1 (tryb `cloud`) albo kluczem API i odpytywać raporty. Zob. [Dostęp dla agentów (MCP)](#dostęp-dla-agentów-mcp).
 - **Kolektor artefaktów + raport statusu** — kolektor PowerShell tylko do odczytu (`tools/uksc-collector.ps1`) zbiera ustawienia techniczne stacji Windows do paczki JSON ze skrótami; raport pokazuje kontrolę, wymóg (UKSC/NIS2), status i skrót artefaktu.
 - **Twoje dane zostają Twoje** — każda organizacja ma własny katalog danych i własną bazę DuckDB; pliki wygasają po ustawionej retencji; nic nie idzie do dostawcy AI bez Twojej zgody.
 
@@ -45,7 +53,7 @@ Możesz hostować u siebie (Docker lub `pip`) albo zlecić hosting.
 | Organizacje | jedna (`default`) | wiele, z członkami i rolami |
 | Logowanie | jeden klucz instancji (`X-API-Key`) | link z e-maila dla ludzi, klucze API dla maszyn |
 | Uruchomienie raportu | `POST /run` (synchronicznie) albo zadania API v1 | zadania API v1 (asynchronicznie, postęp SSE) |
-| Kokpit | opcjonalny | w zestawie (`web/`) |
+| Kokpit | brak (kokpit wymaga `cloud`) | w zestawie (`web/`) |
 | Start | `docker compose up` w katalogu głównym albo `pip` | `deploy/compose.yml` na VPS |
 
 ---
@@ -61,10 +69,21 @@ docker compose exec api python -m app.cli create-org --name "Moja Firma" --owner
 ./smoke.sh --public https://raporty.example.com --wait 90
 ```
 
-Logowanie: `https://raporty.example.com/login` i link z e-maila (w `.env` ustaw `DAAS_EMAIL_BACKEND=smtp`; przy domyślnym `console` link jest w `docker compose logs api`).
+Logowanie: `https://raporty.example.com/login` i link z e-maila (w `.env` ustaw `DAAS_EMAIL_BACKEND=smtp`; przy wygenerowanym `console` link trafia wyłącznie do pliku w `runtime/outbox/` w wolumenie `runtime`, nie do dziennika).
 Instalacja, aktualizacja, rollback, kopie zapasowe i dzielenie VPS z drugą aplikacją: [`deploy/README.md`](deploy/README.md).
 
-Próba lokalna bez domeny i TLS: dopisz do `deploy/.env` trzy linie, uruchom `docker compose up -d --build` i otwórz http://127.0.0.1:3000:
+### Tryb cloud lokalnie
+
+Bez `--domain` skrypt `gen-env.sh` zapisuje `deploy/.env` dla `localhost` (poczta `console`, ten sam origin przez Caddy). Muszą być wolne porty 80 i 443 (Caddy) oraz 127.0.0.1:3000 i 127.0.0.1:8000 (web, api; zmienisz je przez `DAAS_WEB_PORT` / `DAAS_API_PORT` w `deploy/.env`).
+
+```bash
+cd deploy && ./gen-env.sh && docker compose --profile edge up -d --build
+docker compose exec api python -m app.cli create-org --name "Demo" --owner-email wlasciciel@example.com
+```
+
+Otwórz https://localhost/login (certyfikat z lokalnego CA Caddy, więc przeglądarka pokaże ostrzeżenie) i poproś o link dla e-maila właściciela. Link jest w pliku JSON w outboxie: `docker compose exec api sh -c 'cat /data/runtime/outbox/*.json'` (pole `link`). `create-org` wypisuje też jednorazowy klucz API do API i MCP.
+
+Bez Caddy i TLS: po `./gen-env.sh` ustaw w `deploy/.env` trzy linie (dwie istniejące zmień, trzecią dopisz), uruchom `docker compose up -d --build` (bez profilu `edge`) i otwórz http://127.0.0.1:3000:
 
 ```
 NEXT_PUBLIC_API_ORIGIN=http://127.0.0.1:8000
@@ -167,7 +186,7 @@ Mapper (`app/sources/csv_mapper.py`): aliasy PL/EN dla `order_id, date, product,
 
 ## Dostęp dla agentów (MCP)
 
-Asystenci AI (Claude, ChatGPT, Codex, Gemini) mogą używać DaaS Engine jak narzędzia: API ma wbudowany serwer MCP pod `POST /mcp` (Streamable HTTP, bezstanowy, odpowiedzi JSON). Łączysz go kluczem API organizacji w nagłówku `Authorization: Bearer <klucz>` i prosisz zwykłym językiem: „wgraj ten eksport, policz raport i powiedz, co spadło". 13 narzędzi obejmuje upload (tekst CSV albo plik XLSX), runy (opcjonalnie za wybrany okres), raporty, weryfikację hasha, status artefaktów i zużycie — zawsze w organizacji klucza; raporty są też dostępne jako zasoby MCP, a ChatGPT lub Claude mogą połączyć się przez OAuth 2.1 zamiast kluczem.
+Klienci MCP (np. Claude, ChatGPT, Codex czy Gemini) mogą używać DaaS Engine jak narzędzia: API ma wbudowany serwer MCP pod `POST /mcp` (Streamable HTTP, bezstanowy, odpowiedzi JSON). Łączysz go kluczem API organizacji w nagłówku `Authorization: Bearer <klucz>` i prosisz zwykłym językiem: „wgraj ten eksport, policz raport i powiedz, co spadło". 13 narzędzi obejmuje upload (tekst CSV albo plik XLSX), runy (opcjonalnie za wybrany okres), raporty, weryfikację hasha, status artefaktów i zużycie — zawsze w organizacji klucza; raporty są też dostępne jako zasoby MCP, a w trybie `cloud` klienci MCP, np. Claude i ChatGPT, mogą połączyć się przez OAuth 2.1 zamiast kluczem.
 
 ```bash
 claude mcp add --transport http daas https://raporty.example.com/mcp --header "Authorization: Bearer $KEY"
@@ -209,7 +228,7 @@ Trzy pipeline'y na jednym silniku (ta sama baza, ten sam kontrakt API):
 
 **Zasada nr 1: brak klucza nie jest błędem.** Pipeline automatycznie przełącza się na fixtures i oznacza wynik jako `MOCK_DATA`. Wszystko działa od pierwszego uruchomienia bez żadnego sekretu źródłowego.
 
-**Zasada nr 2: plik klienta zamiast integracji.** Upload przyjmuje dowolny eksport CSV lub XLSX (Allegro, Shoper, WooCommerce, Baselinker, Excel „po swojemu"), mapuje kolumny heurystycznie i zwraca gotowy payload. Wynik = `LIVE_DATA`, raport HTML pod linkiem. Demo dla klienta: 2 requesty, zero kodu.
+**Zasada nr 2: plik klienta zamiast integracji.** Upload przyjmuje eksport sprzedaży w CSV lub XLSX, mapuje kolumny eksportu sprzedaży na jeden schemat zamówień (aliasy nagłówków PL/EN, opisane wyżej przy mapperze) i zwraca gotowy payload. Wynik = `LIVE_DATA`, raport HTML pod linkiem. Demo dla klienta: 2 requesty, zero kodu.
 
 Przepływ jednego runu: `source.fetch()` → zapis surowych rekordów do DuckDB (klucz `(run_id, id)`, idempotentnie) → `transform()` → `ReportGenerator.write()` → metadane runu do tabeli `runs` → wynik `RunResult`.
 
@@ -265,9 +284,11 @@ Raport zaczyna się od 3-5 zdań streszczenia. Domyślnie pisze je deterministyc
 ### Raport HTML
 Samodzielny plik (inline CSS, bez zależności zewnętrznych), otwiera się z dysku, z maila, drukuje do PDF (Ctrl+P). Dla każdego runu: `runtime/reports/<pipeline>_<ts>_<id>.html` + `<pipeline>_latest.html`.
 
+Język raportu: dla organizacji z locale `en` po angielsku jest tylko tytuł, a tabele danych mają w nagłówkach surowe nazwy pól (`week_start`, `margin_pct`); nazwy sekcji, WNIOSEK, tabela metryk zbiorczych, PRAKTYCZNE WNIOSKI, streszczenie z szablonu oraz nagłówek i stopka HTML zostają po polsku. Raport `uksc_evidence` jest tylko po polsku.
+
 ---
 
-## Dodanie nowego pipeline'u (source-agnostic w praktyce)
+## Dodanie nowego pipeline'u
 
 1. `app/sources/<x>_source.py` — klasa z `fetch(force_mock) -> SourceResult` (LIVE → fixture).
 2. `app/transforms/<x>_transform.py` — `transform_<x>(records) -> Metrics` (Pydantic).
@@ -286,9 +307,9 @@ pytest                                  # backend, offline
 cd web && npm test && npm run e2e       # kokpit: testy jednostkowe; e2e wymaga API w trybie cloud (web/README.md)
 ```
 
-CI (`.github/workflows/ci.yml`): pytest na Python 3.11/3.12/3.13, testy control plane na prawdziwym PostgreSQL (blokady wierszy, migracje), smoke API przez curl, skanery (gitleaks, semgrep, zizmor, pip-audit), kokpit (eslint, tsc, vitest, build), testy end-to-end Playwright w Chromium, Firefoksie i WebKicie, Lighthouse (mobile), build obrazów Docker (API i kokpit) wraz ze smoke w kontenerze.
+CI działa przy każdym pull requeście i każdym pushu na main ([Actions](https://github.com/emsior/daas-engine/actions)): ponad 2 600 testów Pythona na Python 3.11–3.13, PostgreSQL, Playwright w trzech silnikach (Chromium, Firefox, WebKit), build Dockera i skanery bezpieczeństwa. Szczegółowo (`.github/workflows/ci.yml`): pytest na Python 3.11/3.12/3.13, testy control plane na prawdziwym PostgreSQL (blokady wierszy, migracje), smoke API przez curl, skanery (gitleaks, semgrep, zizmor, pip-audit), kokpit (eslint, tsc, vitest, build), testy end-to-end Playwright w Chromium, Firefoksie i WebKicie, Lighthouse (mobile), build obrazów Docker (API i kokpit) wraz ze smoke w kontenerze. Opcjonalne hooki pre-commit (gitleaks, `.pre-commit-config.yaml`) i zadanie `security` (gitleaks) wykrywają wycieki sekretów; wymagany check `OPSEC` blokuje merge, gdy trafi reguła słownictwa albo prywatności.
 
-Szczegółowa lista kontrolna: [VALIDATION.md](VALIDATION.md). Historia zmian: [CHANGELOG.md](CHANGELOG.md).
+Historyczna, ręczna lista kontrolna z v0.x (wrzesień 2026): [docs/history/VALIDATION.md](docs/history/VALIDATION.md). Historia zmian: [CHANGELOG.md](CHANGELOG.md). Proces pracy z agentami AI: [docs/PROCESS.md](docs/PROCESS.md) (po angielsku).
 
 ## Dokumentacja
 
