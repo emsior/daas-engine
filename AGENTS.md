@@ -80,7 +80,7 @@ nie wykonuj takich operacji wcale, tylko wypisz komendę do ręcznego uruchomien
 
 ## Zasady PPC dla Codexa (15.10.2026, rejestr STACK v3)
 
-Codex CLI jest tu **wykonawcą domyślnym** (`codex exec` ze spec-pliku); zmiany Codexa recenzuje Claude, zmiany Claude'a recenzuje Codex (reviewer ≠ autor). Pełne reguły: globalne zasady Codexa v3 (poza repozytorium) oraz `STACK.md` w warsztacie. Publiczny opis procesu: [`docs/PROCESS.md`](docs/PROCESS.md). Skrót obowiązujący w tym repo bez wyjątków:
+Wykonawcę i recenzenta wyznacza właściciel i role się zmieniają; niezmienne jest jedno: autor zmiany jej nie recenzuje (zmiany Codexa recenzuje Claude, zmiany Claude'a recenzuje Codex). Pełne reguły: globalne zasady Codexa v3 (poza repozytorium) oraz `STACK.md` w warsztacie. Publiczny opis procesu: [`docs/PROCESS.md`](docs/PROCESS.md). Skrót obowiązujący w tym repo bez wyjątków:
 
 1. **Zero nazwiska właściciela** w plikach, commitach, logach i promptach. Marka Proch PC / PPC, jedyny kontakt `prochpc@gmail.com`; stary adres z konta konektorów nie istnieje w treściach.
 2. **Zakazane słownictwo** (lista zakazanych fraz projektu, jak w zasadzie 1 wyżej) w kodzie, commitach, docs i nazwach plików. Publicznie: „aplikacja analityczna z modelem EV” / *esports statistics*. Wzorce sprawdza skill `ppc-wyciek`; lista zostaje poza repozytorium.

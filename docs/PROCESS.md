@@ -9,7 +9,7 @@ Last checked: 2026-11-16.
 
 | Role | Who | What it does |
 |---|---|---|
-| Executor | an AI agent (by the rules, Codex CLI by default) | writes the change on a working branch from a task spec |
+| Executor | an AI agent (Claude Code or Codex CLI; the owner assigns the roles and has swapped them over time) | writes the change on a working branch from a task spec |
 | Reviewer | a different AI agent than the author | reads the diff and the evidence, answers ACCEPTED or CHANGES with findings |
 | Owner | the human who owns the repository | sets the tasks, decides on merge and on pushes that touch `main` |
 
@@ -57,7 +57,7 @@ footer that points to the Claude Code session that made them. No comparable foot
 agent, so the footer shows where Claude worked, not who wrote everything else.
 
 Closed pull requests: <https://github.com/emsior/daas-engine/pulls?q=is%3Apr+is%3Aclosed>. In PR #13 the owner
-account posted a table of which agent wrote and which agent reviewed each commit range, with verdicts. It is a
+account posted [a table](https://github.com/emsior/daas-engine/pull/13#issuecomment-6220057476) of which agent wrote and which agent reviewed each commit range, with verdicts. It is a
 self-reported record; the full review notes are kept outside the repository.
 
 ## What the repository does not enforce
