@@ -1388,6 +1388,7 @@ MALFORMED_PRIVATE_LISTS = [
     "bad=TEST\\x0a",
     "bad=TEST\\xZZ",
     "# TEST-comment only\n\n",
+    "trail=TEST[x] ",
 ]
 
 

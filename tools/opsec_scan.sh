@@ -67,6 +67,7 @@ load_private() {
     number=$((number + 1))
     line=${line%$'\r'}
     [[ -z $line || $line == \#* ]] && continue
+    [[ $line != *[[:blank:]] ]] || fail "trailing whitespace in private pattern list (line $number)"
     [[ $line =~ ^([a-z][a-z0-9-]{0,31})(/c)?=(.+)$ ]] || fail "invalid private pattern list (line $number)"
     name=${BASH_REMATCH[1]}
     fold=i
