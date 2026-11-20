@@ -10,7 +10,7 @@ One codebase, two modes. A FastAPI process runs the pipelines; a control plane k
 | Credentials | one instance key, `DAAS_API_KEY` | per-organization API keys and magic-link sessions |
 | Routes | `/api/v1` plus legacy `/upload`, `/run`, `/reports/...` (with `Deprecation` header) | `/api/v1` only; legacy routes answer `404` |
 | Runs | legacy `/run` is synchronous; v1 jobs are asynchronous | jobs only (`202`, then poll or SSE) |
-| Cockpit | optional | `web/` (Next.js) |
+| Cockpit | none (the cockpit needs `cloud`) | `web/` (Next.js) |
 | Typical deployment | `docker-compose.yml` at the repository root (with n8n) or `pip install` | `deploy/compose.yml` on a VPS |
 
 The mode changes which routes and credentials exist; pipelines, reports and the data plane are the same code.
