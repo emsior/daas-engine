@@ -9,7 +9,7 @@ from app.reporting.narrative import source_label
 from app.reporting.safe import render_markdown
 
 #: Stopka raportu (wspolna dla ecommerce_demo, cs2_demo, uksc_evidence). Liczby licza transformacje
-#: w Pythonie (`app/transforms/`: pandas, uksc w czystym Pythonie) z rekordow zrodlowych; DuckDB
+#: w Pythonie (`app/transforms/`, pandas; także uksc) z rekordow zrodlowych; DuckDB
 #: przechowuje rekordy, metryki i historie runow (uksc czyta z niej poprzedni run do porownania).
 FOOTER = ("DaaS Engine · raport wygenerowany automatycznie · liczby policzone w Pythonie "
           "z rekordów źródłowych; rekordy i historia runów zapisane w DuckDB")
