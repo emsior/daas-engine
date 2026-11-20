@@ -6,10 +6,9 @@ Kontekst projektu (stack, stan, pułapki środowiska) jest w `CLAUDE.md`.
 ## Twarde zasady — obowiązują zawsze
 
 1. **Słownictwo.** Projekt dotyczy analityki danych. Tematyka CS2 występuje wyłącznie
-   jako *esports statistics*. Słownictwo spoza domeny analityki danych, wskazane na liście
-   zakazanych fraz projektu, jest zakazane w kodzie, komentarzach, commitach, README i dokumentacji.
-   Pełna lista zakazanych fraz jest w agencie `opsec-guard`,
-   trzymanym lokalnie poza repozytorium.
+   jako *esports statistics*. Zakazane są frazy z reguł słownictwa `vocab-a` i `vocab-b`
+   w `tools/opsec_scan.sh` (sprawdza je CI) oraz z pełnej listy w agencie `opsec-guard`,
+   trzymanym lokalnie poza repozytorium; dotyczy kodu, komentarzy, commitów, README i dokumentacji.
 2. **Zero danych osobowych właściciela.** Żadnego nazwiska, żadnego prywatnego adresu
    e-mail w plikach, commitach ani metadanych. Marka: **PPC / prochpc.pl**.
    Jedyny adres kontaktowy w repo: `prochpc@gmail.com`.
@@ -82,8 +81,8 @@ nie wykonuj takich operacji wcale, tylko wypisz komendę do ręcznego uruchomien
 
 Wykonawcę i recenzenta wyznacza właściciel i role się zmieniają; niezmienne jest jedno: autor zmiany jej nie recenzuje (zmiany Codexa recenzuje Claude, zmiany Claude'a recenzuje Codex). Pełne reguły: globalne zasady Codexa v3 (poza repozytorium) oraz `STACK.md` w warsztacie. Publiczny opis procesu: [`docs/PROCESS.md`](docs/PROCESS.md). Skrót obowiązujący w tym repo bez wyjątków:
 
-1. **Zero nazwiska właściciela** w plikach, commitach, logach i promptach. Marka Proch PC / PPC, jedyny kontakt `prochpc@gmail.com`; stary adres z konta konektorów nie istnieje w treściach.
-2. **Zakazane słownictwo** (lista zakazanych fraz projektu, jak w zasadzie 1 wyżej) w kodzie, commitach, docs i nazwach plików. Publicznie: „aplikacja analityczna z modelem EV” / *esports statistics*. Wzorce sprawdza skill `ppc-wyciek`; lista zostaje poza repozytorium.
+1. **Zero nazwiska właściciela** w plikach, commitach, logach i promptach. Marka Proch PC / PPC, jedyny kontakt `prochpc@gmail.com`.
+2. **Zakazane słownictwo** (lista zakazanych fraz projektu, jak w zasadzie 1 wyżej) w kodzie, commitach, docs i nazwach plików. Wzorce sprawdza skill; lista zostaje poza repozytorium.
 3. **Git tylko po ścieżkach:** `git add <plik>`, nigdy `-A` ani `.`; nigdy `--no-verify`; nie zmieniaj `core.hooksPath`; nie przepisuj historii. Tożsamość: `user.name = PPC`, `user.email = 267137654+emsior@users.noreply.github.com`. Commit tylko gdy spec na to pozwala, na gałęzi roboczej, komunikat bez nazwiska i zakazanych fraz.
 4. **Zero pusha, publikacji i zmian `main`** — bez wyjątków; push robi właściciel osobnym krokiem.
 5. **Zero `.env`, `.secrets/`, kluczy, tokenów i danych klienta** — nie czytaj, nie cytuj, nie commituj. Dane testowe wyłącznie syntetyczne.
