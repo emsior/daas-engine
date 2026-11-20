@@ -14,8 +14,9 @@ fail() {
 }
 
 # Public rules: banned vocabulary only. Rules that identify a person or a
-# private project never live in this repository: they come from a private
-# list in OPSEC_PATTERNS (the list itself; in CI the repository secret of the
+# private project are no longer kept in the tree (earlier revisions had them
+# inline; history is not rewritten): they come from a private list in
+# OPSEC_PATTERNS (the list itself; in CI the repository secret of the
 # same name) or in the file named by OPSEC_PATTERNS_FILE. Setting both is an
 # error. With neither (or an empty value, as for pull requests without access
 # to secrets) the scan uses public rules only and says so once on stderr. A

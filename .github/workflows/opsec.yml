@@ -27,7 +27,7 @@ jobs:
           HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
           TESTED_SHA: ${{ github.sha }}
           OPSEC_BOOTSTRAP_POLICY: ${{ vars.OPSEC_BOOTSTRAP_POLICY }}
-          # Private rules (person, private project) live only in this secret; format in tools/opsec_scan.sh.
+          # Private rules (person, private project) are loaded from this secret, not from the tree; format in tools/opsec_scan.sh.
           # Pull requests without access to secrets get an empty value: public rules only, with a warning.
           OPSEC_PATTERNS: ${{ secrets.OPSEC_PATTERNS }}
         run: |
