@@ -30,6 +30,7 @@ jobs:
           # Private rules (person, private project) are loaded from this secret, not from the tree; format in tools/opsec_scan.sh.
           # Pull requests without access to secrets get an empty value: public rules only, with a warning.
           OPSEC_PATTERNS: ${{ secrets.OPSEC_PATTERNS }}
+          OPSEC_PRIVATE_REQUIRED: ${{ github.event_name == 'push' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]') }}
         run: |
           set -euo pipefail
           case "$EVENT_NAME" in
@@ -82,6 +83,9 @@ jobs:
           done < "$policy_dir/changed-policy"
           if [[ -n "${OPSEC_PATTERNS-}" ]]; then
             private_list="loaded"
+          elif [[ "${OPSEC_PRIVATE_REQUIRED-}" == true ]]; then
+            printf '%s\n' '::error::OPSEC private pattern list required (secret OPSEC_PATTERNS)'
+            exit 2
           else
             private_list="not loaded (public rules only)"
             printf '%s\n' '::warning::OPSEC private pattern list not loaded: public rules only'

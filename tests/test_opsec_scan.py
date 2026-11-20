@@ -1435,3 +1435,45 @@ def test_workflow_reports_private_list_state(repo, tmp_path, loaded):
     state = "loaded" if loaded else "not loaded (public rules only)"
     assert f"- Private pattern list: {state}\n" in summary
     assert (NOTICE in result.stderr) is not loaded
+
+
+REQUIRED_ERROR = "::error::OPSEC private pattern list required (secret OPSEC_PATTERNS)"
+
+
+def test_workflow_required_private_list_missing_fails_closed(repo, tmp_path):
+    base = _install_opsec_policy(repo)
+    head = repo.commit("TEST-next\n")
+    repo.env.pop("OPSEC_PATTERNS")
+    repo.env["OPSEC_PRIVATE_REQUIRED"] = "true"
+    result, summary = _run_opsec_workflow(repo, tmp_path, base, head)
+    assert result.returncode == 2, result.stderr
+    assert REQUIRED_ERROR in result.stdout
+    assert "::warning::OPSEC private pattern list not loaded" not in result.stdout
+    assert "Private pattern list:" not in summary
+
+
+@pytest.mark.parametrize("required", [None, "false"])
+def test_workflow_optional_private_list_missing_warns(repo, tmp_path, required):
+    base = _install_opsec_policy(repo)
+    head = repo.commit("TEST-next\n")
+    repo.env.pop("OPSEC_PATTERNS")
+    if required is None:
+        repo.env.pop("OPSEC_PRIVATE_REQUIRED", None)
+    else:
+        repo.env["OPSEC_PRIVATE_REQUIRED"] = required
+    result, summary = _run_opsec_workflow(repo, tmp_path, base, head)
+    assert result.returncode == 0, result.stderr
+    assert "::warning::OPSEC private pattern list not loaded: public rules only" in result.stdout
+    assert REQUIRED_ERROR not in result.stdout
+    assert "- Private pattern list: not loaded (public rules only)\n" in summary
+    assert NOTICE in result.stderr
+
+
+def test_workflow_required_private_list_present_passes(repo, tmp_path):
+    base = _install_opsec_policy(repo)
+    head = repo.commit("TEST-next\n")
+    repo.env["OPSEC_PRIVATE_REQUIRED"] = "true"
+    result, summary = _run_opsec_workflow(repo, tmp_path, base, head)
+    assert result.returncode == 0, result.stderr
+    assert REQUIRED_ERROR not in result.stdout
+    assert "- Private pattern list: loaded\n" in summary
