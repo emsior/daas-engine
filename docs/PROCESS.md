@@ -30,9 +30,10 @@ commands with results and date, a CI link and the commit SHA.
 - Changes reach `main` only through a working branch and a pull request ([`AGENTS.md`](../AGENTS.md), section "Git").
 - Files are staged by explicit path, never `git add .` or `git add -A`; hooks are not skipped (`--no-verify`) and
   published history is not rewritten (same section).
-- Push to `main`, force push and deleting remote branches need one-time consent from the owner (same section).
-  The owner reports running a pre-push hook on their own machine that asks for that consent; it is not part of
-  this repository.
+- An agent does not push at all without the owner's explicit consent in the same session ([`AGENTS.md`](../AGENTS.md),
+  rule 3). On top of that, a push to `main`, a force push and deleting a remote branch need one-time consent from
+  the owner (section "Git"). The owner reports running a pre-push hook on their own machine that asks for that
+  consent; it is not part of this repository.
 - `main` is a protected branch. GitHub settings, read via the API on 2026-11-16: three status checks are required
   before merge (`test (3.11)`, `test (3.12)`, `opsec`), force push and deletion are disabled, approving reviews
   required: 0, rules not enforced for admins.
