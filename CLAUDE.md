@@ -16,9 +16,10 @@ nie „czy to ładniejszy kod".
 Jeden kod, dwa tryby (`DAAS_MODE`): `selfhost` (jedna organizacja `default`, klucz z `DAAS_API_KEY`, n8n, trasy legacy)
 i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania asynchroniczne, limity planów).
 
-## Status: 2.0.0 w przygotowaniu — gałąź `claude/saas-2026-10`
+## Status: v2.0 na `main`, wydanie w przygotowaniu (bez tagu)
 
-- `main` = v1.0.0 (tryb utrzymania od 28.09.2026). Prace nad 2.0.0 idą na gałęzi `claude/saas-2026-10`.
+- Kod 2.0.0 jest na `main` od scalenia PR #13 (18.10.2026; gałąź `claude/saas-2026-10` scalona). Wydania 2.0 jeszcze nie ma:
+  jedyny tag to `v1.0.0`, w `CHANGELOG.md` sekcja `[2.0.0] — Unreleased`. Bieżące prace idą na gałęziach roboczych i przez PR.
 - Code freeze z v1.0.0 **uchylony poleceniem właściciela 09.10.2026** (`AGENTS.md`, zasada 8). Pozostałe zasady bez zmian.
 - Zakres 2.0 (kontrakt: SPEC_v2 poza repo): hardening (klucz API na trasach, bind, policy, escapowanie raportów, narracja LLM opt-in),
   control plane + tenancy, API v1, kokpit `web/`, `deploy/`, CI (web, e2e, lighthouse, pip-audit), dokumentacja.
@@ -41,7 +42,7 @@ i `cloud` (wiele organizacji, kokpit www, klucze API per organizacja, zadania as
 | Zależności Pythona | `requirements.lock`, `requirements-dev.lock` (pip-tools, hashe SHA-256; `--require-hashes`); wpisy tylko-Windows/poza-Windows dopisuje `tools/lock_windows_pins.py` |
 | Agenci AI (MCP) | `mcp` 2.3 (oficjalne SDK): `POST /mcp`, Streamable HTTP bezstanowy + JSON, klucz API jako Bearer, 13 narzędzi (w tym `upload_xlsx` — skoroszyt jako base64 — i `start_run` z okresem `period_from`/`period_to`) + 4 zasoby (szablony `daas://`, `resources/list` z 20 najnowszymi raportami) + 3 prompty w `app/mcp_server/`; OAuth 2.1 dla konektorów ChatGPT/Claude (serwer autoryzacji z SDK + `app/control/oauth.py`, zgoda w kokpicie `/oauth/consent`, tylko cloud); `docs/MCP.md` |
 | Harmonogram | `app/control/schedule.py` (pętla w lifespanie, tylko cloud), `app/control/notifications.py` (mail i wiadomość na czacie po runie: Slack / Teams / JSON, payloady w `app/control/chat_messages.py`, wysyłka `post_json` z `webhooks.py` z ochroną SSRF), `GET/PUT /orgs/{id}/schedule` (adres webhooka czatu tylko do zapisu, w odpowiedzi maska), Alembic `0004`, `0005` |
-| Testy | pytest — ok. 2090 przypadków (2086 passed + 1 skipped po scaleniu pięciu przyrostów P-12 13.10.2026, plus testy poprawek audytu Wave 2), pełny przebieg 8–10 min; Linux (3.13) zielone; Windows (3.12): 1777/0 przed P-12, pełny przebieg po P-12 w `bundle\pytest_windows_2026-10-13b.log` warsztatu; Vitest w `web/` (210) |
+| Testy | pytest, pełny przebieg 8–10 min; uruchamiany na Linuksie (CI) i na Windows; Vitest w `web/`. Liczba w README („2,600+”) jest przybliżona: zebrane 2 648 na `f6f8e26` w dniu 16.11.2026. Stanem bazowym jest ostatni zielony przebieg CI na `main` |
 | CI | GitHub Actions: `test` (3.11, 3.12, 3.13), `security` (gitleaks, semgrep, zizmor, pip-audit), `web`, `e2e`, `lighthouse`, `docker`; Dependabot (pip, actions, docker, npm); akcje przypięte do SHA |
 | CI poza SQLite i Chromium | `postgres`: PostgreSQL 16 z obrazu `ubuntu-24.04`, `tests/test_postgres.py` (migracje, `FOR UPDATE` przy dwóch sesjach, SAVEPOINT), `asyncpg` z `requirements-postgres.lock`; `e2e-browsers`: Firefox po http, WebKit po https (`E2E_TLS=1`) |
 
@@ -106,7 +107,7 @@ selfhost: POST /upload → POST /run → GET /reports/{pipeline}/latest?fmt=html
 | Docker Desktop na Windows nie startuje (WSL / Hypervisor Platform) | uruchamiaj natywnie `URUCHOM_DAAS_PYTHON.ps1`; Docker dopiero pod self-host klienta |
 | `.git/HEAD.lock`, `index.lock` zostają po gicie uruchamianym przez agenta w Windows | `GIT_OPTIONAL_LOCKS=0` dla komend odczytu; git wyłącznie z Windows (spod Linuksa pliki wyglądają na zmienione przez CRLF) |
 | n8n 2.37 wymaga Node ≥ 24 | dotyczy tylko workflowów n8n, nie silnika ani kokpitu (Node 22 LTS) |
-| Pełny `pytest` trwa ~2 min | agent uruchamia go w tle z `--junitxml` |
+| Pełny `pytest` trwa 8–10 min | agent uruchamia go w tle z `--junitxml` |
 | `NEXT_PUBLIC_API_ORIGIN` jest wstawiane do paczki kokpitu w czasie budowania | zmiana wymaga ponownego `npm run build` / `docker compose build web`; pusty = ten sam origin (Caddy) |
 | Kokpit i API muszą być w jednej witrynie (cookie sesji `SameSite=Lax`, CSRF) | w dev/e2e użyj proxy jednego originu `web/e2e/proxy.mjs` albo `DAAS_COCKPIT_ORIGIN` + `DAAS_COOKIE_SECURE=false` po http |
 | Limity żądań i kwoty są w pamięci procesu | jeden worker; `WEB_CONCURRENCY`/`UVICORN_WORKERS` > 1 blokuje start. Za proxy adres klienta to adres proxy, dopóki `FORWARDED_ALLOW_IPS` go nie obejmie |

@@ -1,3 +1,5 @@
+*Historyczny raport sprintu (14.09.2026, v0.x). Zachowany dla historii; nie opisuje bieżącego stanu.*
+
 # SPRINT REPORT — DaaS Engine (14.09.2026)
 
 ## 1. Wynik Sprintu
@@ -34,7 +36,7 @@ Wszystkie cele operacyjne sprintu zostały osiągnięte w środowisku lokalnym b
 8. **Pakiet Produktowy (Etap 7):**
    - Opracowano 6 dokumentów w `docs/pilot/` (One-pager, Oferta, Demo Script, Wymagania wejściowe, Zakres bezpieczeństwa, Onboarding checklist).
 9. **Plan Archiwizacji (Etap 8):**
-   - Przygotowano `ARCHIVE_PLAN_2026-09-14.md` ustalający `D:\daas-engine` jako jedyne źródło prawdy bez przedwczesnego kasowania kopii historycznych.
+   - Przygotowano `ARCHIVE_PLAN_2026-09-14.md` ustalający `<repo>` jako jedyne źródło prawdy bez przedwczesnego kasowania kopii historycznych.
 
 ---
 
@@ -58,8 +60,8 @@ Wszystkie cele operacyjne sprintu zostały osiągnięte w środowisku lokalnym b
 ---
 
 ## 4. Utworzone Commity Lokalne
-- `fae5e68`: *Add agent policy layer: tool contracts, role allowlist, budgets, HITL gate, audit log* (cherry-pick z D:main)
-- `c3b1d2b`: *Add AGENTS.md with repo rules; ignore AI scratch output and audit logs* (cherry-pick z D:main)
+- `fae5e68`: *Add agent policy layer: tool contracts, role allowlist, budgets, HITL gate, audit log* (cherry-pick z `main` drugiej kopii repo)
+- `c3b1d2b`: *Add AGENTS.md with repo rules; ignore AI scratch output and audit logs* (cherry-pick z `main` drugiej kopii repo)
 - *Przygotowywany commit integracyjny sprintu*:
   *security & product: patch path traversal, add tenant isolation, sanitize OPSEC metadata and package pilot docs*
 
@@ -69,7 +71,7 @@ Wszystkie cele operacyjne sprintu zostały osiągnięte w środowisku lokalnym b
 ```text
 ============================= test session starts =============================
 platform win32 -- Python 3.12.10, pytest-9.1.1, pluggy-1.6.0
-rootdir: D:\daas-engine
+rootdir: <repo>
 configfile: pyproject.toml
 collected 52 items
 
@@ -86,7 +88,7 @@ tests\test_security.py ........                                          [100%]
 ## 6. Wynik Bezpieczeństwa
 - **Path Traversal:** Zablokowany. Wszelkie próby przekazania ścieżek systemowych lub wyjścia z `uploads/` skutkują statusem `BLOCKED_MISSING_SECRET` / błędem kontrolowanym.
 - **Wyciek danych osobowych (PII):** 0 trafień zakazanego nazwiska i starego adresu e-mail w kodzie źródłowym i konfiguracjach.
-- **Słownictwo hazardowe:** 0 wystąpień zakazanych fraz w kodzie i dokumentacji (ze względów prawnych).
+- **Zakazane słownictwo:** 0 wystąpień zakazanych fraz w kodzie i dokumentacji.
 - **Sekrety:** `.env` i `.secrets/` pozostają nienaruszone i chronione przez `.gitignore`.
 
 ---
@@ -131,11 +133,11 @@ Zapisano w `slack_alert_draft.md` (skierowany do kanału `#edge-os`, niewysłany
 ## 13. Dokładny Rollback
 W razie potrzeby wycofania wszystkich zmian wprowadzonych w sprincie:
 ```powershell
-# Przywrócenie pierwotnego stanu gałęzi D:\daas-engine z bundle
+# Przywrócenie pierwotnego stanu gałęzi <repo> z bundle
 git checkout main
 git branch -D sprint/2026-09-14-product-mvp
 # Kopia bezpieczeństwa przed sprintem znajduje się w:
-# D:\_sprint_backups\daas_2026-09-14\daas-engine-D.bundle
+# <backup>/daas-engine-D.bundle
 ```
 
 ---
