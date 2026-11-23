@@ -35,6 +35,9 @@ fail() {
 #   bytes use '\xHH' (01-ff except 0a), which stands for one raw byte; any other
 #   backslash reaches grep unchanged. A rule must not match an empty line.
 #   Bracket one character (abc[d]) so a list never matches its own text.
+# - Do not start a rule with '^' and do not use back-references: in range mode
+#   content lines are matched behind three bookkeeping columns, inside one
+#   group, so '^' never matches there and a back-reference fails the scan.
 # - Non-ASCII letters: write the UTF-8 bytes and, to catch UTF-16 text, also
 #   the residue left after NUL removal, e.g. U+0144 as (\xc5\x84|D\x01|\x01D).
 #   Such a rule needs /c, because case folding would equate a residual 'D'
@@ -99,7 +102,9 @@ elif [[ -n ${OPSEC_PATTERNS_FILE-} ]]; then
 else
   printf '%s\n' 'OPSEC: private pattern list not loaded (set OPSEC_PATTERNS or OPSEC_PATTERNS_FILE); scanning with public rules only' >&2
 fi
-# Git and every other child process never see the private list.
+# Remove the list from the environment before Git or any later child process
+# starts. Only the grep calls in load_private, which validate each pattern,
+# ran while it was still set.
 unset OPSEC_PATTERNS OPSEC_PATTERNS_FILE
 private_loaded=0
 [[ ${#rules[@]} == "$public_rules" ]] || private_loaded=1
