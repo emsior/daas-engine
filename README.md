@@ -63,7 +63,7 @@ Sign in at `https://reports.example.com/login` with the e-mail link (set `DAAS_E
 
 ### Try cloud mode locally
 
-Without `--domain`, `gen-env.sh` writes `deploy/.env` for `localhost` (console mail, same origin through Caddy). Ports 80 and 443 (Caddy) and 127.0.0.1:3000 and 127.0.0.1:8000 (web, api; change them with `DAAS_WEB_PORT` / `DAAS_API_PORT` in `deploy/.env`) must be free.
+Without `--domain`, `gen-env.sh` writes `deploy/.env` for `localhost` (console mail, same origin through Caddy). Ports 80 and 443 (Caddy) and 127.0.0.1:3000 and 127.0.0.1:8000 (web, api; change them with `DAAS_WEB_PORT` / `DAAS_API_PORT` in `deploy/.env`) must be free. Caddy listens on ports 80 and 443 on all network interfaces, so with the `edge` profile the instance can be reached from other machines on your network, not only from `localhost`; on a network you do not trust, use the variant without Caddy below. `gen-env.sh` does not overwrite an existing `deploy/.env`: if the file is already there, the script prints a notice and changes nothing, so move the old file out of the repository first.
 
 ```bash
 cd deploy && ./gen-env.sh && docker compose --profile edge up -d --build

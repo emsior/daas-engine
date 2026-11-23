@@ -74,7 +74,7 @@ Instalacja, aktualizacja, rollback, kopie zapasowe i dzielenie VPS z drugą apli
 
 ### Tryb cloud lokalnie
 
-Bez `--domain` skrypt `gen-env.sh` zapisuje `deploy/.env` dla `localhost` (poczta `console`, ten sam origin przez Caddy). Muszą być wolne porty 80 i 443 (Caddy) oraz 127.0.0.1:3000 i 127.0.0.1:8000 (web, api; zmienisz je przez `DAAS_WEB_PORT` / `DAAS_API_PORT` w `deploy/.env`).
+Bez `--domain` skrypt `gen-env.sh` zapisuje `deploy/.env` dla `localhost` (poczta `console`, ten sam origin przez Caddy). Muszą być wolne porty 80 i 443 (Caddy) oraz 127.0.0.1:3000 i 127.0.0.1:8000 (web, api; zmienisz je przez `DAAS_WEB_PORT` / `DAAS_API_PORT` w `deploy/.env`). Caddy nasłuchuje na portach 80 i 443 na wszystkich interfejsach sieciowych, więc z profilem `edge` instancja jest dostępna także z innych komputerów w Twojej sieci, nie tylko z `localhost`; w sieci, której nie ufasz, użyj wariantu bez Caddy poniżej. `gen-env.sh` nie nadpisuje istniejącego `deploy/.env`: jeśli plik już jest, skrypt wypisuje komunikat i niczego nie zmienia, więc najpierw przenieś stary plik poza repozytorium.
 
 ```bash
 cd deploy && ./gen-env.sh && docker compose --profile edge up -d --build
