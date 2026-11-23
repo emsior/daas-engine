@@ -831,6 +831,15 @@ def test_workflow_passes_private_list_only_through_step_env():
     assert "${{" not in script
 
 
+def test_workflow_requires_private_list_for_pushes_and_own_pull_requests():
+    workflow = (PROJECT_ROOT / ".github/workflows/opsec.yml").read_text(encoding="utf-8")
+    assert (
+        "          OPSEC_PRIVATE_REQUIRED: ${{ github.event_name == 'push' || "
+        "(github.event.pull_request.head.repo.full_name == github.repository && "
+        "github.actor != 'dependabot[bot]') }}\n"
+    ) in workflow
+
+
 @pytest.mark.parametrize("command", ["ls-tree", "show", "hash-object", "status"])
 def test_workflow_policy_read_failure_is_not_missing_policy(repo, tmp_path, command):
     base = _install_opsec_policy(repo)
